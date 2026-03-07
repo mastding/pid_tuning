@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PID智能整定系统 - 智能体工作台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #555; }
+  </style>
+</head>
+<body>
+  <div id="app" class="h-screen flex bg-gradient-to-br from-purple-600 to-blue-600">
+    <aside class="w-80 bg-white shadow-lg flex flex-col overflow-y-auto">
+      <div class="p-6 border-b">
+        <h1 class="text-2xl font-bold text-gray-900">🤖 智能体工作台</h1>
+        <p class="text-sm text-gray-500 mt-1">观察AI协作过程</p>
+        <a href="index.html" class="text-xs text-blue-600 hover:underline mt-2 inline-block">← 返回快速整定</a>
+      </div>
+
+      <div class="p-4 space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-2">控制回路</label>
+          <input v-model="loopName" type="text" placeholder="FIC_101A"
+            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-2">上传CSV数据</label>
+          <input ref="fileInput" type="file" accept=".csv" @change="handleFileUpload" class="hidden">
+          <button @click="$refs.fileInput.click()"
+            class="w-full px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">
+            📁 选择文件
+          </button>
+          <p v-if="uploadedFile" class="text-xs text-gray-600 mt-2 truncate">{{ uploadedFile.name }}</p>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-2">控制器品牌</label>
+          <select v-model="controllerBrand" class="w-full px-3 py-2 border rounded-lg">
+            <option value="Siemens">西门子</option>
+            <option value="ABB">ABB</option>
+            <option value="Honeywell">霍尼韦尔</option>
+            <option value="Yokogawa">横河</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-2">整定策略</label>
+          <select v-model="strategy" class="w-full px-3 py-2 border rounded-lg">
+            <option value="IMC">IMC (保守型)</option>
+            <option value="Lambda">Lambda (平衡型)</option>
+            <option value="CHR">CHR (快速响应)</option>
+            <option value="ZN">ZN (激进型)</option>
+          </select>
+        </div>
+
+        <button @click="startTuning" :disabled="loading || !uploadedFile"
+          class="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 font-medium">
+          {{ loading ? '⏳ 处理中...' : '🚀 开始整定' }}
+        </button>
+
+        <button v-if="messages.length > 0" @click="clearMessages"
+          class="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm">
+          🗑️ 清空消息
+        </button>
+      </div>
+    </aside>
+
+    <main ref="chatBox" class="flex-1 overflow-y-auto p-6 bg-white custom-scrollbar">
+      <div class="max-w-4xl mx-auto">
+        <!-- 欢迎消息 -->
+        <div v-if="messages.length === 0" class="text-center py-12">
+          <div class="text-6xl mb-4">🤖</div>
+          <h2 class="text-2xl font-bold text-gray-700 mb-2">智能体工作台</h2>
+          <p class="text-gray-500 mb-6">上传CSV数据，观察AI智能体的协作过程</p>
+          <div class="bg-blue-50 rounded-lg p-6 max-w-md mx-auto text-left">
+            <h3 class="font-bold text-blue-900 mb-3">你将看到：</h3>
+            <ul class="space-y-2 text-sm text-blue-800">
+              <li>🧠 智能体的思维链</li>
+              <li>🔧 工具调用过程</li>
+              <li>📊 实时分析结果</li>
+              <li>⚙️ 参数整定过程</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- 消息列表 -->
+        <div v-for="msg in messages" :key="msg.id" class="mb-4">
+          <!-- 用户消息 -->
+          <div v-if="msg.type === 'user'" class="flex justify-end">
+            <div class="max-w-[70%] rounded-2xl rounded-tr-none bg-blue-600 text-white px-5 py-3 text-sm shadow-md">
+              <div class="whitespace-pre-wrap">{{ msg.content }}</div>
+              <div v-if="msg.file_name" class="mt-2 pt-2 border-t border-blue-500 text-xs opacity-90">
+                📎 {{ msg.file_name }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 思维链 -->
+          <div v-else-if="msg.type === 'thought'" class="flex justify-start">
+            <div class="w-full border border-amber-200 rounded-lg overflow-hidden shadow-sm bg-white">
+              <div class="bg-amber-50 px-4 py-3 flex justify-between items-center border-b border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors"
+                @click="toggleCollapse(msg.id)">
+                <div class="flex items-center gap-3">
+                  <span class="text-2xl">🧠</span>
+                  <div>
+                    <span class="text-amber-700 font-bold text-sm">{{ msg.agent || '智能体' }}</span>
+                    <span class="ml-2 text-xs text-amber-600 bg-amber-100 px-2 py-1 rounded-full">
+                      {{ msg.collapsed ? '已折叠' : '已展开' }}
+                    </span>
+                  </div>
+                </div>
+                <span class="text-amber-600 text-lg">{{ msg.collapsed ? '▼' : '▲' }}</span>
+              </div>
+              <div v-if="!msg.collapsed" class="p-4">
+                <pre class="whitespace-pre-wrap text-sm text-gray-700 font-mono leading-relaxed">{{ msg.content }}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 工具调用 -->
+          <!-- 智能体回合 -->
+          <div v-else-if="msg.type === 'agent_turn'" class="flex justify-start">
+            <div class="w-full border-2 border-yellow-300 rounded-lg overflow-hidden shadow-md bg-yellow-50">
+              <div class="bg-yellow-100 px-4 py-3 flex justify-between items-center border-b-2 border-yellow-300 cursor-pointer hover:bg-yellow-200 transition-colors"
+                @click="toggleCollapse(msg.id)">
+                <div class="flex items-center gap-3">
+                  <span class="text-2xl">🧠</span>
+                  <div>
+                    <span class="text-yellow-800 font-bold text-base">{{ msg.agent }}</span>
+                    <span class="ml-2 text-xs text-yellow-700 bg-yellow-200 px-2 py-1 rounded-full">
+                      {{ msg.collapsed ? '已折叠' : '已展开' }}
+                    </span>
+                  </div>
+                </div>
+                <span class="text-yellow-700 text-lg">{{ msg.collapsed ? '▼' : '▲' }}</span>
+              </div>
+              <div v-if="!msg.collapsed" class="p-4 space-y-3">
+                <!-- 工具调用列表 -->
+                <div v-for="(tool, idx) in msg.tools" :key="idx" class="bg-white rounded-lg border border-purple-200 overflow-hidden">
+                  <div class="bg-purple-50 px-3 py-2 border-b border-purple-200">
+                    <div class="flex items-center gap-2">
+                      <span class="text-lg">🔧</span>
+                      <span class="text-purple-700 font-semibold text-sm">工具: {{ tool.tool_name }}</span>
+                      <span v-if="tool.result" class="ml-auto text-xs text-green-600">✅ 成功</span>
+                    </div>
+                  </div>
+                  <div class="p-3 space-y-2">
+                    <div v-if="tool.args">
+                      <div class="text-xs font-semibold text-blue-700 mb-1">📥 输入参数</div>
+                      <pre class="whitespace-pre-wrap text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200 font-mono">{{ formatJson(tool.args) }}</pre>
+                    </div>
+                    <div v-if="tool.result">
+                      <div class="text-xs font-semibold text-emerald-700 mb-1">📤 执行结果</div>
+                      <pre class="whitespace-pre-wrap text-xs text-gray-800 bg-white p-2 rounded border border-gray-200 font-mono max-h-40 overflow-y-auto">{{ formatJson(tool.result) }}</pre>
+                    </div>
+                  </div>
+                </div>
+                <!-- 智能体回复 -->
+                <div v-if="msg.response" class="bg-white rounded-lg border border-yellow-300 p-3">
+                  <div class="text-xs font-semibold text-yellow-800 mb-2">💬 智能体回复</div>
+                  <div class="whitespace-pre-wrap text-sm text-gray-800">{{ msg.response }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="msg.type === 'tool_call'" class="flex justify-start">
+            <div class="w-full border border-purple-200 rounded-lg overflow-hidden shadow-sm bg-white">
+              <div class="bg-purple-50 px-4 py-3 flex justify-between items-center border-b border-purple-200 cursor-pointer hover:bg-purple-100 transition-colors"
+                @click="toggleCollapse(msg.id)">
+                <div class="flex items-center gap-3">
+                  <span class="text-2xl">🔧</span>
+                  <div>
+                    <span class="text-purple-700 font-bold text-sm">工具: {{ msg.tool_name }}</span>
+                    <span class="ml-2 text-xs text-purple-600 bg-purple-100 px-2 py-1 rounded-full">
+                      {{ msg.collapsed ? '已折叠' : '已展开' }}
+                    </span>
+                    <span v-if="msg.result" class="ml-2 text-xs" :class="msg.is_error ? 'text-red-600' : 'text-green-600'">
+                      {{ msg.is_error ? '❌ 失败' : '✅ 成功' }}
+                    </span>
+                  </div>
+                </div>
+                <span class="text-purple-600 text-lg">{{ msg.collapsed ? '▼' : '▲' }}</span>
+              </div>
+              <div v-if="!msg.collapsed" class="p-4 space-y-4">
+                <div v-if="msg.args">
+                  <div class="text-xs font-semibold text-blue-700 mb-2 flex items-center gap-2">
+                    <span>📥</span><span>输入参数</span>
+                  </div>
+                  <pre class="whitespace-pre-wrap text-xs text-gray-700 bg-gray-50 p-3 rounded border border-gray-200 font-mono">{{ formatJson(msg.args) }}</pre>
+                </div>
+                <div v-if="msg.result" class="pt-3 border-t border-gray-200">
+                  <div class="text-xs font-semibold text-emerald-700 mb-2 flex items-center gap-2">
+                    <span>📤</span><span>执行结果</span>
+                  </div>
+                  <pre class="whitespace-pre-wrap text-xs text-gray-800 bg-white p-3 rounded border border-gray-200 font-mono max-h-60 overflow-y-auto custom-scrollbar">{{ formatJson(msg.result) }}</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 智能体回复 -->
+          <div v-else-if="msg.type === 'assistant'" class="flex justify-start">
+            <div class="w-full rounded-2xl rounded-tl-none bg-white border border-slate-200 px-5 py-4 text-sm text-slate-800 shadow-sm">
+              <div class="whitespace-pre-wrap">{{ msg.content }}</div>
+            </div>
+          </div>
+
+          <!-- 结果 -->
+          <div v-else-if="msg.type === 'result'" class="flex justify-start">
+            <div class="w-full rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 px-5 py-4 shadow-md">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="text-2xl">📊</span>
+                <span class="font-bold text-emerald-800 text-base">整定结果</span>
+              </div>
+              <div class="space-y-3 text-sm">
+                <div v-if="msg.data.model" class="bg-white rounded-lg p-3 border border-emerald-100">
+                  <div class="font-semibold text-gray-700 mb-2">🔬 系统模型 (FOPDT)</div>
+                  <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div><span class="text-gray-600">增益 K:</span> <span class="font-mono">{{ msg.data.model.K.toFixed(3) }}</span></div>
+                    <div><span class="text-gray-600">时间常数 T:</span> <span class="font-mono">{{ msg.data.model.T.toFixed(2) }}s</span></div>
+                    <div><span class="text-gray-600">死区时间 L:</span> <span class="font-mono">{{ msg.data.model.L.toFixed(2) }}s</span></div>
+                    <div><span class="text-gray-600">置信度:</span> <span class="font-mono">{{ (msg.data.model.confidence * 100).toFixed(1) }}%</span></div>
+                  </div>
+                </div>
+                <div v-if="msg.data.pidParams" class="bg-white rounded-lg p-3 border border-emerald-100">
+                  <div class="font-semibold text-gray-700 mb-2">⚙️ PID参数</div>
+                  <div class="grid grid-cols-3 gap-2 text-xs">
+                    <div><span class="text-gray-600">Kp:</span> <span class="font-mono font-bold text-blue-600">{{ msg.data.pidParams.Kp.toFixed(4) }}</span></div>
+                    <div><span class="text-gray-600">Ki:</span> <span class="font-mono font-bold text-blue-600">{{ msg.data.pidParams.Ki.toFixed(4) }}</span></div>
+                    <div><span class="text-gray-600">Kd:</span> <span class="font-mono font-bold text-blue-600">{{ msg.data.pidParams.Kd.toFixed(4) }}</span></div>
+                  </div>
+                </div>
+                <div v-if="msg.data.translated" class="bg-white rounded-lg p-3 border border-emerald-100">
+                  <div class="font-semibold text-gray-700 mb-2">🏭 控制器参数</div>
+                  <div class="text-xs space-y-1">
+                    <div v-for="(value, key) in msg.data.translated" :key="key">
+                      <span class="text-gray-600">{{ key }}:</span>
+                      <span class="font-mono font-bold text-purple-600">{{ typeof value === 'number' ? value.toFixed(3) : value }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="msg.data.evaluation" class="bg-white rounded-lg p-3 border border-emerald-100">
+                  <div class="font-semibold text-gray-700 mb-2">📈 评估结果</div>
+                  <div class="space-y-2 text-xs">
+                    <div class="flex items-center justify-between">
+                      <span class="text-gray-600">性能评分:</span>
+                      <span class="font-mono font-bold" :class="msg.data.evaluation.performance_score >= 7 ? 'text-green-600' : msg.data.evaluation.performance_score >= 5 ? 'text-yellow-600' : 'text-red-600'">
+                        {{ msg.data.evaluation.performance_score.toFixed(2) }} / 10
+                      </span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <span class="text-gray-600">方法置信度:</span>
+                      <span class="font-mono font-bold text-blue-600">{{ (msg.data.evaluation.method_confidence * 100).toFixed(1) }}%</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <span class="text-gray-600">综合评级:</span>
+                      <span class="font-mono font-bold" :class="msg.data.evaluation.final_rating >= 6 ? 'text-green-600' : 'text-red-600'">
+                        {{ msg.data.evaluation.final_rating.toFixed(2) }}
+                      </span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <span class="text-gray-600">使用策略:</span>
+                      <span class="font-mono font-bold text-indigo-600">{{ msg.data.evaluation.strategy_used }}</span>
+                    </div>
+                    <div class="mt-2 pt-2 border-t border-emerald-200">
+                      <span v-if="msg.data.evaluation.passed" class="inline-flex items-center gap-1 text-green-700 font-semibold">
+                        ✅ 评估通过
+                      </span>
+                      <span v-else class="inline-flex items-center gap-1 text-red-700 font-semibold">
+                        ❌ 评估未通过
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 加载中 -->
+        <div v-if="loading" class="flex items-center gap-3 text-sm text-slate-600 px-2 py-3">
+          <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+          <span>{{ loadingMessage }}</span>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const { createApp } = Vue;
+
+    createApp({
+      data() {
+        return {
+          messages: [],
+          loading: false,
+          loadingMessage: '正在连接...',
+          uploadedFile: null,
+          loopName: 'FIC_101A',
+          controllerBrand: 'Siemens',
+          strategy: 'IMC',
+          messageIdCounter: 0
+        };
+      },
+      methods: {
+        handleFileUpload(event) {
+          this.uploadedFile = event.target.files[0];
+        },
+
+        async startTuning() {
+          if (!this.uploadedFile || this.loading) return;
+
+          this.loading = true;
+          this.loadingMessage = '正在上传文件...';
+
+          // 添加用户消息
+          this.addMessage({
+            type: 'user',
+            content: `请为控制回路 ${this.loopName} 整定PID参数\n控制器品牌: ${this.controllerBrand}\n整定策略: ${this.strategy}`,
+            file_name: this.uploadedFile.name
+          });
+
+          const formData = new FormData();
+          formData.append('file', this.uploadedFile);
+          formData.append('loop_name', this.loopName);
+          formData.append('controller_brand', this.controllerBrand);
+          formData.append('strategy', this.strategy);
+
+          try {
+            this.loadingMessage = '智能体正在处理...';
+
+            const response = await fetch('http://pidend.dicp.sixseven.ltd:5924/api/tune_stream', {
+              method: 'POST',
+              body: formData
+            });
+
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              const chunk = decoder.decode(value);
+              const lines = chunk.split('\n');
+
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  const data = JSON.parse(line.substring(6));
+                  this.handleSSEMessage(data);
+                }
+              }
+            }
+
+          } catch (error) {
+            console.error('Tuning failed:', error);
+            this.addMessage({
+              type: 'assistant',
+              content: `❌ 请求失败: ${error.message}`
+            });
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        handleSSEMessage(data) {
+          if (data.type === 'thought') {
+            this.addMessage({
+              type: 'thought',
+              agent: data.agent,
+              content: data.content,
+              collapsed: false
+            });
+          } else if (data.type === 'agent_turn') {
+            this.addMessage({
+              type: 'agent_turn',
+              agent: data.agent,
+              tools: data.tools,
+              response: data.response,
+              collapsed: false
+            });
+          } else if (data.type === 'tool_call') {
+            this.addMessage({
+              type: 'tool_call',
+              tool_name: data.tool_name,
+              args: data.args,
+              collapsed: false,
+              result: null,
+              is_error: false
+            });
+          } else if (data.type === 'tool_result') {
+            const lastToolMsg = [...this.messages].reverse()
+              .find(m => m.type === 'tool_call' && !m.result);
+            if (lastToolMsg) {
+              lastToolMsg.result = data.result;
+              lastToolMsg.is_error = data.is_error || false;
+            }
+          } else if (data.type === 'assistant') {
+            this.addMessage({
+              type: 'assistant',
+              content: data.content
+            });
+          } else if (data.type === 'result') {
+            this.addMessage({
+              type: 'result',
+              data: data.data
+            });
+          } else if (data.type === 'error') {
+            this.addMessage({
+              type: 'assistant',
+              content: `❌ 错误: ${data.message}`
+            });
+          }
+
+          this.$nextTick(() => {
+            const chatBox = this.$refs.chatBox;
+            if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+          });
+        },
+
+        addMessage(msg) {
+          this.messages.push({
+            id: ++this.messageIdCounter,
+            ...msg
+          });
+        },
+
+        toggleCollapse(msgId) {
+          const msg = this.messages.find(m => m.id === msgId);
+          if (msg) {
+            msg.collapsed = !msg.collapsed;
+          }
+        },
+
+        formatJson(obj) {
+          return JSON.stringify(obj, null, 2);
+        },
+
+        clearMessages() {
+          this.messages = [];
+          this.messageIdCounter = 0;
+        }
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

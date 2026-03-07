@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+
+# Environment
+.env
+.env.local
+venv/
+ENV/
+
+# Logs
+*.log
+*.log.*
+
+# Backup
+backup/
+*.backup
+*.bak
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
