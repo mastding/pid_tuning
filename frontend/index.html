@@ -230,6 +230,40 @@
             </div>
           </div>
 
+          <!-- 思考过程 -->
+          <div v-else-if="msg.type === 'thought'" class="flex justify-start">
+            <div class="max-w-4xl rounded-2xl px-5 py-4 shadow-lg border-2" :style="{backgroundColor: getAgentColor(msg.agent).bg, borderColor: getAgentColor(msg.agent).border}">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">{{ getAgentIcon(msg.agent) }}</span>
+                <span class="font-bold text-sm" :style="{color: getAgentColor(msg.agent).text}">{{ msg.agent }}</span>
+                <span class="text-xs text-slate-500">思考中...</span>
+              </div>
+              <div class="text-sm leading-relaxed whitespace-pre-wrap" :style="{color: getAgentColor(msg.agent).text}">{{ msg.content }}</div>
+            </div>
+          </div>
+
+          <!-- 工具调用 -->
+          <div v-else-if="msg.type === 'tool_call'" class="flex justify-start">
+            <div class="max-w-4xl rounded-2xl px-5 py-4 shadow-lg border-2 bg-slate-50 border-slate-300">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">🔧</span>
+                <span class="font-bold text-sm text-slate-700">工具调用</span>
+              </div>
+              <div class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{{ msg.content }}</div>
+            </div>
+          </div>
+
+          <!-- 工具结果 -->
+          <div v-else-if="msg.type === 'tool_result'" class="flex justify-start">
+            <div class="max-w-4xl rounded-2xl px-5 py-4 shadow-lg border-2 bg-blue-50 border-blue-300">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">📊</span>
+                <span class="font-bold text-sm text-blue-700">工具结果</span>
+              </div>
+              <div class="text-sm text-blue-600 leading-relaxed whitespace-pre-wrap">{{ msg.content }}</div>
+            </div>
+          </div>
+
           <!-- 结果 -->
           <div v-else-if="msg.type === 'result'" class="flex justify-start">
             <div class="w-full rounded-2xl bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 border-2 border-emerald-300 px-6 py-5 shadow-2xl">
@@ -413,6 +447,16 @@
             '评估智能体': 'text-orange-800'
           };
           return classes[agentName] || 'text-slate-800';
+        },
+
+        getAgentColor(agentName) {
+          const colors = {
+            '数据分析智能体': { bg: '#eff6ff', border: '#3b82f6', text: '#1e40af' },
+            '系统辨识智能体': { bg: '#f0fdf4', border: '#10b981', text: '#065f46' },
+            'PID专家智能体': { bg: '#faf5ff', border: '#8b5cf6', text: '#6b21a8' },
+            '评估智能体': { bg: '#fff7ed', border: '#f59e0b', text: '#92400e' }
+          };
+          return colors[agentName] || { bg: '#f8fafc', border: '#cbd5e1', text: '#475569' };
         },
 
         updateProgress(agentName) {

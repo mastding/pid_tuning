@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import sys
 from typing import Any, AsyncGenerator, Dict, List
@@ -465,3 +466,81 @@ async def run_multi_agent_collaboration(
             "type": "error",
             "message": f"多智能体协作失败: {str(e)}\n{traceback.format_exc()}"
         }
+
+
+# ============ FastAPI Web服务 ============
+if __name__ == "__main__":
+    from fastapi import FastAPI, File, UploadFile, Form
+    from fastapi.responses import StreamingResponse
+    from fastapi.middleware.cors import CORSMiddleware
+    import tempfile
+    import uvicorn
+
+    app = FastAPI()
+
+    # CORS配置
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # LLM配置
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    LLM_CONFIG = {
+        "api_key": os.getenv("MODEL_API_KEY"),
+        "base_url": os.getenv("MODEL_API_URL"),
+        "model": os.getenv("MODEL", "qwen-plus")
+    }
+
+    @app.post("/api/tune_stream")
+    async def tune_stream(
+        file: UploadFile = File(...),
+        loop_name: str = Form(...),
+        controller_brand: str = Form(...),
+        strategy: str = Form("IMC")
+    ):
+        """流式PID整定接口 - 使用AutoGen多智能体"""
+        
+        # 保存上传的文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            csv_path = tmp_file.name
+        
+        async def event_generator():
+            try:
+                # 调用多智能体协作
+                async for event in run_multi_agent_collaboration(
+                    csv_path=csv_path,
+                    loop_name=loop_name,
+                    controller_brand=controller_brand,
+                    strategy=strategy,
+                    llm_config=LLM_CONFIG
+                ):
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                import traceback
+                error_msg = {"type": "error", "message": f"{str(e)}\n{traceback.format_exc()}"}
+                yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
+            finally:
+                # 清理临时文件
+                if os.path.exists(csv_path):
+                    os.remove(csv_path)
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+        )
+
+    print("Starting PID Tuning Multi-Agent System...")
+    print(f"API endpoint: http://0.0.0.0:3443/api/tune_stream")
+    uvicorn.run(app, host="0.0.0.0", port=3443)
