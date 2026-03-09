@@ -36,7 +36,7 @@ from skills.data_analysis_skills import (
     prepare_pid_dataset,
 )
 from skills.system_id_skills import fit_fopdt_model, calculate_model_confidence
-from skills.pid_tuning_skills import apply_tuning_rules, controller_logic_translator, select_tuning_strategy
+from skills.pid_tuning_skills import apply_tuning_rules, select_tuning_strategy
 from skills.rating import ModelRating
 
 
@@ -125,82 +125,66 @@ def _build_agent_response(agent_name: str, tools: List[Dict[str, Any]]) -> str:
     if not isinstance(latest_result, dict):
         return ""
 
-    if agent_name == "数据分析智能体":
+    if agent_name == DISPLAY_AGENT_NAMES["data_analyst"]:
         points = latest_result.get("data_points", 0)
         window_points = latest_result.get("window_points", 0)
         sampling_time = latest_result.get("sampling_time", 1.0)
         step_events = latest_result.get("step_events", [])
         return (
-            f"已完成数据加载与预处理，共获得 {points} 个数据点，"
-            f"当前用于辨识的窗口为 {window_points} 点，采样周期约 {_format_float(sampling_time, 2)} s，"
-            f"检测到 {len(step_events) if isinstance(step_events, list) else 0} 个候选阶跃事件。"
+            f"??????????????? {points} ?????"
+            f"?????????? {window_points} ??????? {_format_float(sampling_time, 2)} s?"
+            f"??? {len(step_events) if isinstance(step_events, list) else 0} ????????"
         )
 
-    if agent_name == "系统辨识智能体":
+    if agent_name == DISPLAY_AGENT_NAMES["system_id_expert"]:
         extra = ""
         reason_codes = latest_result.get("reason_codes", [])
         if isinstance(reason_codes, list) and reason_codes:
-            extra = f" 风险提示: {', '.join(reason_codes)}。"
+            extra = f" ????: {', '.join(reason_codes)}?"
         next_actions = latest_result.get("next_actions", [])
         if isinstance(next_actions, list) and next_actions:
-            extra += f" 建议动作: {', '.join(next_actions)}。"
+            extra += f" ????: {', '.join(next_actions)}?"
         return (
-            f"FOPDT 模型辨识完成，得到 K={_format_float(latest_result.get('K'))}，"
-            f"T={_format_float(latest_result.get('T'))}，L={_format_float(latest_result.get('L'))}，"
-            f"标准化RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}，"
-            f"R² {_format_float(latest_result.get('r2_score'), 3)}，模型置信度 {_format_float(latest_result.get('confidence'), 2)}。{extra}"
+            f"FOPDT ????????? K={_format_float(latest_result.get('K'))}?"
+            f"T={_format_float(latest_result.get('T'))}?L={_format_float(latest_result.get('L'))}?"
+            f"???RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}?"
+            f"R? {_format_float(latest_result.get('r2_score'), 3)}?????? {_format_float(latest_result.get('confidence'), 2)}?{extra}"
         )
 
-    if agent_name == "PID专家智能体":
-        translated_result = None
+    if agent_name == DISPLAY_AGENT_NAMES["pid_expert"]:
         tune_result = None
         for tool in tools:
             if tool.get("tool_name") == "tool_tune_pid" and isinstance(tool.get("result"), dict):
                 tune_result = tool["result"]
-            if tool.get("tool_name") == "tool_translate_params" and isinstance(tool.get("result"), dict):
-                translated_result = tool["result"]
 
         if tune_result is None:
             tune_result = latest_result if latest_tool_name == "tool_tune_pid" else {}
 
         response = (
-            f"已按 {tune_result.get('strategy_used', tune_result.get('strategy', '当前'))} 策略完成整定，"
-            f"Kp={_format_float(tune_result.get('Kp'))}，Ki={_format_float(tune_result.get('Ki'))}，"
-            f"Kd={_format_float(tune_result.get('Kd'))}。"
+            f"?? {tune_result.get('strategy_used', tune_result.get('strategy', '??'))} ???????"
+            f"Kp={_format_float(tune_result.get('Kp'))}?Ki={_format_float(tune_result.get('Ki'))}?"
+            f"Kd={_format_float(tune_result.get('Kd'))}?"
         )
         if tune_result.get("selection_reason"):
-            response += f" 策略选择依据：{tune_result.get('selection_reason')}"
-        if translated_result:
-            translated_items = ", ".join(
-                f"{key}={_format_float(value)}" if isinstance(value, (int, float)) else f"{key}={value}"
-                for key, value in translated_result.items()
-                if key not in {"format", "brand"}
-            )
-            response += (
-                f" 已转换为 {translated_result.get('brand', '控制器')} "
-                f"{translated_result.get('format', '参数')} 格式"
-            )
-            if translated_items:
-                response += f"：{translated_items}。"
+            response += f" ???????{tune_result.get('selection_reason')}"
         return response
 
-    if agent_name == "评估智能体":
+    if agent_name == DISPLAY_AGENT_NAMES["evaluation_expert"]:
         extra = ""
         if not latest_result.get("passed") and latest_result.get("feedback_target"):
             extra = (
-                f" 未通过主因：{latest_result.get('failure_reason', '')}"
-                f" 建议回流给 {latest_result.get('feedback_target')}，"
+                f" ??????{latest_result.get('failure_reason', '')}"
+                f" ???????? {latest_result.get('feedback_target')}?"
                 f"{latest_result.get('feedback_action', '')}"
             )
         return (
-            f"闭环评估完成，性能评分 {_format_float(latest_result.get('performance_score'), 2)}，"
-            f"方法置信度 {_format_float(latest_result.get('method_confidence'), 2)}，"
-            f"最终评分 {_format_float(latest_result.get('final_rating'), 2)}，"
-            f"{'通过' if latest_result.get('passed') else '未通过'}当前整定校核。{extra}"
+            f"??????????? {_format_float(latest_result.get('performance_score'), 2)}?"
+            f"????? {_format_float(latest_result.get('method_confidence'), 2)}?"
+            f"???? {_format_float(latest_result.get('final_rating'), 2)}?"
+            f"{'??' if latest_result.get('passed') else '???'}???????{extra}"
         )
 
     return ""
-
 
 def _finalize_agent_turn(current_turn_data: Dict[str, Any] | None) -> Dict[str, Any] | None:
     if current_turn_data is None:
@@ -1084,15 +1068,6 @@ async def tool_tune_pid(K: float, T: float, L: float, loop_type: str) -> Dict[st
     })
 
 
-async def tool_translate_params(Kp: float, Ki: float, Kd: float, brand: str) -> Dict[str, Any]:
-    """转换为控制器参数"""
-    pid_params = {"Kp": Kp, "Ki": Ki, "Kd": Kd}
-    translated = controller_logic_translator(pid_params, brand)
-    result = {k: float(v) if isinstance(v, (int, float)) else str(v) for k, v in translated.items()}
-    _shared_data_store["translated_params"] = result
-    return result
-
-
 async def tool_evaluate_pid(
     K: float,
     T: float,
@@ -1179,12 +1154,6 @@ async def tool_evaluate_pid(
                     "description": "Auto refined after evaluation feedback",
                 }
                 _shared_data_store["selected_pid_evaluation"] = eval_result
-                controller_brand = str(_shared_data_store.get("controller_brand", ""))
-                if controller_brand:
-                    _shared_data_store["translated_params"] = controller_logic_translator(
-                        {"Kp": Kp, "Ki": Ki, "Kd": Kd},
-                        controller_brand,
-                    )
                 _shared_data_store["evaluation_result"] = eval_result
                 auto_refine_result = {
                     "applied": True,
@@ -1241,12 +1210,6 @@ async def tool_evaluate_pid(
                     "description": "Switched to alternative identification window",
                 }
                 _shared_data_store["selected_pid_evaluation"] = eval_result
-                controller_brand = str(_shared_data_store.get("controller_brand", ""))
-                if controller_brand:
-                    _shared_data_store["translated_params"] = controller_logic_translator(
-                        {"Kp": Kp, "Ki": Ki, "Kd": Kd},
-                        controller_brand,
-                    )
                 model_retry_result = {
                     "applied": True,
                     "window_source": str(alternative_model.get("window_source", "")),
@@ -1306,7 +1269,6 @@ def create_pid_agents(
     start_time: str,
     end_time: str,
     data_type: str,
-    controller_brand: str,
     loop_type: str
 ) -> List[AssistantAgent]:
     """创建 4 个专业智能体。"""
@@ -1352,14 +1314,13 @@ tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_ti
     pid_expert = AssistantAgent(
         name="pid_expert",
         model_client=model_client,
-        system_message=f"""你是 PID 整定专家。
+        system_message=f"""?? PID ?????
 
-当轮到你发言时：
-1. 从对话历史读取 tool_fit_fopdt 返回的 K、T、L。
-2. 调用 tool_tune_pid(K=..., T=..., L=..., loop_type="{loop_type}")。
-3. 拿到 Kp、Ki、Kd 后，立即调用 tool_translate_params(Kp=..., Ki=..., Kd=..., brand="{controller_brand}")。
-4. 用一句话总结自动选择的整定策略、标准 PID 参数和控制器参数格式，并以“完成”结束。""",
-        tools=[tool_tune_pid, tool_translate_params],
+????????
+1. ??????? tool_fit_fopdt ??? K?T?L?
+2. ?? tool_tune_pid(K=..., T=..., L=..., loop_type="{loop_type}")?
+3. ???????????????? PID ????????????""",
+        tools=[tool_tune_pid],
         model_client_stream=False,
         max_tool_iterations=2,
     )
@@ -1367,13 +1328,13 @@ tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_ti
     evaluation_expert = AssistantAgent(
         name="evaluation_expert",
         model_client=model_client,
-        system_message=f"""你是评估专家。
+        system_message="""???????
 
-当轮到你发言时：
-1. 从对话历史读取 K、T、L、Kp、Ki、Kd。
-2. 调用 tool_evaluate_pid(K=..., T=..., L=..., Kp=..., Ki=..., Kd=..., method="auto")。
-3. 如果 passed=true，用一句话总结性能评分、方法置信度和最终评分，最后明确输出 APPROVE。
-4. 如果 passed=false，必须明确说明本次不通过的主因、feedback_target 和 feedback_action，不要输出 APPROVE。""",
+????????
+1. ??????? K?T?L?Kp?Ki?Kd?
+2. ?? tool_evaluate_pid(K=..., T=..., L=..., Kp=..., Ki=..., Kd=..., method="auto")?
+3. ?? passed=true????????????????????????????? APPROVE?
+4. ?? passed=false????????????????feedback_target ? feedback_action????? APPROVE?""",
         tools=[tool_evaluate_pid],
         model_client_stream=False,
     )
@@ -1389,7 +1350,6 @@ async def run_multi_agent_collaboration(
     start_time: str,
     end_time: str,
     data_type: str,
-    controller_brand: str,
     llm_config: Dict[str, Any]
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """运行多智能体协作 - 使用RoundRobinGroupChat"""
@@ -1397,7 +1357,6 @@ async def run_multi_agent_collaboration(
     # 清空全局数据存储
     _shared_data_store.clear()
     _shared_data_store["loop_type"] = loop_type
-    _shared_data_store["controller_brand"] = controller_brand
 
     # 创建模型客户端
     model_client = create_model_client(
@@ -1414,7 +1373,6 @@ async def run_multi_agent_collaboration(
         start_time=start_time,
         end_time=end_time,
         data_type=data_type,
-        controller_brand=controller_brand,
         loop_type=loop_type
     )
 
@@ -1428,25 +1386,23 @@ async def run_multi_agent_collaboration(
     )
 
     # 构建初始任务消息
-    task_message = f"""请为控制回路 {loop_name} 执行PID整定任务。
+    task_message = f"""?????? {loop_name} ??PID?????
 
-数据文件: {csv_path}
-历史数据回路URI: {loop_uri}
-历史数据开始时间: {start_time or "默认最近24小时"}
-历史数据结束时间: {end_time or "当前时间"}
-历史数据类型: {data_type}
-控制器品牌: {controller_brand}
-回路类型: {loop_type}
+????: {csv_path}
+??????URI: {loop_uri}
+????????: {start_time or "????24??"}
+????????: {end_time or "????"}
+??????: {data_type}
+????: {loop_type}
 
-请按以下顺序协作完成：
-1. 数据分析智能体：加载和分析数据
-2. 系统辨识智能体：拟合FOPDT模型
-3. PID专家智能体：计算和转换PID参数
-4. 评估智能体：评估整定质量
+???????????
+1. ???????????????
+2. ??????????FOPDT??
+3. PID????????PID??
+4. ????????????
 
-每个智能体完成任务后，请明确告知下一个智能体继续工作。"""
+???????????????????????????"""
 
-    # 发送用户消息
     yield {
         "type": "user",
         "content": task_message,
@@ -1611,7 +1567,6 @@ async def run_multi_agent_collaboration(
 
         step_events = shared_data.get("step_events") or []
         effective_pid_params = _shared_data_store.get("selected_pid_params") or {}
-        effective_translated_params = _shared_data_store.get("translated_params") or {}
         final_result = {
             "dataAnalysis": {
                 "dataPoints": shared_data.get("data_points", 0),
@@ -1662,28 +1617,6 @@ async def run_multi_agent_collaboration(
             },
         }
 
-        # 添加translated参数（如果有）
-        translated_keys = [
-            k for k in shared_data.keys()
-            if k not in [
-                "data_points", "window_points", "sampling_time", "mv_range", "pv_range", "available_columns",
-                "selected_window", "window_overview", "step_events", "candidate_windows", "quality_metrics", "status",
-                "K", "T", "L", "dt", "residue", "normalized_rmse", "raw_rmse", "r2_score", "success",
-                "confidence", "confidence_quality", "confidence_recommendation", "rmse_score",
-                "reason_codes", "next_actions", "selected_window_source", "attempts", "fit_preview",
-                "Kp", "Ki", "Kd", "Ti", "Td", "strategy", "strategy_requested", "strategy_used", "description",
-                "loop_type", "selection_reason", "selection_inputs", "candidate_strategies",
-                "performance_score", "method_confidence", "final_rating", "passed",
-                "initial_assessment", "evaluation_feedback", "evaluation_pass_threshold",
-                "performance_details", "final_details", "simulation",
-            ]
-        ]
-        if effective_translated_params:
-            final_result["translated"] = effective_translated_params
-        elif translated_keys:
-            final_result["translated"] = {k: shared_data[k] for k in translated_keys}
-
-        # 添加evaluation结果（如果有）
         if "final_rating" in shared_data:
             final_result["evaluation"] = {
                 "performance_score": shared_data.get("performance_score", 0.0),
@@ -1764,7 +1697,6 @@ if __name__ == "__main__":
         start_time: str = Form(DEFAULT_HISTORY_START_TIME),
         end_time: str = Form(DEFAULT_HISTORY_END_TIME),
         data_type: str = Form("interpolated"),
-        controller_brand: str = Form(...),
     ):
         """流式PID整定接口 - 使用AutoGen多智能体"""
         
@@ -1787,7 +1719,6 @@ if __name__ == "__main__":
                     start_time=start_time,
                     end_time=end_time,
                     data_type=data_type,
-                    controller_brand=controller_brand,
                     llm_config=LLM_CONFIG
                 ):
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"

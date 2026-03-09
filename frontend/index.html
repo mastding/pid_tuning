@@ -74,53 +74,46 @@
             class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
         </div>
 
-        <button v-if="uploadedFile" @click="clearUploadedFile"
-          class="w-full mt-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 border border-slate-200 transition-all text-sm font-medium">
-          清除CSV，改用历史数据
-        </button>
-        <p v-else class="text-xs text-amber-700 mt-2 bg-amber-50 px-3 py-2 rounded border border-amber-200">
-          未上传CSV时，将按下方历史参数获取数据；若参数留空，则使用默认值。
-        </p>
+                <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">????</label>
+          <select v-model="dataSource" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+            <option value="upload">??CSV</option>
+            <option value="history">??????</option>
+          </select>
+        </div>
 
-        <div v-if="!uploadedFile" class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <div class="text-sm font-semibold text-slate-700">历史数据参数</div>
+        <div v-if="dataSource === 'history'" class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p class="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
+            ???CSV????????????????????????????
+          </p>
+          <div class="text-sm font-semibold text-slate-700">??????</div>
           <div>
             <label class="block text-sm font-semibold text-slate-700 mb-2">Loop URI</label>
             <input v-model="loopUri" type="text"
               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
           </div>
           <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">开始时间</label>
+            <label class="block text-sm font-semibold text-slate-700 mb-2">????</label>
             <input v-model="startTime" type="text" placeholder="1772467200000"
               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
           </div>
           <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">结束时间</label>
+            <label class="block text-sm font-semibold text-slate-700 mb-2">????</label>
             <input v-model="endTime" type="text" placeholder="1772553600000"
               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
           </div>
         </div>
 
-        <div>
-          <label class="block text-sm font-semibold text-slate-700 mb-2">上传CSV数据文件</label>
+        <div v-if="dataSource === 'upload'">
+          <label class="block text-sm font-semibold text-slate-700 mb-2">??CSV????</label>
           <input ref="fileInput" type="file" accept=".csv" @change="handleFileUpload" class="hidden">
           <button @click="$refs.fileInput.click()"
             class="w-full px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded-lg hover:from-blue-100 hover:to-indigo-100 border border-blue-200 transition-all font-medium">
-            <span class="text-xl mr-2">📁</span> 选择CSV文件
+            <span class="text-xl mr-2">??</span> ??CSV??
           </button>
           <p v-if="uploadedFile" class="text-xs text-slate-600 mt-2 truncate bg-green-50 px-3 py-2 rounded border border-green-200">
-            ✅ {{ uploadedFile.name }}
+            ? {{ uploadedFile.name }}
           </p>
-        </div>
-
-        <div>
-          <label class="block text-sm font-semibold text-slate-700 mb-2">控制器品牌</label>
-          <select v-model="controllerBrand" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
-            <option value="Siemens">西门子 (Siemens)</option>
-            <option value="ABB">ABB</option>
-            <option value="Honeywell">霍尼韦尔 (Honeywell)</option>
-            <option value="Yokogawa">横河 (Yokogawa)</option>
-          </select>
         </div>
 
         <div>
@@ -649,17 +642,6 @@
                     </div>
                   </div>
                 </div>
-                <div v-if="msg.data.translated" class="bg-white rounded-xl p-4 border-2 border-indigo-100 shadow-md">
-                  <div class="font-bold text-slate-800 mb-3 flex items-center gap-2 text-base">
-                    <span>🏭</span><span>控制器参数</span>
-                  </div>
-                  <div class="grid grid-cols-2 gap-2 text-sm">
-                    <div v-for="(value, key) in msg.data.translated" :key="key" class="bg-indigo-50 rounded-lg p-2 flex justify-between items-center">
-                      <span class="text-slate-700 font-medium">{{ key }}</span>
-                      <span class="font-mono font-bold text-indigo-700">{{ typeof value === 'number' ? value.toFixed(3) : value }}</span>
-                    </div>
-                  </div>
-                </div>
                 <div v-if="msg.data.evaluation" class="bg-white rounded-xl p-4 border-2 border-orange-100 shadow-md">
                   <div class="font-bold text-slate-800 mb-3 flex items-center gap-2 text-base">
                     <span>📈</span><span>性能评估</span>
@@ -773,11 +755,11 @@
           loading: false,
           loadingMessage: '正在连接...',
           uploadedFile: null,
+          dataSource: 'history',
           loopName: 'FIC_101A',
           loopUri: '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b',
           startTime: '1772467200000',
           endTime: '1772553600000',
-          controllerBrand: 'Siemens',
           loopType: 'flow',
           messageIdCounter: 0,
           compactMode: false,
@@ -790,6 +772,31 @@
         };
       },
       methods: {
+        messageStorageKey() {
+          return 'pid_tuning_messages_v1';
+        },
+
+        saveMessages() {
+          localStorage.setItem(this.messageStorageKey(), JSON.stringify({
+            messages: this.messages,
+            messageIdCounter: this.messageIdCounter,
+            compactMode: this.compactMode
+          }));
+        },
+
+        loadMessages() {
+          const raw = localStorage.getItem(this.messageStorageKey());
+          if (!raw) return;
+          try {
+            const parsed = JSON.parse(raw);
+            this.messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+            this.messageIdCounter = Number(parsed.messageIdCounter) || this.messages.reduce((maxId, msg) => Math.max(maxId, msg.id || 0), 0);
+            this.compactMode = Boolean(parsed.compactMode);
+          } catch (error) {
+            console.warn('Failed to restore messages:', error);
+          }
+        },
+
         handleFileUpload(event) {
           this.uploadedFile = event.target.files[0];
         },
@@ -915,93 +922,58 @@
         async startTuning() {
           if (this.loading) return;
 
-          const usingUploadedCsv = !!this.uploadedFile;
-
-          {
-            this.loading = true;
-            this.loadingMessage = usingUploadedCsv ? '正在上传文件...' : '正在获取历史数据...';
-
+          const usingUploadedCsv = this.dataSource === 'upload';
+          if (usingUploadedCsv && !this.uploadedFile) {
             this.addMessage({
-              type: 'user',
-              content: usingUploadedCsv
-                ? `为控制回路 ${this.loopName} 整定PID参数\n数据来源: 上传CSV\n控制器品牌: ${this.controllerBrand}\n回路类型: ${this.loopType}`
-                : `为控制回路 ${this.loopName} 整定PID参数\n数据来源: 历史数据\nloop_uri: ${this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b'}\nstart_time: ${this.startTime || '1772467200000'}\nend_time: ${this.endTime || '1772553600000'}\n控制器品牌: ${this.controllerBrand}\n回路类型: ${this.loopType}`,
-              file_name: usingUploadedCsv ? this.uploadedFile.name : null
+              type: 'assistant',
+              content: '???CSV?????????'
             });
-
-            const formData = new FormData();
-            if (usingUploadedCsv) {
-              formData.append('file', this.uploadedFile);
-            }
-            formData.append('loop_name', this.loopName);
-            formData.append('loop_uri', this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b');
-            formData.append('start_time', this.startTime || '1772467200000');
-            formData.append('end_time', this.endTime || '1772553600000');
-            formData.append('controller_brand', this.controllerBrand);
-            formData.append('loop_type', this.loopType);
-
-            try {
-              this.loadingMessage = '智能体正在协同处理...';
-
-              const response = await fetch(`${resolveApiBase()}/api/tune_stream`, {
-                method: 'POST',
-                body: formData
-              });
-
-              if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-              }
-
-              await this.consumeSSEStream(response);
-            } catch (error) {
-              console.error('Tuning failed:', error);
-              this.addMessage({
-                type: 'assistant',
-                content: `请求失败: ${error.message}`
-              });
-            } finally {
-              this.loading = false;
-              this.progressSteps.forEach(step => step.active = false);
-            }
             return;
           }
 
           this.loading = true;
-          this.loadingMessage = usingUploadedCsv ? '正在上传文件...' : '正在获取历史数据...';
-          this.loadingMessage = '正在上传文件...';
+          this.loadingMessage = usingUploadedCsv ? '??????...' : '????????...';
 
-          // 添加用户消息
           this.addMessage({
             type: 'user',
-            content: `请为控制回路 ${this.loopName} 整定PID参数\n控制器品牌: ${this.controllerBrand}\n回路类型: ${this.loopType}`,
-            file_name: this.uploadedFile.name
+            content: usingUploadedCsv
+              ? `????? ${this.loopName} ??PID??
+????: ??CSV
+????: ${this.loopType}`
+              : `????? ${this.loopName} ??PID??
+????: ????
+loop_uri: ${this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b'}
+start_time: ${this.startTime || '1772467200000'}
+end_time: ${this.endTime || '1772553600000'}
+????: ${this.loopType}`,
+            file_name: usingUploadedCsv ? this.uploadedFile.name : null
           });
 
           const formData = new FormData();
-          formData.append('file', this.uploadedFile);
+          if (usingUploadedCsv) {
+            formData.append('file', this.uploadedFile);
+          }
           formData.append('loop_name', this.loopName);
-          formData.append('controller_brand', this.controllerBrand);
           formData.append('loop_type', this.loopType);
+          formData.append('loop_uri', this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b');
+          formData.append('start_time', this.startTime || '1772467200000');
+          formData.append('end_time', this.endTime || '1772553600000');
 
           try {
-            this.loadingMessage = '智能体正在协同处理...';
-
+            this.loadingMessage = '?????????...';
             const response = await fetch(`${resolveApiBase()}/api/tune_stream`, {
               method: 'POST',
               body: formData
             });
-
             if (!response.ok) {
               throw new Error(`HTTP error! status: ${response.status}`);
             }
-
             await this.consumeSSEStream(response);
-
           } catch (error) {
             console.error('Tuning failed:', error);
             this.addMessage({
               type: 'assistant',
-              content: `❌ 请求失败: ${error.message}`
+              content: `????: ${error.message}`
             });
           } finally {
             this.loading = false;
@@ -1041,6 +1013,7 @@
             if (lastToolMsg) {
               lastToolMsg.result = data.result;
               lastToolMsg.is_error = data.is_error || false;
+              this.saveMessages();
             }
           } else if (data.type === 'assistant') {
             this.addMessage({
@@ -1071,12 +1044,14 @@
             id: ++this.messageIdCounter,
             ...msg
           });
+          this.saveMessages();
         },
 
         toggleCollapse(msgId) {
           const msg = this.messages.find(m => m.id === msgId);
           if (msg) {
             msg.collapsed = !msg.collapsed;
+            this.saveMessages();
           }
         },
 
@@ -1229,7 +1204,11 @@
         clearMessages() {
           this.messages = [];
           this.messageIdCounter = 0;
+          localStorage.removeItem(this.messageStorageKey());
         }
+      },
+      mounted() {
+        this.loadMessages();
       }
     }).mount('#app');
   </script>
