@@ -92,22 +92,45 @@ def fit_fopdt_model(mv: np.ndarray, pv: np.ndarray, dt: float = 1.0) -> Dict:
 
     K_opt, T_opt, L_opt = [float(x) for x in result.x]
     y_pred = _simulate_fopdt_response(mv_norm, K_opt, T_opt, L_opt, dt)
-    residue = float(np.sqrt(np.mean((pv_norm - y_pred) ** 2)))
+    normalized_rmse = float(np.sqrt(np.mean((pv_norm - y_pred) ** 2)))
+    y_pred_raw = y_pred * pv_std + np.mean(pv)
+    raw_rmse = float(np.sqrt(np.mean((pv - y_pred_raw) ** 2)))
+    ss_res = float(np.sum((pv_norm - y_pred) ** 2))
+    ss_tot = float(np.sum((pv_norm - np.mean(pv_norm)) ** 2))
+    r2_score = 1.0 - (ss_res / ss_tot) if ss_tot > 1e-9 else 0.0
     K_real = K_opt * pv_std / mv_std
 
     return {
         "K": float(K_real),
         "T": T_opt,
         "L": L_opt,
-        "residue": residue,
+        "residue": normalized_rmse,
+        "normalized_rmse": normalized_rmse,
+        "raw_rmse": raw_rmse,
+        "r2_score": float(r2_score),
         "success": bool(result.success),
         "message": result.message,
     }
 
 
-def calculate_model_confidence(residue: float, threshold: float = 0.15) -> Dict:
-    """根据拟合残差给出置信度。"""
-    confidence = max(0.0, 1.0 - float(residue) / max(float(threshold), 1e-6))
+def calculate_model_confidence(
+    residue: float,
+    r2_score: float | None = None,
+    threshold: float = 0.25,
+) -> Dict:
+    """根据拟合残差和 R² 给出置信度。"""
+    residue = float(residue)
+    rmse_score = max(0.0, 1.0 - residue / max(float(threshold), 1e-6))
+    r2_score = float(r2_score) if r2_score is not None else 0.0
+    r2_component = min(1.0, max(0.0, r2_score))
+    confidence = 0.6 * rmse_score + 0.4 * r2_component
+
+    if residue > 0.15:
+        confidence = min(confidence, 0.45)
+    elif residue > 0.1:
+        confidence = min(confidence, 0.65)
+    if r2_component < 0.4:
+        confidence = min(confidence, 0.45)
 
     if confidence > 0.85:
         recommendation = "模型可信，可直接用于 PID 整定"
@@ -126,7 +149,10 @@ def calculate_model_confidence(residue: float, threshold: float = 0.15) -> Dict:
         "confidence": float(confidence),
         "quality": quality,
         "recommendation": recommendation,
-        "residue": float(residue),
+        "residue": residue,
+        "rmse_score": float(rmse_score),
+        "r2_score": float(r2_component),
+        "threshold": float(threshold),
     }
 
 

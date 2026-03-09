@@ -124,13 +124,14 @@
         </div>
 
         <div>
-          <label class="block text-sm font-semibold text-slate-700 mb-2">整定策略</label>
-          <select v-model="strategy" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
-            <option value="IMC">IMC - 保守型（推荐）</option>
-            <option value="Lambda">Lambda - 平衡型</option>
-            <option value="CHR">CHR - 快速响应</option>
-            <option value="ZN">ZN - 激进型</option>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">回路类型</label>
+          <select v-model="loopType" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+            <option value="flow">流量</option>
+            <option value="temperature">温度</option>
+            <option value="pressure">压力</option>
+            <option value="level">液位</option>
           </select>
+          <p class="mt-2 text-xs text-slate-500">整定方法将由后端根据回路类型、模型质量和数据情况自动选择。</p>
         </div>
 
         <button @click="startTuning" :disabled="loading"
@@ -336,6 +337,187 @@
                       <div class="font-mono font-bold text-blue-700 text-lg">{{ (msg.data.model.confidence * 100).toFixed(1) }}%</div>
                     </div>
                   </div>
+                  <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                    <div class="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                      <span class="text-slate-600">标准化 RMSE</span>
+                      <span class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.model.normalizedRmse, 4) }}</span>
+                    </div>
+                    <div class="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                      <span class="text-slate-600">原始 RMSE</span>
+                      <span class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.model.rawRmse, 4) }}</span>
+                    </div>
+                    <div class="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                      <span class="text-slate-600">R²</span>
+                      <span class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.model.r2Score, 4) }}</span>
+                    </div>
+                  </div>
+                  <div v-if="msg.data.model.windowOverview && msg.data.model.windowOverview.points && msg.data.model.windowOverview.points.length > 1" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div class="mb-2 flex items-center justify-between">
+                      <div class="text-sm font-semibold text-slate-700">辨识窗口位置</div>
+                      <div class="text-xs text-slate-500">
+                        窗口: {{ msg.data.dataAnalysis?.selectedWindow?.start_index ?? 0 }} - {{ msg.data.dataAnalysis?.selectedWindow?.end_index ?? 0 }}
+                      </div>
+                    </div>
+                    <div class="mb-2 flex items-center justify-between text-[11px]">
+                      <span class="rounded bg-slate-200 px-2 py-1 font-medium text-slate-700">Y轴: PV</span>
+                      <span class="rounded bg-blue-100 px-2 py-1 font-semibold text-blue-800">
+                        辨识窗口: {{ rangeLabel(msg.data.model.windowOverview.window_start_time, msg.data.model.windowOverview.window_end_time, msg.data.dataAnalysis?.selectedWindow?.start_index, msg.data.dataAnalysis?.selectedWindow?.end_index) }}
+                      </span>
+                    </div>
+                    <svg viewBox="0 0 420 180" class="h-40 w-full rounded bg-white">
+                      <text x="8" y="16" fill="#475569" font-size="11">{{ formatNumber(seriesMax(msg.data.model.windowOverview.points, 'pv'), 2) }}</text>
+                      <text x="8" y="172" fill="#475569" font-size="11">{{ formatNumber(seriesMin(msg.data.model.windowOverview.points, 'pv'), 2) }}</text>
+                      <rect
+                        :x="windowHighlightRect(msg.data.model.windowOverview, 420).x"
+                        y="0"
+                        :width="windowHighlightRect(msg.data.model.windowOverview, 420).width"
+                        height="180"
+                        fill="#dbeafe"
+                      ></rect>
+                      <line
+                        :x1="windowMarkerPositions(msg.data.model.windowOverview, 420).start"
+                        :x2="windowMarkerPositions(msg.data.model.windowOverview, 420).start"
+                        y1="0"
+                        y2="180"
+                        stroke="#dc2626"
+                        stroke-width="2"
+                        stroke-dasharray="4 4"
+                      ></line>
+                      <line
+                        :x1="windowMarkerPositions(msg.data.model.windowOverview, 420).end"
+                        :x2="windowMarkerPositions(msg.data.model.windowOverview, 420).end"
+                        y1="0"
+                        y2="180"
+                        stroke="#dc2626"
+                        stroke-width="2"
+                        stroke-dasharray="4 4"
+                      ></line>
+                      <path :d="buildTrendPath(msg.data.model.windowOverview.points, 'pv', 420, 180)" fill="none" stroke="#334155" stroke-width="2" stroke-linecap="round"></path>
+                    </svg>
+                    <div class="mt-2 flex justify-between text-[11px] text-slate-500">
+                      <span>{{ overallAxisStartLabel(msg.data) }}</span>
+                      <span>{{ overallAxisEndLabel(msg.data) }}</span>
+                    </div>
+                    <div class="mt-1 flex justify-between text-[11px] font-medium text-red-600">
+                      <span>窗口起点: {{ windowBoundaryStartLabel(msg.data) }}</span>
+                      <span>窗口终点: {{ windowBoundaryEndLabel(msg.data) }}</span>
+                    </div>
+                    <div class="mt-1 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] font-medium text-blue-900">
+                      选中窗口时间: {{ rangeLabel(msg.data.model.windowOverview.window_start_time, msg.data.model.windowOverview.window_end_time, msg.data.dataAnalysis?.selectedWindow?.start_index, msg.data.dataAnalysis?.selectedWindow?.end_index) }}
+                    </div>
+                  </div>
+                  <div v-if="msg.data.model.fitPreview && msg.data.model.fitPreview.points && msg.data.model.fitPreview.points.length > 1" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div class="mb-2 flex items-center justify-between">
+                      <div class="text-sm font-semibold text-slate-700">辨识窗口拟合对比</div>
+                      <div class="flex items-center gap-4 text-xs text-slate-500">
+                        <div class="flex items-center gap-1">
+                          <span class="inline-block h-2 w-2 rounded-full bg-blue-500"></span>
+                          <span>原始 PV</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <span class="inline-block h-2 w-2 rounded-full bg-emerald-500"></span>
+                          <span>拟合 PV</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="mb-2 flex items-center justify-between text-[11px]">
+                      <span class="rounded bg-slate-200 px-2 py-1 font-medium text-slate-700">Y轴: PV</span>
+                      <span class="rounded bg-emerald-100 px-2 py-1 font-medium text-emerald-800">窗口内原始PV vs 拟合PV</span>
+                    </div>
+                    <svg viewBox="0 0 420 180" class="h-48 w-full rounded bg-white">
+                      <path :d="buildTrendPath(msg.data.model.fitPreview.points, 'pv', 420, 180)" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round"></path>
+                      <path :d="buildTrendPath(msg.data.model.fitPreview.points, 'pv_fit', 420, 180)" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round"></path>
+                    </svg>
+                    <div class="mt-2 flex justify-between text-[11px] text-slate-500">
+                      <span>{{ axisStartLabel(msg.data.model.fitPreview) }}</span>
+                      <span>{{ axisEndLabel(msg.data.model.fitPreview) }}</span>
+                    </div>
+                  </div>
+                  <div class="mt-3 space-y-2 text-sm">
+                    <div v-if="msg.data.model.confidenceQuality || msg.data.model.confidenceRecommendation" class="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-semibold text-slate-700">模型质量</span>
+                        <span class="px-2 py-1 rounded-full text-xs font-bold"
+                          :class="msg.data.model.confidence >= 0.7 ? 'bg-green-100 text-green-700' : msg.data.model.confidence >= 0.5 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'">
+                          {{ msg.data.model.confidenceQuality || 'unknown' }}
+                        </span>
+                      </div>
+                      <div v-if="msg.data.model.confidenceRecommendation" class="mt-2 text-slate-600">
+                        {{ msg.data.model.confidenceRecommendation }}
+                      </div>
+                    </div>
+                    <div v-if="msg.data.model.reasonCodes && msg.data.model.reasonCodes.length" class="bg-amber-50 rounded-lg p-3 border border-amber-100">
+                      <div class="font-semibold text-slate-700 mb-2">低置信度原因</div>
+                      <div class="flex flex-wrap gap-2">
+                        <span v-for="reason in msg.data.model.reasonCodes" :key="reason" class="px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-mono">
+                          {{ reason }}
+                        </span>
+                      </div>
+                    </div>
+                    <div v-if="msg.data.model.nextActions && msg.data.model.nextActions.length" class="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
+                      <div class="font-semibold text-slate-700 mb-2">建议动作</div>
+                      <div class="flex flex-wrap gap-2">
+                        <span v-for="action in msg.data.model.nextActions" :key="action" class="px-2 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-mono">
+                          {{ action }}
+                        </span>
+                      </div>
+                    </div>
+                    <div v-if="msg.data.model.attempts && msg.data.model.attempts.length" class="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                      <div class="font-semibold text-slate-700 mb-2">辨识尝试记录</div>
+                      <div class="space-y-2">
+                        <div v-for="attempt in msg.data.model.attempts" :key="`${attempt.window_source}-${attempt.points}`" class="grid grid-cols-2 md:grid-cols-12 gap-2 text-xs bg-white rounded-lg p-2 border border-slate-200">
+                          <div>
+                            <div class="text-slate-500">窗口</div>
+                            <div class="font-mono text-slate-800">{{ attempt.window_source }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">点数</div>
+                            <div class="font-mono text-slate-800">{{ attempt.points }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">K</div>
+                            <div class="font-mono text-slate-800">{{ formatNumber(attempt.K, 3) }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">T</div>
+                            <div class="font-mono text-slate-800">{{ formatNumber(attempt.T, 3) }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">L</div>
+                            <div class="font-mono text-slate-800">{{ formatNumber(attempt.L, 3) }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">标准化RMSE</div>
+                            <div class="font-mono text-slate-800">{{ formatNumber(attempt.normalized_rmse, 4) }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">R²</div>
+                            <div class="font-mono text-slate-800">{{ formatNumber(attempt.r2_score, 4) }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">闭环分</div>
+                            <div class="font-mono text-slate-800">{{ formatNumber(attempt.benchmark_performance_score, 3) }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">策略</div>
+                            <div class="font-mono text-slate-800">{{ attempt.benchmark_strategy || '-' }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">置信度</div>
+                            <div class="font-mono text-slate-800">{{ formatPercent(attempt.confidence) }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">质量</div>
+                            <div class="font-mono text-slate-800">{{ attempt.confidence_quality }}</div>
+                          </div>
+                          <div>
+                            <div class="text-slate-500">选中</div>
+                            <div class="font-mono text-slate-800">{{ msg.data.model.selectedWindowSource === attempt.window_source ? 'yes' : 'no' }}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div v-if="msg.data.pidParams" class="bg-white rounded-xl p-4 border-2 border-purple-100 shadow-md">
                   <div class="font-bold text-slate-800 mb-3 flex items-center gap-2 text-base">
@@ -353,6 +535,111 @@
                     <div class="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-3 text-center">
                       <div class="text-slate-600 text-xs mb-1">微分 Kd</div>
                       <div class="font-mono font-bold text-purple-700 text-xl">{{ msg.data.pidParams.Kd.toFixed(4) }}</div>
+                    </div>
+                  </div>
+                  <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                    <div class="bg-purple-50 rounded-lg p-3 flex justify-between items-center">
+                      <span class="text-slate-600">策略选择</span>
+                      <span class="font-mono font-bold text-purple-700">{{ msg.data.pidParams.strategyRequested || 'AUTO' }}</span>
+                    </div>
+                    <div class="bg-purple-50 rounded-lg p-3 flex justify-between items-center">
+                      <span class="text-slate-600">实际执行策略</span>
+                      <span class="font-mono font-bold text-purple-700">{{ msg.data.pidParams.strategyUsed || msg.data.pidParams.strategy }}</span>
+                    </div>
+                  </div>
+                  <div v-if="msg.data.pidParams.loopType || msg.data.pidParams.selectionReason" class="mt-2 text-sm text-slate-700 bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-1">
+                    <div v-if="msg.data.pidParams.loopType">回路类型：{{ msg.data.pidParams.loopType }}</div>
+                    <div v-if="msg.data.pidParams.selectionReason">选择依据：{{ msg.data.pidParams.selectionReason }}</div>
+                  </div>
+                  <div v-if="msg.data.pidParams.selectionInputs && Object.keys(msg.data.pidParams.selectionInputs).length" class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                    <div class="text-sm font-semibold text-slate-700 mb-2">策略决策输入</div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                      <div class="bg-white rounded p-2 border border-slate-200">
+                        <div class="text-slate-500">model_confidence</div>
+                        <div class="font-mono text-slate-800">{{ formatNumber(msg.data.pidParams.selectionInputs.model_confidence, 4) }}</div>
+                      </div>
+                      <div class="bg-white rounded p-2 border border-slate-200">
+                        <div class="text-slate-500">normalized_rmse</div>
+                        <div class="font-mono text-slate-800">{{ formatNumber(msg.data.pidParams.selectionInputs.normalized_rmse, 4) }}</div>
+                      </div>
+                      <div class="bg-white rounded p-2 border border-slate-200">
+                        <div class="text-slate-500">r2_score</div>
+                        <div class="font-mono text-slate-800">{{ formatNumber(msg.data.pidParams.selectionInputs.r2_score, 4) }}</div>
+                      </div>
+                      <div class="bg-white rounded p-2 border border-slate-200">
+                        <div class="text-slate-500">tau_ratio</div>
+                        <div class="font-mono text-slate-800">{{ formatNumber(msg.data.pidParams.selectionInputs.tau_ratio, 4) }}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="msg.data.pidParams.candidateStrategies && msg.data.pidParams.candidateStrategies.length" class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                    <div class="text-sm font-semibold text-slate-700 mb-2">候选方法试算</div>
+                    <div class="space-y-2">
+                      <div v-for="candidate in msg.data.pidParams.candidateStrategies" :key="candidate.strategy" class="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs bg-white rounded-lg p-2 border border-slate-200">
+                        <div>
+                          <div class="text-slate-500">方法</div>
+                          <div class="font-mono text-slate-800">{{ candidate.strategy }}</div>
+                        </div>
+                        <div>
+                          <div class="text-slate-500">performance</div>
+                          <div class="font-mono text-slate-800">{{ formatNumber(candidate.performance_score, 3) }}</div>
+                        </div>
+                        <div>
+                          <div class="text-slate-500">final</div>
+                          <div class="font-mono text-slate-800">{{ formatNumber(candidate.final_rating, 3) }}</div>
+                        </div>
+                        <div>
+                          <div class="text-slate-500">Kp</div>
+                          <div class="font-mono text-slate-800">{{ formatNumber(candidate.Kp, 3) }}</div>
+                        </div>
+                        <div>
+                          <div class="text-slate-500">Ki</div>
+                          <div class="font-mono text-slate-800">{{ formatNumber(candidate.Ki, 3) }}</div>
+                        </div>
+                        <div>
+                          <div class="text-slate-500">稳定</div>
+                          <div class="font-mono text-slate-800">{{ candidate.is_stable ? '是' : '否' }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="msg.data.evaluation && msg.data.evaluation.initial_assessment && msg.data.evaluation.initial_assessment.evaluated_pid && msg.data.evaluation.auto_refine_result && msg.data.evaluation.auto_refine_result.applied" class="mt-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                    <div class="text-sm font-semibold text-emerald-900 mb-2">回流前后 PID 参数对比</div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                      <div class="rounded-lg border border-slate-200 bg-white p-3">
+                        <div class="mb-2 text-xs font-semibold text-slate-500">首次评估使用参数</div>
+                        <div class="grid grid-cols-3 gap-2">
+                          <div class="rounded bg-slate-50 p-2 text-center">
+                            <div class="text-[11px] text-slate-500">Kp</div>
+                            <div class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.evaluation.initial_assessment.evaluated_pid.Kp, 4) }}</div>
+                          </div>
+                          <div class="rounded bg-slate-50 p-2 text-center">
+                            <div class="text-[11px] text-slate-500">Ki</div>
+                            <div class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.evaluation.initial_assessment.evaluated_pid.Ki, 4) }}</div>
+                          </div>
+                          <div class="rounded bg-slate-50 p-2 text-center">
+                            <div class="text-[11px] text-slate-500">Kd</div>
+                            <div class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.evaluation.initial_assessment.evaluated_pid.Kd, 4) }}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="rounded-lg border border-emerald-200 bg-white p-3">
+                        <div class="mb-2 text-xs font-semibold text-emerald-600">自动回流后最终生效参数</div>
+                        <div class="grid grid-cols-3 gap-2">
+                          <div class="rounded bg-emerald-50 p-2 text-center">
+                            <div class="text-[11px] text-emerald-700">Kp</div>
+                            <div class="font-mono font-bold text-emerald-800">{{ formatNumber(msg.data.pidParams.Kp, 4) }}</div>
+                          </div>
+                          <div class="rounded bg-emerald-50 p-2 text-center">
+                            <div class="text-[11px] text-emerald-700">Ki</div>
+                            <div class="font-mono font-bold text-emerald-800">{{ formatNumber(msg.data.pidParams.Ki, 4) }}</div>
+                          </div>
+                          <div class="rounded bg-emerald-50 p-2 text-center">
+                            <div class="text-[11px] text-emerald-700">Kd</div>
+                            <div class="font-mono font-bold text-emerald-800">{{ formatNumber(msg.data.pidParams.Kd, 4) }}</div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -392,7 +679,7 @@
                     </div>
                     <div class="bg-orange-50 rounded-lg p-2 flex justify-between items-center">
                       <span class="text-slate-600 text-sm">使用策略</span>
-                      <span class="font-mono font-bold text-indigo-700 text-base">{{ msg.data.evaluation.strategy_used }}</span>
+                      <span class="font-mono font-bold text-indigo-700 text-base">{{ msg.data.evaluation.strategy_used || '-' }}</span>
                     </div>
                     <div class="mt-3 pt-3 border-t-2 border-orange-200 text-center">
                       <span v-if="msg.data.evaluation.passed" class="inline-flex items-center gap-2 text-green-700 font-bold text-base bg-green-100 px-4 py-2 rounded-lg">
@@ -401,6 +688,53 @@
                       <span v-else class="inline-flex items-center gap-2 text-red-700 font-bold text-base bg-red-100 px-4 py-2 rounded-lg">
                         ❌ 评估未通过
                       </span>
+                    </div>
+                    <div v-if="!msg.data.evaluation.passed && (msg.data.evaluation.failure_reason || msg.data.evaluation.feedback_target)" class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+                      <div class="font-semibold text-red-800">未通过主因</div>
+                      <div class="mt-1 text-red-700">{{ msg.data.evaluation.failure_reason || '-' }}</div>
+                      <div class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                        <div class="rounded bg-white p-2 border border-red-100">
+                          <div class="text-slate-500">建议回流智能体</div>
+                          <div class="font-mono text-slate-800">{{ msg.data.evaluation.feedback_target_display || msg.data.evaluation.feedback_target || '-' }}</div>
+                        </div>
+                        <div class="rounded bg-white p-2 border border-red-100">
+                          <div class="text-slate-500">通过阈值</div>
+                          <div class="font-mono text-slate-800">{{ formatNumber(msg.data.evaluation.pass_threshold, 2) }}</div>
+                        </div>
+                      </div>
+                      <div v-if="msg.data.evaluation.feedback_action" class="mt-2 text-red-800">
+                        建议动作: {{ msg.data.evaluation.feedback_action }}
+                      </div>
+                    </div>
+                    <div v-if="msg.data.evaluation.auto_refine_result && msg.data.evaluation.auto_refine_result.applied" class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
+                      <div class="font-semibold text-emerald-800">已自动回流 PID 专家细调一轮</div>
+                      <div class="mt-1 text-emerald-700">
+                        细调后参数: Kp={{ formatNumber(msg.data.evaluation.auto_refine_result.Kp, 4) }},
+                        Ki={{ formatNumber(msg.data.evaluation.auto_refine_result.Ki, 4) }},
+                        Kd={{ formatNumber(msg.data.evaluation.auto_refine_result.Kd, 4) }}
+                      </div>
+                      <div class="mt-1 text-emerald-700">
+                        细调后 performance={{ formatNumber(msg.data.evaluation.auto_refine_result.refined_performance_score, 2) }},
+                        final={{ formatNumber(msg.data.evaluation.auto_refine_result.refined_final_rating, 2) }}
+                      </div>
+                    </div>
+                    <div v-if="msg.data.evaluation.model_retry_result && msg.data.evaluation.model_retry_result.applied" class="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
+                      <div class="font-semibold text-blue-800">已自动回流系统辨识并切换候选窗口</div>
+                      <div class="mt-1 text-blue-700">
+                        新窗口: {{ msg.data.evaluation.model_retry_result.window_source }},
+                        新模型: K={{ formatNumber(msg.data.evaluation.model_retry_result.K, 3) }},
+                        T={{ formatNumber(msg.data.evaluation.model_retry_result.T, 3) }},
+                        L={{ formatNumber(msg.data.evaluation.model_retry_result.L, 3) }}
+                      </div>
+                      <div class="mt-1 text-blue-700">
+                        新参数: Kp={{ formatNumber(msg.data.evaluation.model_retry_result.Kp, 4) }},
+                        Ki={{ formatNumber(msg.data.evaluation.model_retry_result.Ki, 4) }},
+                        Kd={{ formatNumber(msg.data.evaluation.model_retry_result.Kd, 4) }}
+                      </div>
+                      <div class="mt-1 text-blue-700">
+                        performance={{ formatNumber(msg.data.evaluation.model_retry_result.performance_score, 2) }},
+                        final={{ formatNumber(msg.data.evaluation.model_retry_result.final_rating, 2) }}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -438,7 +772,7 @@
           startTime: '1772467200000',
           endTime: '1772553600000',
           controllerBrand: 'Siemens',
-          strategy: 'IMC',
+          loopType: 'flow',
           messageIdCounter: 0,
           compactMode: false,
           progressSteps: [
@@ -526,6 +860,52 @@
           }
         },
 
+        async consumeSSEStream(response) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+            let boundaryIndex = buffer.indexOf('\n\n');
+            while (boundaryIndex !== -1) {
+              const rawEvent = buffer.slice(0, boundaryIndex);
+              buffer = buffer.slice(boundaryIndex + 2);
+
+              const dataLines = rawEvent
+                .split('\n')
+                .filter(line => line.startsWith('data: '))
+                .map(line => line.substring(6));
+
+              if (dataLines.length) {
+                const payload = dataLines.join('\n');
+                const data = JSON.parse(payload);
+                this.handleSSEMessage(data);
+              }
+
+              boundaryIndex = buffer.indexOf('\n\n');
+            }
+
+            if (done) {
+              const trailing = buffer.trim();
+              if (trailing) {
+                const dataLines = trailing
+                  .split('\n')
+                  .filter(line => line.startsWith('data: '))
+                  .map(line => line.substring(6));
+                if (dataLines.length) {
+                  const payload = dataLines.join('\n');
+                  const data = JSON.parse(payload);
+                  this.handleSSEMessage(data);
+                }
+              }
+              break;
+            }
+          }
+        },
+
         async startTuning() {
           if (this.loading) return;
 
@@ -538,8 +918,8 @@
             this.addMessage({
               type: 'user',
               content: usingUploadedCsv
-                ? `为控制回路 ${this.loopName} 整定PID参数\n数据来源: 上传CSV\n控制器品牌: ${this.controllerBrand}\n整定策略: ${this.strategy}`
-                : `为控制回路 ${this.loopName} 整定PID参数\n数据来源: 历史数据\nloop_uri: ${this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b'}\nstart_time: ${this.startTime || '1772467200000'}\nend_time: ${this.endTime || '1772553600000'}\n控制器品牌: ${this.controllerBrand}\n整定策略: ${this.strategy}`,
+                ? `为控制回路 ${this.loopName} 整定PID参数\n数据来源: 上传CSV\n控制器品牌: ${this.controllerBrand}\n回路类型: ${this.loopType}`
+                : `为控制回路 ${this.loopName} 整定PID参数\n数据来源: 历史数据\nloop_uri: ${this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b'}\nstart_time: ${this.startTime || '1772467200000'}\nend_time: ${this.endTime || '1772553600000'}\n控制器品牌: ${this.controllerBrand}\n回路类型: ${this.loopType}`,
               file_name: usingUploadedCsv ? this.uploadedFile.name : null
             });
 
@@ -552,7 +932,7 @@
             formData.append('start_time', this.startTime || '1772467200000');
             formData.append('end_time', this.endTime || '1772553600000');
             formData.append('controller_brand', this.controllerBrand);
-            formData.append('strategy', this.strategy);
+            formData.append('loop_type', this.loopType);
 
             try {
               this.loadingMessage = '智能体正在协同处理...';
@@ -566,23 +946,7 @@
                 throw new Error(`HTTP error! status: ${response.status}`);
               }
 
-              const reader = response.body.getReader();
-              const decoder = new TextDecoder();
-
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
-
-                for (const line of lines) {
-                  if (line.startsWith('data: ')) {
-                    const data = JSON.parse(line.substring(6));
-                    this.handleSSEMessage(data);
-                  }
-                }
-              }
+              await this.consumeSSEStream(response);
             } catch (error) {
               console.error('Tuning failed:', error);
               this.addMessage({
@@ -603,7 +967,7 @@
           // 添加用户消息
           this.addMessage({
             type: 'user',
-            content: `请为控制回路 ${this.loopName} 整定PID参数\n控制器品牌: ${this.controllerBrand}\n整定策略: ${this.strategy}`,
+            content: `请为控制回路 ${this.loopName} 整定PID参数\n控制器品牌: ${this.controllerBrand}\n回路类型: ${this.loopType}`,
             file_name: this.uploadedFile.name
           });
 
@@ -611,7 +975,7 @@
           formData.append('file', this.uploadedFile);
           formData.append('loop_name', this.loopName);
           formData.append('controller_brand', this.controllerBrand);
-          formData.append('strategy', this.strategy);
+          formData.append('loop_type', this.loopType);
 
           try {
             this.loadingMessage = '智能体正在协同处理...';
@@ -625,23 +989,7 @@
               throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              const chunk = decoder.decode(value);
-              const lines = chunk.split('\n');
-
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  const data = JSON.parse(line.substring(6));
-                  this.handleSSEMessage(data);
-                }
-              }
-            }
+            await this.consumeSSEStream(response);
 
           } catch (error) {
             console.error('Tuning failed:', error);
@@ -729,16 +1077,141 @@
           return JSON.stringify(obj, null, 2);
         },
 
+        formatNumber(value, digits = 3) {
+          return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '-';
+        },
+
+        formatPercent(value, digits = 1) {
+          return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : '-';
+        },
+
+        buildTrendPath(points, key, width = 420, height = 180) {
+          if (!Array.isArray(points) || points.length < 2) return '';
+          const paddingX = 18;
+          const paddingY = 14;
+          const usableWidth = width - paddingX * 2;
+          const usableHeight = height - paddingY * 2;
+          const values = points
+            .map(point => Number(point[key]))
+            .filter(value => Number.isFinite(value));
+          if (!values.length) return '';
+
+          const minValue = Math.min(...values);
+          const maxValue = Math.max(...values);
+          const valueSpan = Math.max(maxValue - minValue, 1e-6);
+          const lastIndex = Math.max(points.length - 1, 1);
+
+          return points.map((point, idx) => {
+            const value = Number(point[key]);
+            if (!Number.isFinite(value)) {
+              return '';
+            }
+            const x = paddingX + (usableWidth * idx) / lastIndex;
+            const y = height - paddingY - ((value - minValue) / valueSpan) * usableHeight;
+            return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+          }).filter(Boolean).join(' ');
+        },
+
+        windowHighlightRect(overview, width = 420) {
+          const paddingX = 18;
+          const usableWidth = width - paddingX * 2;
+          const totalPoints = Math.max(Number(overview?.total_points) || 0, 1);
+          const windowStart = Math.max(Number(overview?.window_start) || 0, 0);
+          const windowEnd = Math.max(Number(overview?.window_end) || windowStart, windowStart);
+          const startRatio = windowStart / totalPoints;
+          const endRatio = windowEnd / totalPoints;
+          const x = paddingX + usableWidth * startRatio;
+          const rectWidth = Math.max(usableWidth * (endRatio - startRatio), 2);
+          return { x, width: rectWidth };
+        },
+
+        windowMarkerPositions(overview, width = 420) {
+          const paddingX = 18;
+          const usableWidth = width - paddingX * 2;
+          const totalPoints = Math.max(Number(overview?.total_points) || 1, 1);
+          const windowStart = Math.max(Number(overview?.window_start) || 0, 0);
+          const windowEnd = Math.max(Number(overview?.window_end) || windowStart, windowStart);
+          return {
+            start: paddingX + usableWidth * (windowStart / totalPoints),
+            end: paddingX + usableWidth * (windowEnd / totalPoints),
+          };
+        },
+
+        seriesMin(points, key) {
+          if (!Array.isArray(points) || !points.length) return null;
+          const values = points.map(point => Number(point[key])).filter(value => Number.isFinite(value));
+          return values.length ? Math.min(...values) : null;
+        },
+
+        seriesMax(points, key) {
+          if (!Array.isArray(points) || !points.length) return null;
+          const values = points.map(point => Number(point[key])).filter(value => Number.isFinite(value));
+          return values.length ? Math.max(...values) : null;
+        },
+
+        axisStartLabel(series) {
+          if (series?.x_axis === 'timestamp' && series?.start_time) {
+            return series.start_time;
+          }
+          return '起点';
+        },
+
+        axisEndLabel(series) {
+          if (series?.x_axis === 'timestamp' && series?.end_time) {
+            return series.end_time;
+          }
+          return '终点';
+        },
+
+        overallAxisStartLabel(data) {
+          const historyStart = data?.dataAnalysis?.historyRange?.startTime;
+          if (historyStart) return historyStart;
+          return this.axisStartLabel(data?.model?.windowOverview);
+        },
+
+        overallAxisEndLabel(data) {
+          const historyEnd = data?.dataAnalysis?.historyRange?.endTime;
+          if (historyEnd) return historyEnd;
+          return this.axisEndLabel(data?.model?.windowOverview);
+        },
+
+        windowBoundaryStartLabel(data) {
+          const overview = data?.model?.windowOverview;
+          return overview?.window_start_time || `索引 ${data?.dataAnalysis?.selectedWindow?.start_index ?? 0}`;
+        },
+
+        windowBoundaryEndLabel(data) {
+          const overview = data?.model?.windowOverview;
+          return overview?.window_end_time || `索引 ${data?.dataAnalysis?.selectedWindow?.end_index ?? 0}`;
+        },
+
+        rangeLabel(startTime, endTime, startIndex, endIndex) {
+          if (startTime && endTime) {
+            return `${startTime} -> ${endTime}`;
+          }
+          return `${startIndex ?? 0} -> ${endIndex ?? 0}`;
+        },
+
         copyResult(data) {
           const text = `PID参数整定结果\n\n` +
             `系统模型 (FOPDT):\n` +
             `  K = ${data.model?.K.toFixed(3)}\n` +
             `  T = ${data.model?.T.toFixed(2)}s\n` +
-            `  L = ${data.model?.L.toFixed(2)}s\n\n` +
+            `  L = ${data.model?.L.toFixed(2)}s\n` +
+            `  置信度 = ${this.formatPercent(data.model?.confidence)}\n` +
+            `  标准化RMSE = ${this.formatNumber(data.model?.normalizedRmse, 4)}\n` +
+            `  原始RMSE = ${this.formatNumber(data.model?.rawRmse, 4)}\n` +
+            `  R² = ${this.formatNumber(data.model?.r2Score, 4)}\n` +
+            `  原因 = ${(data.model?.reasonCodes || []).join(', ') || '无'}\n` +
+            `  建议动作 = ${(data.model?.nextActions || []).join(', ') || '无'}\n\n` +
             `PID参数:\n` +
             `  Kp = ${data.pidParams?.Kp.toFixed(4)}\n` +
             `  Ki = ${data.pidParams?.Ki.toFixed(4)}\n` +
-            `  Kd = ${data.pidParams?.Kd.toFixed(4)}\n\n` +
+            `  Kd = ${data.pidParams?.Kd.toFixed(4)}\n` +
+            `  策略选择 = ${data.pidParams?.strategyRequested || 'AUTO'}\n` +
+            `  实际策略 = ${data.pidParams?.strategyUsed || data.pidParams?.strategy}\n` +
+            `  回路类型 = ${data.pidParams?.loopType || '-'}\n\n` +
+            `${data.evaluation?.initial_assessment?.evaluated_pid && data.evaluation?.auto_refine_result?.applied ? `首次评估PID参数:\n  Kp = ${this.formatNumber(data.evaluation.initial_assessment.evaluated_pid.Kp, 4)}\n  Ki = ${this.formatNumber(data.evaluation.initial_assessment.evaluated_pid.Ki, 4)}\n  Kd = ${this.formatNumber(data.evaluation.initial_assessment.evaluated_pid.Kd, 4)}\n\n` : ''}` +
             `性能评分: ${data.evaluation?.performance_score.toFixed(2)}/10`;
 
           navigator.clipboard.writeText(text).then(() => {

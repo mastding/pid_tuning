@@ -19,6 +19,7 @@ DEFAULT_HISTORY_START_TIME = "1772467200000"
 # Use a valid default 1-day window ending exactly 24 hours after the default start.
 DEFAULT_HISTORY_END_TIME = "1772553600000"
 MAX_HISTORY_RANGE_MS = 24 * 60 * 60 * 1000
+LOCAL_TIMEZONE = "Asia/Shanghai"
 PID_COLUMN_ALIASES = {
     "timestamp": ["timestamp", "time", "datetime", "ts"],
     "SV": ["sv", "sp", "setpoint"],
@@ -142,7 +143,11 @@ def parse_timestamp_column(df: pd.DataFrame) -> pd.DataFrame:
     ts = df["timestamp"]
     if pd.api.types.is_numeric_dtype(ts):
         unit = "ms" if ts.dropna().abs().median() > 1e11 else "s"
-        df["timestamp"] = pd.to_datetime(ts, unit=unit, errors="coerce")
+        df["timestamp"] = (
+            pd.to_datetime(ts, unit=unit, errors="coerce", utc=True)
+            .dt.tz_convert(LOCAL_TIMEZONE)
+            .dt.tz_localize(None)
+        )
     else:
         df["timestamp"] = pd.to_datetime(ts, errors="coerce")
 
@@ -179,34 +184,95 @@ def clean_pid_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return cleaned
 
 
-def select_identification_window(df: pd.DataFrame, padding: int = 120) -> Tuple[pd.DataFrame, List[Dict], Dict | None]:
+def _adaptive_event_window(
+    df: pd.DataFrame,
+    event: Dict,
+    event_index: int,
+    total_events: int,
+) -> Dict:
+    n = len(df)
+    amplitude = abs(float(event.get("amplitude", 0.0)))
+    pre_padding = max(30, min(180, int(max(amplitude * 18, 60))))
+    max_post_padding = max(180, min(900, int(max(amplitude * 45, 240))))
+    settle_span = max(8, min(45, pre_padding // 3))
+
+    window_start = max(0, int(event["start_idx"]) - pre_padding)
+    search_limit = min(n, int(event["end_idx"]) + max_post_padding)
+
+    if event_index + 1 < total_events:
+        next_event = int(df.attrs.get("step_events", [])[event_index + 1]["start_idx"])
+        search_limit = min(search_limit, max(int(event["end_idx"]) + settle_span, next_event - pre_padding // 2))
+
+    sv_end = float(event.get("sv_end", df["SV"].iloc[min(n - 1, int(event["end_idx"]))])) if "SV" in df.columns else None
+    tolerance = max(0.05, amplitude * 0.05)
+    pv = df["PV"].to_numpy(dtype=float)
+
+    stable_end = None
+    if sv_end is not None:
+        for idx in range(int(event["end_idx"]), max(int(event["end_idx"]) + 1, search_limit - settle_span)):
+            tail = pv[idx: idx + settle_span]
+            if len(tail) < settle_span:
+                break
+            if np.max(np.abs(tail - sv_end)) <= tolerance and (np.max(tail) - np.min(tail)) <= tolerance:
+                stable_end = idx + settle_span
+                break
+
+    window_end = stable_end if stable_end is not None else search_limit
+    window_end = max(window_start + 20, min(n, int(window_end)))
+    return {
+        **event,
+        "window_start_idx": int(window_start),
+        "window_end_idx": int(window_end),
+    }
+
+
+def build_candidate_windows(df: pd.DataFrame) -> Tuple[List[Dict], Dict | None]:
     if len(df) < 10:
-        return df.copy(), [], None
+        return [], None
 
     if "SV" in df.columns and df["SV"].nunique(dropna=True) > 1:
         threshold = max(0.5, float(df["SV"].std(ddof=0) * 0.2))
         step_events = detect_step_events(df, threshold=threshold)
         if step_events:
-            best_event = max(step_events, key=lambda item: abs(item["amplitude"]))
-            start_idx = max(0, int(best_event["start_idx"]) - padding)
-            end_idx = min(len(df), int(best_event["end_idx"]) + padding)
-            return df.iloc[start_idx:end_idx].reset_index(drop=True), step_events, best_event
-        return df.copy(), [], None
+            df.attrs["step_events"] = step_events
+            candidate_windows = [
+                _adaptive_event_window(df, event, idx, len(step_events))
+                for idx, event in enumerate(step_events)
+            ]
+            best_event = max(candidate_windows, key=lambda item: abs(item["amplitude"]))
+            return candidate_windows, best_event
+        return [], None
 
     mv_diff = np.abs(np.diff(df["MV"].to_numpy()))
     if len(mv_diff) == 0:
-        return df.copy(), [], None
+        return [], None
 
     center = int(np.argmax(mv_diff))
+    padding = max(60, min(300, len(df) // 50))
     start_idx = max(0, center - padding)
     end_idx = min(len(df), center + padding)
     event = {
-        "start_idx": start_idx,
-        "end_idx": end_idx,
+        "start_idx": center,
+        "end_idx": min(len(df), center + 1),
+        "window_start_idx": start_idx,
+        "window_end_idx": end_idx,
         "amplitude": float(mv_diff[center]),
         "type": "mv_change",
     }
-    return df.iloc[start_idx:end_idx].reset_index(drop=True), [event], event
+    return [event], event
+
+
+def select_identification_window(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict], Dict | None, List[Dict]]:
+    candidate_windows, selected_event = build_candidate_windows(df)
+    if candidate_windows:
+        selected_event = selected_event or candidate_windows[0]
+        start_idx = int(selected_event["window_start_idx"])
+        end_idx = int(selected_event["window_end_idx"])
+        return df.iloc[start_idx:end_idx].reset_index(drop=True), candidate_windows, selected_event, candidate_windows
+
+    if len(df) < 20:
+        return df.copy(), [], None, []
+    return df.copy(), [], None, []
 
 
 def prepare_pid_dataset(csv_path: str) -> Dict:
@@ -219,7 +285,7 @@ def prepare_pid_dataset(csv_path: str) -> Dict:
         denoised_df["PV"] = adaptive_denoise(denoised_df["PV"].to_numpy(), noise_level="auto")
         denoised_df["MV"] = adaptive_denoise(denoised_df["MV"].to_numpy(), noise_level="low")
 
-    window_df, step_events, selected_event = select_identification_window(denoised_df)
+    window_df, step_events, selected_event, candidate_windows = select_identification_window(denoised_df)
     if len(window_df) < 20:
         window_df = denoised_df.copy().reset_index(drop=True)
         selected_event = None
@@ -245,6 +311,7 @@ def prepare_pid_dataset(csv_path: str) -> Dict:
         "dt": dt,
         "step_events": step_events,
         "selected_event": selected_event,
+        "candidate_windows": candidate_windows,
         "quality_metrics": quality_metrics,
     }
 
