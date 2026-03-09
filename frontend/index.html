@@ -208,6 +208,10 @@
                 :class="getAgentBgClass(msg.agent)"
                 @click="toggleCollapse(msg.id)">
                 <div class="flex items-center gap-3">
+                  <span class="text-xs px-2.5 py-1 rounded-full font-medium"
+                    :class="msg.collapsed ? 'bg-slate-200 text-slate-600' : 'bg-slate-700 text-white'">
+                    {{ msg.collapsed ? '宸叉姌鍙?' : '宸插睍寮€' }}
+                  </span>
                   <span class="text-3xl">{{ getAgentIcon(msg.agent) }}</span>
                   <div>
                     <span class="font-bold text-base" :class="getAgentTextClass(msg.agent)">{{ msg.agent }}</span>
@@ -304,17 +308,19 @@
 
           <!-- 结果 -->
           <div v-else-if="msg.type === 'result'" class="flex justify-start">
-            <div class="w-full rounded-2xl bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 border-2 border-emerald-300 px-6 py-5 shadow-2xl">
-              <div class="flex items-center justify-between mb-4">
+            <div class="w-full rounded-xl overflow-hidden shadow-lg bg-white border-2 border-emerald-300">
+              <div class="px-5 py-4 flex items-center justify-between cursor-pointer hover:bg-emerald-50 transition-colors bg-gradient-to-r from-emerald-50 to-cyan-50"
+                @click="toggleCollapse(msg.id)">
                 <div class="flex items-center gap-3">
                   <span class="text-3xl">🎉</span>
                   <span class="font-bold text-emerald-900 text-xl">整定完成</span>
                 </div>
-                <button @click="copyResult(msg.data)" class="px-4 py-2 bg-white text-emerald-700 rounded-lg hover:bg-emerald-50 border border-emerald-300 text-sm font-semibold transition-all shadow-sm">
+                <button @click.stop="copyResult(msg.data)" class="px-4 py-2 bg-white text-emerald-700 rounded-lg hover:bg-emerald-50 border border-emerald-300 text-sm font-semibold transition-all shadow-sm">
                   📋 复制参数
                 </button>
+                <span class="text-slate-600 text-xl font-bold">{{ msg.collapsed ? '鈻?' : '鈻?' }}</span>
               </div>
-              <div class="space-y-3">
+              <div v-if="!msg.collapsed" class="p-5 space-y-3 bg-slate-50">
                 <div v-if="msg.data.model" class="bg-white rounded-xl p-4 border-2 border-blue-100 shadow-md">
                   <div class="font-bold text-slate-800 mb-3 flex items-center gap-2 text-base">
                     <span>🔬</span><span>系统模型 (FOPDT)</span>
@@ -351,7 +357,7 @@
                       <span class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.model.r2Score, 4) }}</span>
                     </div>
                   </div>
-                  <div v-if="msg.data.model.windowOverview && msg.data.model.windowOverview.points && msg.data.model.windowOverview.points.length > 1" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div v-if="false && msg.data.model.windowOverview && msg.data.model.windowOverview.points && msg.data.model.windowOverview.points.length > 1" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
                     <div class="mb-2 flex items-center justify-between">
                       <div class="text-sm font-semibold text-slate-700">辨识窗口位置</div>
                       <div class="text-xs text-slate-500">
@@ -406,7 +412,7 @@
                       选中窗口时间: {{ rangeLabel(msg.data.model.windowOverview.window_start_time, msg.data.model.windowOverview.window_end_time, msg.data.dataAnalysis?.selectedWindow?.start_index, msg.data.dataAnalysis?.selectedWindow?.end_index) }}
                     </div>
                   </div>
-                  <div v-if="msg.data.model.fitPreview && msg.data.model.fitPreview.points && msg.data.model.fitPreview.points.length > 1" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div v-if="false && msg.data.model.fitPreview && msg.data.model.fitPreview.points && msg.data.model.fitPreview.points.length > 1" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
                     <div class="mb-2 flex items-center justify-between">
                       <div class="text-sm font-semibold text-slate-700">辨识窗口拟合对比</div>
                       <div class="flex items-center gap-4 text-xs text-slate-500">
@@ -462,7 +468,7 @@
                         </span>
                       </div>
                     </div>
-                    <div v-if="msg.data.model.attempts && msg.data.model.attempts.length" class="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                    <div v-if="false && msg.data.model.attempts && msg.data.model.attempts.length" class="bg-slate-50 rounded-lg p-3 border border-slate-200">
                       <div class="font-semibold text-slate-700 mb-2">辨识尝试记录</div>
                       <div class="space-y-2">
                         <div v-for="attempt in msg.data.model.attempts" :key="`${attempt.window_source}-${attempt.points}`" class="grid grid-cols-2 md:grid-cols-12 gap-2 text-xs bg-white rounded-lg p-2 border border-slate-200">
@@ -572,7 +578,7 @@
                       </div>
                     </div>
                   </div>
-                  <div v-if="msg.data.pidParams.candidateStrategies && msg.data.pidParams.candidateStrategies.length" class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <div v-if="false && msg.data.pidParams.candidateStrategies && msg.data.pidParams.candidateStrategies.length" class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
                     <div class="text-sm font-semibold text-slate-700 mb-2">候选方法试算</div>
                     <div class="space-y-2">
                       <div v-for="candidate in msg.data.pidParams.candidateStrategies" :key="candidate.strategy" class="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs bg-white rounded-lg p-2 border border-slate-200">
@@ -1044,7 +1050,8 @@
           } else if (data.type === 'result') {
             this.addMessage({
               type: 'result',
-              data: data.data
+              data: data.data,
+              collapsed: false
             });
           } else if (data.type === 'error') {
             this.addMessage({
