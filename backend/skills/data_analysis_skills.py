@@ -1,12 +1,252 @@
 """
 数据分析智能体的Skills
 """
-import pandas as pd
+import os
+import tempfile
+from typing import Dict, List, Tuple
+
 import numpy as np
+import pandas as pd
+import requests
 from scipy import signal
 from scipy.interpolate import interp1d
-import ruptures as rpt
-from typing import Dict, List, Tuple
+
+
+HISTORY_DATA_EXPORT_URL = "http://holli-pid-agent.hollysys-project.sit-cloud.ieccloud.hollicube.com/api/data_query/export-history-data-csv"
+DEFAULT_LOOP_URI = "/pid_zd/5989fb05a2ce4828a7ae36c682906f2b"
+DEFAULT_HISTORY_START_TIME = "1772467200000"
+# The user-provided 1771718400 is earlier than the requested start time once normalized.
+# Use a valid default 1-day window ending exactly 24 hours after the default start.
+DEFAULT_HISTORY_END_TIME = "1772553600000"
+MAX_HISTORY_RANGE_MS = 24 * 60 * 60 * 1000
+PID_COLUMN_ALIASES = {
+    "timestamp": ["timestamp", "time", "datetime", "ts"],
+    "SV": ["sv", "sp", "setpoint"],
+    "PV": ["pv", "cv", "process_value"],
+    "MV": ["mv", "op", "output", "manipulated_value"],
+}
+MAX_DENOISE_POINTS = 200000
+
+
+def _median_abs(values: np.ndarray) -> float:
+    if values.size == 0:
+        return 0.0
+    return float(np.median(np.abs(values - np.median(values))))
+
+
+def _normalize_time_value(value: str | None, *, fallback: str) -> str:
+    if value is None:
+        return fallback
+
+    text = str(value).strip()
+    if not text:
+        return fallback
+
+    return text
+
+
+def _parse_time_to_ms(value: str) -> int:
+    text = str(value).strip()
+    if text.isdigit():
+        if len(text) <= 10:
+            return int(text) * 1000
+        return int(text)
+
+    parsed = pd.to_datetime(text)
+    if pd.isna(parsed):
+        raise ValueError(f"Invalid time value: {value}")
+    return int(parsed.timestamp() * 1000)
+
+
+def fetch_history_data_csv(
+    loop_uri: str = DEFAULT_LOOP_URI,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    data_type: str = "interpolated",
+    timeout: int = 60,
+) -> Dict:
+    """
+    Skill 0: 调用外部历史数据接口并保存为本地 CSV
+    """
+    normalized_start_time = _normalize_time_value(start_time, fallback=DEFAULT_HISTORY_START_TIME)
+    normalized_end_time = _normalize_time_value(end_time, fallback=DEFAULT_HISTORY_END_TIME)
+    normalized_data_type = (data_type or "interpolated").strip().lower()
+
+    if normalized_data_type not in {"raw", "interpolated"}:
+        raise ValueError("data_type must be 'raw' or 'interpolated'")
+
+    start_ms = _parse_time_to_ms(normalized_start_time)
+    end_ms = _parse_time_to_ms(normalized_end_time)
+
+    if end_ms <= start_ms:
+        raise ValueError(
+            f"Invalid history range: end_time must be later than start_time. "
+            f"Received start_time={normalized_start_time}, end_time={normalized_end_time}"
+        )
+
+    if end_ms - start_ms > MAX_HISTORY_RANGE_MS:
+        raise ValueError(
+            "Invalid history range: each request can fetch at most 1 day of data."
+        )
+
+    params = {
+        "loop_uri": loop_uri or DEFAULT_LOOP_URI,
+        "start_time": str(start_ms),
+        "end_time": str(end_ms),
+        "data_type": normalized_data_type,
+    }
+
+    response = requests.get(HISTORY_DATA_EXPORT_URL, params=params, timeout=timeout)
+    response.raise_for_status()
+
+    content_type = response.headers.get("Content-Type", "")
+    if "text/csv" not in content_type and "application/octet-stream" not in content_type:
+        preview = response.text[:300]
+        if "," not in preview:
+            raise ValueError(f"Unexpected response content type: {content_type}, body preview: {preview}")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
+        tmp_file.write(response.content)
+        csv_path = tmp_file.name
+
+    return {
+        "csv_path": csv_path,
+        "loop_uri": params["loop_uri"],
+        "start_time": normalized_start_time,
+        "end_time": normalized_end_time,
+        "data_type": normalized_data_type,
+        "file_size": os.path.getsize(csv_path),
+        "status": "历史数据已下载为本地CSV",
+    }
+
+
+def normalize_pid_columns(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map: Dict[str, str] = {}
+    lowered = {col.lower(): col for col in df.columns}
+    for standard_name, aliases in PID_COLUMN_ALIASES.items():
+        for alias in aliases:
+            if alias in lowered:
+                rename_map[lowered[alias]] = standard_name
+                break
+
+    normalized = df.rename(columns=rename_map).copy()
+    if "PV" not in normalized.columns or "MV" not in normalized.columns:
+        raise ValueError("CSV must contain MV/PV columns or equivalent aliases")
+    return normalized
+
+
+def parse_timestamp_column(df: pd.DataFrame) -> pd.DataFrame:
+    if "timestamp" not in df.columns:
+        return df
+
+    ts = df["timestamp"]
+    if pd.api.types.is_numeric_dtype(ts):
+        unit = "ms" if ts.dropna().abs().median() > 1e11 else "s"
+        df["timestamp"] = pd.to_datetime(ts, unit=unit, errors="coerce")
+    else:
+        df["timestamp"] = pd.to_datetime(ts, errors="coerce")
+
+    return df.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+
+
+def estimate_sampling_time(df: pd.DataFrame, fallback: float = 1.0) -> float:
+    if "timestamp" not in df.columns or len(df) < 2:
+        return fallback
+
+    deltas = df["timestamp"].diff().dt.total_seconds().dropna()
+    deltas = deltas[deltas > 0]
+    if deltas.empty:
+        return fallback
+    return float(deltas.median())
+
+
+def clean_pid_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    cleaned = normalize_pid_columns(df)
+    cleaned = parse_timestamp_column(cleaned)
+
+    numeric_cols = [col for col in ["SV", "PV", "MV"] if col in cleaned.columns]
+    for col in numeric_cols:
+        cleaned[col] = pd.to_numeric(cleaned[col], errors="coerce")
+
+    cleaned = cleaned.dropna(subset=["PV", "MV"]).reset_index(drop=True)
+    if cleaned.empty:
+        raise ValueError("No valid MV/PV rows after cleaning")
+
+    if numeric_cols:
+        cleaned[numeric_cols] = cleaned[numeric_cols].interpolate(limit_direction="both")
+        cleaned[numeric_cols] = cleaned[numeric_cols].ffill().bfill()
+
+    return cleaned
+
+
+def select_identification_window(df: pd.DataFrame, padding: int = 120) -> Tuple[pd.DataFrame, List[Dict], Dict | None]:
+    if len(df) < 10:
+        return df.copy(), [], None
+
+    if "SV" in df.columns and df["SV"].nunique(dropna=True) > 1:
+        threshold = max(0.5, float(df["SV"].std(ddof=0) * 0.2))
+        step_events = detect_step_events(df, threshold=threshold)
+        if step_events:
+            best_event = max(step_events, key=lambda item: abs(item["amplitude"]))
+            start_idx = max(0, int(best_event["start_idx"]) - padding)
+            end_idx = min(len(df), int(best_event["end_idx"]) + padding)
+            return df.iloc[start_idx:end_idx].reset_index(drop=True), step_events, best_event
+        return df.copy(), [], None
+
+    mv_diff = np.abs(np.diff(df["MV"].to_numpy()))
+    if len(mv_diff) == 0:
+        return df.copy(), [], None
+
+    center = int(np.argmax(mv_diff))
+    start_idx = max(0, center - padding)
+    end_idx = min(len(df), center + padding)
+    event = {
+        "start_idx": start_idx,
+        "end_idx": end_idx,
+        "amplitude": float(mv_diff[center]),
+        "type": "mv_change",
+    }
+    return df.iloc[start_idx:end_idx].reset_index(drop=True), [event], event
+
+
+def prepare_pid_dataset(csv_path: str) -> Dict:
+    raw_df = pd.read_csv(csv_path)
+    cleaned_df = clean_pid_dataframe(raw_df)
+    dt = estimate_sampling_time(cleaned_df)
+
+    denoised_df = cleaned_df.copy()
+    if len(denoised_df) >= 25:
+        denoised_df["PV"] = adaptive_denoise(denoised_df["PV"].to_numpy(), noise_level="auto")
+        denoised_df["MV"] = adaptive_denoise(denoised_df["MV"].to_numpy(), noise_level="low")
+
+    window_df, step_events, selected_event = select_identification_window(denoised_df)
+    if len(window_df) < 20:
+        window_df = denoised_df.copy().reset_index(drop=True)
+        selected_event = None
+
+    quality_metrics = None
+    if selected_event and "SV" in window_df.columns and selected_event.get("type") in {"step_up", "step_down"}:
+        quality_metrics = assess_control_quality(
+            window_df,
+            {
+                "start_idx": 0,
+                "end_idx": len(window_df),
+                "amplitude": selected_event["amplitude"],
+                "sv_start": selected_event.get("sv_start", float(window_df["SV"].iloc[0])),
+                "sv_end": selected_event.get("sv_end", float(window_df["SV"].iloc[-1])),
+                "type": selected_event["type"],
+            },
+        )
+
+    return {
+        "raw_df": raw_df,
+        "cleaned_df": denoised_df,
+        "window_df": window_df,
+        "dt": dt,
+        "step_events": step_events,
+        "selected_event": selected_event,
+        "quality_metrics": quality_metrics,
+    }
 
 
 def load_and_slice_data(csv_path: str, max_pv_change: bool = True) -> pd.DataFrame:
@@ -65,34 +305,56 @@ def detect_step_events(df: pd.DataFrame, threshold: float = 0.5) -> List[Dict]:
     Returns:
         List of step events with start_idx, end_idx, amplitude
     """
-    # 计算SV的一阶差分
-    sv_diff = np.diff(df['SV'].values)
-    
-    # 使用ruptures库检测变点
-    algo = rpt.Pelt(model="rbf").fit(df['SV'].values)
-    change_points = algo.predict(pen=10)
-    
+    sv = df["SV"].to_numpy(dtype=float)
+    if sv.size < 4:
+        return []
+
+    sv_diff = np.diff(sv)
+    robust_noise = _median_abs(sv_diff)
+    diff_threshold = max(float(threshold), robust_noise * 6.0, 1e-6)
+    candidate_indices = np.where(np.abs(sv_diff) >= diff_threshold)[0] + 1
+    if candidate_indices.size == 0:
+        return []
+
+    merge_gap = max(3, min(20, len(df) // 200))
+    window = max(3, min(30, len(df) // 100))
+
+    grouped_events: List[List[int]] = []
+    current_group = [int(candidate_indices[0])]
+    for idx in candidate_indices[1:]:
+        if int(idx) - current_group[-1] <= merge_gap:
+            current_group.append(int(idx))
+        else:
+            grouped_events.append(current_group)
+            current_group = [int(idx)]
+    grouped_events.append(current_group)
+
     step_events = []
-    
-    for i in range(len(change_points) - 1):
-        start_idx = change_points[i] if i == 0 else change_points[i-1]
-        end_idx = change_points[i]
-        
-        # 计算该段的SV变化幅值
-        sv_start = df['SV'].iloc[start_idx]
-        sv_end = df['SV'].iloc[end_idx-1] if end_idx < len(df) else df['SV'].iloc[-1]
+    for group in grouped_events:
+        center = int(round(sum(group) / len(group)))
+        pre_start = max(0, center - window)
+        pre_end = max(pre_start + 1, center)
+        post_start = min(len(df) - 1, center)
+        post_end = min(len(df), center + window)
+
+        sv_start = float(np.median(sv[pre_start:pre_end]))
+        sv_end = float(np.median(sv[post_start:post_end]))
         amplitude = abs(sv_end - sv_start)
-        
-        if amplitude > threshold:
-            step_events.append({
-                'start_idx': start_idx,
-                'end_idx': end_idx,
-                'amplitude': amplitude,
-                'sv_start': sv_start,
-                'sv_end': sv_end,
-                'type': 'step_up' if sv_end > sv_start else 'step_down'
-            })
-    
+
+        if amplitude < threshold:
+            continue
+
+        event_start = max(0, center - merge_gap)
+        event_end = min(len(df), center + merge_gap + 1)
+        step_events.append({
+            "start_idx": int(event_start),
+            "end_idx": int(event_end),
+            "amplitude": float(amplitude),
+            "sv_start": sv_start,
+            "sv_end": sv_end,
+            "type": "step_up" if sv_end > sv_start else "step_down",
+        })
+
     return step_events
 
 
@@ -124,10 +386,10 @@ def assess_control_quality(df: pd.DataFrame, step_event: Dict) -> Dict:
         dt = 1.0
     
     # IAE: 积分绝对误差
-    iae = np.trapz(np.abs(error), dx=dt)
+    iae = np.trapezoid(np.abs(error), dx=dt)
     
     # ISE: 积分平方误差
-    ise = np.trapz(error**2, dx=dt)
+    ise = np.trapezoid(error**2, dx=dt)
     
     # 超调量
     sv_final = step_event['sv_end']
@@ -186,12 +448,16 @@ def adaptive_denoise(signal_data: np.ndarray, noise_level: str = 'auto') -> np.n
     Returns:
         去噪后的信号
     """
+    signal_data = np.asarray(signal_data, dtype=float)
+    if signal_data.size > MAX_DENOISE_POINTS:
+        return signal_data
+
     if noise_level == 'auto':
         # 自动检测噪声水平
         diff = np.diff(signal_data)
         noise_std = np.std(diff)
         signal_std = np.std(signal_data)
-        noise_ratio = noise_std / signal_std
+        noise_ratio = noise_std / signal_std if signal_std > 1e-9 else 0.0
         
         if noise_ratio < 0.05:
             noise_level = 'low'
