@@ -42,18 +42,20 @@ def build_agent_response(
         )
 
     if agent_name == display_agent_names["system_id_expert"]:
-        extra = ""
+        extra_parts: List[str] = []
         reason_codes = latest_result.get("reason_codes", [])
         if isinstance(reason_codes, list) and reason_codes:
-            extra = f" 风险提示：{', '.join(reason_codes)}。"
+            extra_parts.append(f"风险提示：{', '.join(reason_codes)}。")
         next_actions = latest_result.get("next_actions", [])
         if isinstance(next_actions, list) and next_actions:
-            extra += f" 建议动作：{', '.join(next_actions)}。"
+            extra_parts.append(f"建议动作：{', '.join(next_actions)}。")
+        extra = f" {' '.join(extra_parts)}" if extra_parts else ""
         return (
             f"FOPDT 模型辨识完成，得到 K={_format_float(latest_result.get('K'))}，"
             f"T={_format_float(latest_result.get('T'))}，L={_format_float(latest_result.get('L'))}，"
             f"标准化 RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}，"
-            f"R² {_format_float(latest_result.get('r2_score'), 3)}，模型置信度 {_format_float(latest_result.get('confidence'), 2)}。{extra}"
+            f"R² {_format_float(latest_result.get('r2_score'), 3)}，模型置信度 {_format_float(latest_result.get('confidence'), 2)}。"
+            f"{extra}"
         )
 
     if agent_name == display_agent_names["pid_expert"]:
@@ -65,7 +67,7 @@ def build_agent_response(
             tune_result = latest_result if latest_tool_name == "tool_tune_pid" else {}
 
         response = (
-            f"已按 {tune_result.get('strategy_used', tune_result.get('strategy', '当前'))} 策略完成整定，"
+            f"已按 {tune_result.get('strategy_used', tune_result.get('strategy', '当前策略'))} 策略完成整定，"
             f"Kp={_format_float(tune_result.get('Kp'))}，Ki={_format_float(tune_result.get('Ki'))}，"
             f"Kd={_format_float(tune_result.get('Kd'))}。"
         )
@@ -105,6 +107,7 @@ def finalize_agent_turn(
         current_turn_data.get("tools", []),
         display_agent_names=display_agent_names,
     )
+
     latest_result = None
     for tool in reversed(current_turn_data.get("tools", [])):
         if isinstance(tool.get("result"), dict):
@@ -119,6 +122,7 @@ def finalize_agent_turn(
     if force_generated:
         current_turn_data["response"] = generated or existing_response
         return current_turn_data
+
     if not existing_response or existing_response in {"完成", "APPROVE"}:
         current_turn_data["response"] = generated or existing_response
     elif generated and len(existing_response) < 12:
@@ -138,6 +142,7 @@ def build_feedback_turns(
         return []
 
     turns: List[Dict[str, Any]] = []
+
     auto_refine_result = shared_data.get("auto_refine_result") or {}
     if auto_refine_result.get("applied"):
         selection_inputs = shared_data.get("selection_inputs") or {}

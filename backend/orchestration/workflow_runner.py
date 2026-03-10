@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import asyncio
+import json
 from typing import Any, AsyncGenerator, Callable, Dict
 
 from autogen_agentchat.base import TaskResult
@@ -15,13 +17,75 @@ from autogen_agentchat.messages import (
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_core import CancellationToken
 
+from orchestration.constants import DISPLAY_AGENT_NAMES
 
-DISPLAY_AGENT_NAMES = {
-    "data_analyst": "数据分析智能体",
-    "system_id_expert": "系统辨识智能体",
-    "pid_expert": "PID专家智能体",
-    "evaluation_expert": "评估智能体",
-}
+
+def _build_task_message(
+    *,
+    csv_path: str,
+    loop_name: str,
+    loop_type: str,
+    loop_uri: str,
+    start_time: str,
+    end_time: str,
+) -> str:
+    data_source = "上传CSV" if csv_path else "获取历史数据"
+    display_start = start_time or "使用默认开始时间"
+    display_end = end_time or "使用默认结束时间"
+    return (
+        f"请为控制回路 {loop_name} 整定 PID 参数。\n"
+        f"数据来源: {data_source}\n"
+        f"loop_uri: {loop_uri}\n"
+        f"start_time: {display_start}\n"
+        f"end_time: {display_end}\n"
+        f"回路类型: {loop_type}\n\n"
+        "请按以下顺序协作完成：\n"
+        "1. 数据分析智能体：加载和分析数据\n"
+        "2. 系统辨识智能体：拟合 FOPDT 模型\n"
+        "3. PID专家智能体：计算 PID 参数\n"
+        "4. 评估智能体：评估整定质量\n\n"
+        "每个智能体完成任务后，请明确交接给下一位智能体。"
+    )
+
+
+def _parse_tool_result(content: Any) -> Dict[str, Any]:
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, str):
+        try:
+            return json.loads(content)
+        except Exception:
+            return ast.literal_eval(content)
+    return {"result": str(content)}
+
+
+def _build_display_result(
+    result_data: Dict[str, Any],
+    *,
+    current_tool_name: str,
+) -> Dict[str, Any]:
+    if current_tool_name == "tool_evaluate_pid" and result_data.get("initial_assessment"):
+        initial_assessment = result_data.get("initial_assessment") or {}
+        initial_eval_result = initial_assessment.get("evaluation_result") or {}
+        return {
+            "passed": initial_assessment.get("passed", False),
+            "pass_threshold": initial_assessment.get("pass_threshold", result_data.get("pass_threshold", 7.0)),
+            "performance_score": initial_eval_result.get("performance_score", 0.0),
+            "method_confidence": initial_eval_result.get("method_confidence", 0.0),
+            "final_rating": initial_eval_result.get("final_rating", 0.0),
+            "failure_reason": initial_assessment.get("failure_reason", ""),
+            "feedback_target": initial_assessment.get("feedback_target", ""),
+            "feedback_action": initial_assessment.get("feedback_action", ""),
+            "evaluated_pid": initial_assessment.get("evaluated_pid", {}),
+        }
+
+    display_result: Dict[str, Any] = {}
+    for key, value in result_data.items():
+        if key in {"mv", "pv"} and isinstance(value, list):
+            display_result[key] = f"[数组长度: {len(value)}]"
+        else:
+            display_result[key] = value
+    return display_result
 
 
 async def run_multi_agent_collaboration(
@@ -62,21 +126,14 @@ async def run_multi_agent_collaboration(
 
     termination = TextMentionTermination("APPROVE") | MaxMessageTermination(12)
     team = RoundRobinGroupChat(participants=agents, termination_condition=termination)
-
-    task_message = f"""请为控制回路 {loop_name} 整定 PID 参数。
-数据来源: {'上传CSV' if csv_path else '历史数据'}
-loop_uri: {loop_uri}
-start_time: {start_time or '默认最近24小时'}
-end_time: {end_time or '当前时间'}
-回路类型: {loop_type}
-
-请按以下顺序协作完成：
-1. 数据分析智能体：加载和分析数据
-2. 系统辨识智能体：拟合 FOPDT 模型
-3. PID 专家智能体：计算 PID 参数
-4. 评估智能体：评估整定质量
-
-每个智能体完成任务后，请明确告知下一个智能体继续工作。"""
+    task_message = _build_task_message(
+        csv_path=csv_path,
+        loop_name=loop_name,
+        loop_type=loop_type,
+        loop_uri=loop_uri,
+        start_time=start_time,
+        end_time=end_time,
+    )
 
     yield {
         "type": "user",
@@ -112,96 +169,66 @@ end_time: {end_time or '当前时间'}
                     last_agent = event_agent
                     current_agent = event_agent
 
-                for tc in event.content:
-                    tool_call = {
-                        "tool_name": tc.name,
-                        "args": tc.arguments,
-                        "result": None,
-                    }
-                    if current_turn_data:
-                        current_turn_data["tools"].append(tool_call)
+                for tool_call in event.content:
+                    if current_turn_data is not None:
+                        current_turn_data["tools"].append(
+                            {
+                                "tool_name": tool_call.name,
+                                "args": tool_call.arguments,
+                                "result": None,
+                            }
+                        )
+                continue
 
-            elif isinstance(event, ToolCallExecutionEvent):
-                for res in event.content:
+            if isinstance(event, ToolCallExecutionEvent):
+                for tool_result in event.content:
                     try:
-                        if isinstance(res.content, dict):
-                            result_data = res.content
-                        elif isinstance(res.content, str):
-                            try:
-                                import json
-
-                                result_data = json.loads(res.content)
-                            except Exception:
-                                import ast
-
-                                result_data = ast.literal_eval(res.content)
-                        else:
-                            result_data = {"result": str(res.content)}
-
+                        result_data = _parse_tool_result(tool_result.content)
                         if isinstance(result_data, dict):
                             shared_data.update(result_data)
 
-                        display_result: Dict[str, Any]
-                        if isinstance(result_data, dict):
-                            current_tool_name = ""
-                            if current_turn_data and current_turn_data["tools"]:
-                                current_tool_name = current_turn_data["tools"][-1].get("tool_name", "")
+                        current_tool_name = ""
+                        if current_turn_data and current_turn_data["tools"]:
+                            current_tool_name = current_turn_data["tools"][-1].get("tool_name", "")
 
-                            if current_tool_name == "tool_evaluate_pid" and result_data.get("initial_assessment"):
-                                initial_assessment = result_data.get("initial_assessment") or {}
-                                initial_eval_result = initial_assessment.get("evaluation_result") or {}
-                                display_result = {
-                                    "passed": initial_assessment.get("passed", False),
-                                    "pass_threshold": initial_assessment.get("pass_threshold", result_data.get("pass_threshold", 7.0)),
-                                    "performance_score": initial_eval_result.get("performance_score", 0.0),
-                                    "method_confidence": initial_eval_result.get("method_confidence", 0.0),
-                                    "final_rating": initial_eval_result.get("final_rating", 0.0),
-                                    "failure_reason": initial_assessment.get("failure_reason", ""),
-                                    "feedback_target": initial_assessment.get("feedback_target", ""),
-                                    "feedback_action": initial_assessment.get("feedback_action", ""),
-                                    "evaluated_pid": initial_assessment.get("evaluated_pid", {}),
-                                }
-                            else:
-                                display_result = {}
-                                for key, value in result_data.items():
-                                    if key in ["mv", "pv"] and isinstance(value, list):
-                                        display_result[key] = f"[数组长度: {len(value)}]"
-                                    else:
-                                        display_result[key] = value
-                        else:
-                            display_result = {"result": str(result_data)}
-
+                        display_result = _build_display_result(
+                            result_data if isinstance(result_data, dict) else {"result": str(result_data)},
+                            current_tool_name=current_tool_name,
+                        )
                         if current_turn_data and current_turn_data["tools"]:
                             current_turn_data["tools"][-1]["result"] = display_result
-
                     except Exception as exc:
-                        error_result = {"raw_content": str(res.content)[:500], "parse_error": str(exc)}
+                        error_result = {
+                            "raw_content": str(tool_result.content)[:500],
+                            "parse_error": str(exc),
+                        }
                         if current_turn_data and current_turn_data["tools"]:
                             current_turn_data["tools"][-1]["result"] = error_result
+                continue
 
-            elif isinstance(event, ModelClientStreamingChunkEvent):
-                pass
-            elif isinstance(event, ToolCallSummaryMessage):
-                pass
-            elif isinstance(event, TextMessage):
-                if event.content and hasattr(event, "source") and event.source != "user":
-                    if current_turn_data:
-                        current_turn_data["response"] = event.content
-            elif isinstance(event, TaskResult):
+            if isinstance(event, (ModelClientStreamingChunkEvent, ToolCallSummaryMessage)):
+                continue
+
+            if isinstance(event, TextMessage):
+                if event.content and getattr(event, "source", None) != "user" and current_turn_data:
+                    current_turn_data["response"] = event.content
+                continue
+
+            if isinstance(event, TaskResult):
                 if current_turn_data is not None:
                     yield finalize_agent_turn(current_turn_data)
                     await asyncio.sleep(0.3)
                 break
-            else:
-                event_type = type(event).__name__
-                if hasattr(event, "content") and event.content:
-                    content = str(event.content)[:200]
-                    yield {
-                        "type": "thought",
-                        "agent": current_agent or "系统",
-                        "content": f"[{event_type}] {content}",
-                    }
-                    await asyncio.sleep(0.1)
+
+            event_type = type(event).__name__
+            content = getattr(event, "content", None)
+            if content:
+                yield {
+                    "type": "thought",
+                    "agent": current_agent or "系统",
+                    "content": f"[{event_type}] {str(content)[:200]}",
+                }
+                await asyncio.sleep(0.1)
 
         quality_metrics = shared_data.get("quality_metrics") or {}
         for feedback_turn in build_feedback_turns(shared_data):
@@ -280,10 +307,9 @@ end_time: {end_time or '当前时间'}
 
         yield {"type": "result", "data": final_result}
         yield {"type": "done", "status": "succeeded"}
-
     except asyncio.CancelledError:
-        yield {"type": "error", "message": "任务被取消"}
+        yield {"type": "error", "message": "任务已取消"}
     except Exception as exc:
         import traceback
 
-        yield {"type": "error", "message": f"多智能体协作失败: {str(exc)}\n{traceback.format_exc()}"}
+        yield {"type": "error", "message": f"多智能体协作失败: {exc}\n{traceback.format_exc()}"}
