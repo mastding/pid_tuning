@@ -75,44 +75,44 @@
         </div>
 
                 <div>
-          <label class="block text-sm font-semibold text-slate-700 mb-2">????</label>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">数据来源</label>
           <select v-model="dataSource" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
-            <option value="upload">??CSV</option>
-            <option value="history">??????</option>
+            <option value="upload">上传CSV</option>
+            <option value="history">获取历史数据</option>
           </select>
         </div>
 
         <div v-if="dataSource === 'history'" class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p class="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
-            ???CSV????????????????????????????
+            未上传CSV时，将按下方历史参数获取数据；若参数留空，则使用默认值。
           </p>
-          <div class="text-sm font-semibold text-slate-700">??????</div>
+          <div class="text-sm font-semibold text-slate-700">历史数据参数</div>
           <div>
             <label class="block text-sm font-semibold text-slate-700 mb-2">Loop URI</label>
             <input v-model="loopUri" type="text"
               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
           </div>
           <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">????</label>
+            <label class="block text-sm font-semibold text-slate-700 mb-2">开始时间</label>
             <input v-model="startTime" type="text" placeholder="1772467200000"
               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
           </div>
           <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">????</label>
+            <label class="block text-sm font-semibold text-slate-700 mb-2">结束时间</label>
             <input v-model="endTime" type="text" placeholder="1772553600000"
               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
           </div>
         </div>
 
         <div v-if="dataSource === 'upload'">
-          <label class="block text-sm font-semibold text-slate-700 mb-2">??CSV????</label>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">上传CSV数据文件</label>
           <input ref="fileInput" type="file" accept=".csv" @change="handleFileUpload" class="hidden">
           <button @click="$refs.fileInput.click()"
             class="w-full px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded-lg hover:from-blue-100 hover:to-indigo-100 border border-blue-200 transition-all font-medium">
-            <span class="text-xl mr-2">??</span> ??CSV??
+            <span class="text-xl mr-2">📁</span> 选择CSV文件
           </button>
           <p v-if="uploadedFile" class="text-xs text-slate-600 mt-2 truncate bg-green-50 px-3 py-2 rounded border border-green-200">
-            ? {{ uploadedFile.name }}
+            ✅ {{ uploadedFile.name }}
           </p>
         </div>
 
@@ -201,10 +201,6 @@
                 :class="getAgentBgClass(msg.agent)"
                 @click="toggleCollapse(msg.id)">
                 <div class="flex items-center gap-3">
-                  <span class="text-xs px-2.5 py-1 rounded-full font-medium"
-                    :class="msg.collapsed ? 'bg-slate-200 text-slate-600' : 'bg-slate-700 text-white'">
-                    {{ msg.collapsed ? '宸叉姌鍙?' : '宸插睍寮€' }}
-                  </span>
                   <span class="text-3xl">{{ getAgentIcon(msg.agent) }}</span>
                   <div>
                     <span class="font-bold text-base" :class="getAgentTextClass(msg.agent)">{{ msg.agent }}</span>
@@ -308,10 +304,12 @@
                   <span class="text-3xl">🎉</span>
                   <span class="font-bold text-emerald-900 text-xl">整定完成</span>
                 </div>
-                <button @click.stop="copyResult(msg.data)" class="px-4 py-2 bg-white text-emerald-700 rounded-lg hover:bg-emerald-50 border border-emerald-300 text-sm font-semibold transition-all shadow-sm">
-                  📋 复制参数
-                </button>
-                <span class="text-slate-600 text-xl font-bold">{{ msg.collapsed ? '鈻?' : '鈻?' }}</span>
+                <div class="ml-auto flex items-center gap-3">
+                  <button @click.stop="copyResult(msg.data)" class="px-4 py-2 bg-white text-emerald-700 rounded-lg hover:bg-emerald-50 border border-emerald-300 text-sm font-semibold transition-all shadow-sm">
+                    复制参数
+                  </button>
+                  <span class="text-slate-600 text-xl font-bold">{{ msg.collapsed ? '▼' : '▲' }}</span>
+                </div>
               </div>
               <div v-if="!msg.collapsed" class="p-5 space-y-3 bg-slate-50">
                 <div v-if="msg.data.model" class="bg-white rounded-xl p-4 border-2 border-blue-100 shadow-md">
@@ -926,26 +924,26 @@
           if (usingUploadedCsv && !this.uploadedFile) {
             this.addMessage({
               type: 'assistant',
-              content: '???CSV?????????'
+              content: '请选择CSV文件后再开始整定。'
             });
             return;
           }
 
           this.loading = true;
-          this.loadingMessage = usingUploadedCsv ? '??????...' : '????????...';
+          this.loadingMessage = usingUploadedCsv ? '正在上传文件...' : '正在获取历史数据...';
 
           this.addMessage({
             type: 'user',
             content: usingUploadedCsv
-              ? `????? ${this.loopName} ??PID??
-????: ??CSV
-????: ${this.loopType}`
-              : `????? ${this.loopName} ??PID??
-????: ????
+              ? `为控制回路 ${this.loopName} 整定PID参数
+数据来源: 上传CSV
+回路类型: ${this.loopType}`
+              : `为控制回路 ${this.loopName} 整定PID参数
+数据来源: 历史数据
 loop_uri: ${this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b'}
 start_time: ${this.startTime || '1772467200000'}
 end_time: ${this.endTime || '1772553600000'}
-????: ${this.loopType}`,
+回路类型: ${this.loopType}`,
             file_name: usingUploadedCsv ? this.uploadedFile.name : null
           });
 
@@ -960,7 +958,7 @@ end_time: ${this.endTime || '1772553600000'}
           formData.append('end_time', this.endTime || '1772553600000');
 
           try {
-            this.loadingMessage = '?????????...';
+            this.loadingMessage = '智能体正在协同处理...';
             const response = await fetch(`${resolveApiBase()}/api/tune_stream`, {
               method: 'POST',
               body: formData
@@ -973,7 +971,7 @@ end_time: ${this.endTime || '1772553600000'}
             console.error('Tuning failed:', error);
             this.addMessage({
               type: 'assistant',
-              content: `????: ${error.message}`
+              content: `请求失败: ${error.message}`
             });
           } finally {
             this.loading = false;

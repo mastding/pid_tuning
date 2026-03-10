@@ -131,24 +131,24 @@ def _build_agent_response(agent_name: str, tools: List[Dict[str, Any]]) -> str:
         sampling_time = latest_result.get("sampling_time", 1.0)
         step_events = latest_result.get("step_events", [])
         return (
-            f"??????????????? {points} ?????"
-            f"?????????? {window_points} ??????? {_format_float(sampling_time, 2)} s?"
-            f"??? {len(step_events) if isinstance(step_events, list) else 0} ????????"
+            f"已完成数据加载与预处理，共获得 {points} 个数据点，"
+            f"当前用于辨识的窗口为 {window_points} 点，采样周期约 {_format_float(sampling_time, 2)} s，"
+            f"检测到 {len(step_events) if isinstance(step_events, list) else 0} 个候选阶跃事件。"
         )
 
     if agent_name == DISPLAY_AGENT_NAMES["system_id_expert"]:
         extra = ""
         reason_codes = latest_result.get("reason_codes", [])
         if isinstance(reason_codes, list) and reason_codes:
-            extra = f" ????: {', '.join(reason_codes)}?"
+            extra = f" 风险提示：{', '.join(reason_codes)}。"
         next_actions = latest_result.get("next_actions", [])
         if isinstance(next_actions, list) and next_actions:
-            extra += f" ????: {', '.join(next_actions)}?"
+            extra += f" 建议动作：{', '.join(next_actions)}。"
         return (
-            f"FOPDT ????????? K={_format_float(latest_result.get('K'))}?"
-            f"T={_format_float(latest_result.get('T'))}?L={_format_float(latest_result.get('L'))}?"
-            f"???RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}?"
-            f"R? {_format_float(latest_result.get('r2_score'), 3)}?????? {_format_float(latest_result.get('confidence'), 2)}?{extra}"
+            f"FOPDT 模型辨识完成，得到 K={_format_float(latest_result.get('K'))}，"
+            f"T={_format_float(latest_result.get('T'))}，L={_format_float(latest_result.get('L'))}，"
+            f"标准化RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}，"
+            f"R² {_format_float(latest_result.get('r2_score'), 3)}，模型置信度 {_format_float(latest_result.get('confidence'), 2)}。{extra}"
         )
 
     if agent_name == DISPLAY_AGENT_NAMES["pid_expert"]:
@@ -161,31 +161,30 @@ def _build_agent_response(agent_name: str, tools: List[Dict[str, Any]]) -> str:
             tune_result = latest_result if latest_tool_name == "tool_tune_pid" else {}
 
         response = (
-            f"?? {tune_result.get('strategy_used', tune_result.get('strategy', '??'))} ???????"
-            f"Kp={_format_float(tune_result.get('Kp'))}?Ki={_format_float(tune_result.get('Ki'))}?"
-            f"Kd={_format_float(tune_result.get('Kd'))}?"
+            f"已按 {tune_result.get('strategy_used', tune_result.get('strategy', '当前'))} 策略完成整定，"
+            f"Kp={_format_float(tune_result.get('Kp'))}，Ki={_format_float(tune_result.get('Ki'))}，"
+            f"Kd={_format_float(tune_result.get('Kd'))}。"
         )
         if tune_result.get("selection_reason"):
-            response += f" ???????{tune_result.get('selection_reason')}"
+            response += f" 策略选择依据：{tune_result.get('selection_reason')}"
         return response
 
     if agent_name == DISPLAY_AGENT_NAMES["evaluation_expert"]:
         extra = ""
         if not latest_result.get("passed") and latest_result.get("feedback_target"):
             extra = (
-                f" ??????{latest_result.get('failure_reason', '')}"
-                f" ???????? {latest_result.get('feedback_target')}?"
+                f" 未通过主因：{latest_result.get('failure_reason', '')}"
+                f" 建议下一步回流给 {latest_result.get('feedback_target')}，"
                 f"{latest_result.get('feedback_action', '')}"
             )
         return (
-            f"??????????? {_format_float(latest_result.get('performance_score'), 2)}?"
-            f"????? {_format_float(latest_result.get('method_confidence'), 2)}?"
-            f"???? {_format_float(latest_result.get('final_rating'), 2)}?"
-            f"{'??' if latest_result.get('passed') else '???'}???????{extra}"
+            f"闭环评估完成，性能评分 {_format_float(latest_result.get('performance_score'), 2)}，"
+            f"方法置信度 {_format_float(latest_result.get('method_confidence'), 2)}，"
+            f"最终评分 {_format_float(latest_result.get('final_rating'), 2)}，"
+            f"{'通过' if latest_result.get('passed') else '未通过'}当前整定校核。{extra}"
         )
 
     return ""
-
 def _finalize_agent_turn(current_turn_data: Dict[str, Any] | None) -> Dict[str, Any] | None:
     if current_turn_data is None:
         return None
@@ -813,7 +812,27 @@ async def tool_fit_fopdt(dt: float = 1.0) -> Dict[str, Any]:
         candidate_df = candidate["df"]
         mv_array = candidate_df["MV"].to_numpy(dtype=float)
         pv_array = candidate_df["PV"].to_numpy(dtype=float)
-        model_params = await asyncio.to_thread(fit_fopdt_model, mv_array, pv_array, actual_dt)
+        attempt_result = {
+            "window_source": candidate["name"],
+            "points": int(len(candidate_df)),
+        }
+        if candidate.get("event"):
+            attempt_result["window_start_index"] = int(candidate["event"].get("window_start_idx", 0))
+            attempt_result["window_end_index"] = int(candidate["event"].get("window_end_idx", len(candidate_df)))
+            attempt_result["event_type"] = str(candidate["event"].get("type", ""))
+
+        try:
+            model_params = await asyncio.to_thread(fit_fopdt_model, mv_array, pv_array, actual_dt)
+        except ValueError as exc:
+            attempt_result.update({
+                "success": False,
+                "error": str(exc),
+                "mv_std": float(np.std(mv_array)) if len(mv_array) else 0.0,
+                "pv_std": float(np.std(pv_array)) if len(pv_array) else 0.0,
+            })
+            attempts.append(attempt_result)
+            continue
+
         confidence = calculate_model_confidence(model_params["normalized_rmse"], model_params.get("r2_score"))
         benchmark = _benchmark_pid_strategies(
             float(model_params["K"]),
@@ -823,9 +842,7 @@ async def tool_fit_fopdt(dt: float = 1.0) -> Dict[str, Any]:
             float(confidence["confidence"]),
         )
         best_strategy = benchmark["best"] or {}
-        attempt_result = {
-            "window_source": candidate["name"],
-            "points": int(len(candidate_df)),
+        attempt_result.update({
             "K": float(model_params["K"]),
             "T": float(model_params["T"]),
             "L": float(model_params["L"]),
@@ -840,11 +857,7 @@ async def tool_fit_fopdt(dt: float = 1.0) -> Dict[str, Any]:
             "benchmark_final_rating": float(best_strategy.get("final_rating", 0.0)),
             "benchmark_stable": bool(best_strategy.get("is_stable", False)),
             "success": bool(model_params["success"]),
-        }
-        if candidate.get("event"):
-            attempt_result["window_start_index"] = int(candidate["event"].get("window_start_idx", 0))
-            attempt_result["window_end_index"] = int(candidate["event"].get("window_end_idx", len(candidate_df)))
-            attempt_result["event_type"] = str(candidate["event"].get("type", ""))
+        })
         attempts.append(attempt_result)
         if best_model_params is None:
             best_model_params = model_params
@@ -871,7 +884,7 @@ async def tool_fit_fopdt(dt: float = 1.0) -> Dict[str, Any]:
             best_source = candidate["name"]
 
     if best_model_params is None or best_confidence is None:
-        raise ValueError("未能完成 FOPDT 模型辨识")
+        raise ValueError("所有候选辨识窗口中的 MV/PV 变化都过小，无法完成 FOPDT 辨识")
 
     reason_codes = _derive_model_reason_codes(best_model_params, best_confidence, quality_metrics)
     next_actions = _derive_next_actions(_safe_float(best_confidence.get("confidence")), reason_codes)
@@ -1386,22 +1399,21 @@ async def run_multi_agent_collaboration(
     )
 
     # 构建初始任务消息
-    task_message = f"""?????? {loop_name} ??PID?????
+    task_message = f"""请为控制回路 {loop_name} 整定PID参数。
 
-????: {csv_path}
-??????URI: {loop_uri}
-????????: {start_time or "????24??"}
-????????: {end_time or "????"}
-??????: {data_type}
-????: {loop_type}
+数据来源: {'上传CSV' if csv_path else '历史数据'}
+loop_uri: {loop_uri}
+start_time: {start_time or '默认最近24小时'}
+end_time: {end_time or '当前时间'}
+回路类型: {loop_type}
 
-???????????
-1. ???????????????
-2. ??????????FOPDT??
-3. PID????????PID??
-4. ????????????
+请按以下顺序协作完成：
+1. 数据分析智能体：加载和分析数据
+2. 系统辨识智能体：拟合FOPDT模型
+3. PID专家智能体：计算PID参数
+4. 评估智能体：评估整定质量
 
-???????????????????????????"""
+每个智能体完成任务后，请明确告知下一个智能体继续工作。"""
 
     yield {
         "type": "user",

@@ -21,7 +21,7 @@ fi
 
 # 启动后端API (端口3443)
 echo "启动后端API (端口3443)..."
-cd /run/code/dinglei/pid_tuning/backend
+cd /d/code/pid_tuning/pid_tuning/backend
 nohup python agents_multiagent.py > agents_multiagent.log 2>&1 &
 BACKEND_NEW_PID=$!
 echo "后端PID: $BACKEND_NEW_PID"
@@ -31,7 +31,7 @@ sleep 3
 
 # 启动前端服务 (端口5273)
 echo "启动前端服务 (端口5273)..."
-cd /run/code/dinglei/pid_tuning/frontend
+cd /d/code/pid_tuning/pid_tuning/frontend
 nohup python -m http.server 5273 > frontend.log 2>&1 &
 FRONTEND_NEW_PID=$!
 echo "前端PID: $FRONTEND_NEW_PID"
@@ -46,14 +46,14 @@ if lsof -i:3443 >/dev/null 2>&1; then
     echo "✓ 后端API运行正常 (端口3443)"
 else
     echo "✗ 后端API启动失败"
-    echo "查看日志: tail -f /run/code/dinglei/pid_tuning/backend/agents_multiagent.log"
+    echo "查看日志: tail -f /d/code/pid_tuning/pid_tuning/backend/agents_multiagent.log"
 fi
 
 if lsof -i:5273 >/dev/null 2>&1; then
     echo "✓ 前端服务运行正常 (端口5273)"
 else
     echo "✗ 前端服务启动失败"
-    echo "查看日志: tail -f /run/code/dinglei/pid_tuning/frontend/frontend.log"
+    echo "查看日志: tail -f /d/code/pid_tuning/pid_tuning/frontend/frontend.log"
 fi
 
 echo ""
@@ -62,5 +62,5 @@ echo "  前端界面: http://pid.dicp.sixseven.ltd:5924"
 echo "  后端API:  http://pidend.dicp.sixseven.ltd:5924"
 echo ""
 echo "查看日志:"
-echo "  后端: tail -f /run/code/dinglei/pid_tuning/backend/agents_multiagent.log"
-echo "  前端: tail -f /run/code/dinglei/pid_tuning/frontend/frontend.log"
+echo "  后端: tail -f /d/code/pid_tuning/pid_tuning/backend/agents_multiagent.log"
+echo "  前端: tail -f /d/code/pid_tuning/pid_tuning/frontend/frontend.log"
