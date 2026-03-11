@@ -4,7 +4,21 @@ from typing import Any, Callable, Dict, List
 
 import numpy as np
 
-from skills.system_id_skills import calculate_model_confidence, fit_fopdt_model
+from skills.system_id_skills import (
+    calculate_model_confidence,
+    fit_fo_model,
+    fit_fopdt_model,
+    fit_ipdt_model,
+    fit_sopdt_model,
+)
+
+
+MODEL_ORDER_BY_LOOP_TYPE = {
+    "flow": ["FO", "FOPDT", "SOPDT", "IPDT"],
+    "pressure": ["FO", "FOPDT", "SOPDT", "IPDT"],
+    "temperature": ["SOPDT", "FOPDT", "FO", "IPDT"],
+    "level": ["IPDT", "FOPDT", "FO", "SOPDT"],
+}
 
 
 def extract_candidate_windows(cleaned_df: Any, candidate_windows: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
@@ -17,11 +31,13 @@ def extract_candidate_windows(cleaned_df: Any, candidate_windows: List[Dict[str,
             end_idx = int(event.get("window_end_idx", 0))
             candidate_df = cleaned_df.iloc[start_idx:end_idx].reset_index(drop=True)
             if len(candidate_df) >= 10:
-                candidates.append({
-                    "name": f"step_event_{idx + 1}",
-                    "df": candidate_df,
-                    "event": event,
-                })
+                candidates.append(
+                    {
+                        "name": f"step_event_{idx + 1}",
+                        "df": candidate_df,
+                        "event": event,
+                    }
+                )
 
     if cleaned_df is not None and len(cleaned_df) >= 10:
         candidates.append({"name": "full_cleaned", "df": cleaned_df})
@@ -42,13 +58,18 @@ def extract_candidate_windows(cleaned_df: Any, candidate_windows: List[Dict[str,
     return deduped
 
 
-def derive_model_reason_codes(model_params: Dict[str, Any], confidence: Dict[str, Any], quality_metrics: Dict[str, Any] | None) -> List[str]:
+def derive_model_reason_codes(
+    model_params: Dict[str, Any],
+    confidence: Dict[str, Any],
+    quality_metrics: Dict[str, Any] | None,
+) -> List[str]:
     reason_codes: List[str] = []
     residue = float(model_params.get("normalized_rmse", model_params.get("residue", 0.0)) or 0.0)
     r2_score = float(model_params.get("r2_score", 0.0) or 0.0)
     confidence_score = float(confidence.get("confidence", 0.0) or 0.0)
     T = float(model_params.get("T", 0.0) or 0.0)
     L = float(model_params.get("L", 0.0) or 0.0)
+    model_type = str(model_params.get("model_type", "FOPDT")).upper()
     overshoot = float((quality_metrics or {}).get("overshoot_percent", 0.0) or 0.0)
     settling_time = float((quality_metrics or {}).get("settling_time", -1.0) or -1.0)
 
@@ -61,10 +82,12 @@ def derive_model_reason_codes(model_params: Dict[str, Any], confidence: Dict[str
         reason_codes.append("拟合解释度偏低")
     if confidence_score < 0.55:
         reason_codes.append("模型置信度偏低")
-    if T <= 2.0 and confidence_score < 0.7 and residue > 0.08:
+    if model_type == "FOPDT" and T <= 2.0 and confidence_score < 0.7 and residue > 0.08:
         reason_codes.append("动态较快或采样粒度偏粗")
-    if L <= 0.0 and confidence_score < 0.7 and r2_score < 0.9:
+    if model_type == "FOPDT" and L <= 0.0 and confidence_score < 0.7 and r2_score < 0.9:
         reason_codes.append("未观察到明显死区")
+    if model_type == "IPDT":
+        reason_codes.append("对象可能呈积分特性")
     if overshoot > 20:
         reason_codes.append("窗口内响应偏激进")
     if settling_time > 0 and settling_time < 3:
@@ -80,9 +103,11 @@ def derive_next_actions(confidence_score: float, reason_codes: List[str]) -> Lis
     if "残差偏高" in reason_codes or "辨识窗口可能偏短" in reason_codes:
         actions.append("尝试其他辨识窗口")
     if "拟合解释度偏低" in reason_codes:
-        actions.append("确认对象是否偏离FOPDT假设")
+        actions.append("确认对象是否偏离当前模型假设")
     if "动态较快或采样粒度偏粗" in reason_codes or "未观察到明显死区" in reason_codes:
         actions.append("检查采样周期或补采更高频数据")
+    if "对象可能呈积分特性" in reason_codes:
+        actions.append("优先采用积分过程模型或更保守整定策略")
     if confidence_score < 0.5:
         actions.append("采用更保守的整定策略")
     if confidence_score < 0.35:
@@ -90,7 +115,66 @@ def derive_next_actions(confidence_score: float, reason_codes: List[str]) -> Lis
     return actions
 
 
-def build_fit_preview(window_df: Any, model_params: Dict[str, Any], dt: float, max_points: int = 200) -> Dict[str, Any]:
+def _simulate_model_preview(
+    model_type: str,
+    mv: np.ndarray,
+    model_params: Dict[str, Any],
+    dt: float,
+) -> np.ndarray:
+    mv = np.asarray(mv, dtype=float)
+    mv_delta = mv - mv[0]
+    K = float(model_params.get("K", 0.0))
+    T = float(model_params.get("T", 0.0) or 0.0)
+    L = float(model_params.get("L", 0.0) or 0.0)
+
+    if model_type == "FO":
+        alpha = dt / (max(T, 1e-6) + dt)
+        y = np.zeros_like(mv_delta, dtype=float)
+        for i in range(len(mv_delta)):
+            prev_y = y[i - 1] if i > 0 else 0.0
+            y[i] = (1.0 - alpha) * prev_y + K * alpha * mv_delta[i]
+        return y
+
+    if model_type == "IPDT":
+        y = np.zeros_like(mv_delta, dtype=float)
+        delay_steps = int(round(max(L, 0.0) / max(dt, 1e-6)))
+        for i in range(len(mv_delta)):
+            delayed_u = mv_delta[i - delay_steps] if i >= delay_steps else 0.0
+            prev_y = y[i - 1] if i > 0 else 0.0
+            y[i] = prev_y + K * dt * delayed_u
+        return y
+    if model_type == "SOPDT":
+        T1 = float(model_params.get("T1", max(T, dt)))
+        T2 = float(model_params.get("T2", max(T, dt)))
+        y1 = np.zeros_like(mv_delta, dtype=float)
+        y2 = np.zeros_like(mv_delta, dtype=float)
+        delay_steps = int(round(max(L, 0.0) / max(dt, 1e-6)))
+        alpha1 = dt / (max(T1, 1e-6) + dt)
+        alpha2 = dt / (max(T2, 1e-6) + dt)
+        for i in range(len(mv_delta)):
+            delayed_u = mv_delta[i - delay_steps] if i >= delay_steps else 0.0
+            prev_y1 = y1[i - 1] if i > 0 else 0.0
+            prev_y2 = y2[i - 1] if i > 0 else 0.0
+            y1[i] = (1.0 - alpha1) * prev_y1 + alpha1 * delayed_u
+            y2[i] = (1.0 - alpha2) * prev_y2 + alpha2 * y1[i]
+        return K * y2
+
+    delay_steps = int(round(max(L, 0.0) / max(dt, 1e-6)))
+    alpha = dt / (max(T, 1e-6) + dt)
+    y = np.zeros_like(mv_delta, dtype=float)
+    for i in range(len(mv_delta)):
+        delayed_u = mv_delta[i - delay_steps] if i >= delay_steps else 0.0
+        prev_y = y[i - 1] if i > 0 else 0.0
+        y[i] = (1.0 - alpha) * prev_y + K * alpha * delayed_u
+    return y
+
+
+def build_fit_preview(
+    window_df: Any,
+    model_params: Dict[str, Any],
+    dt: float,
+    max_points: int = 200,
+) -> Dict[str, Any]:
     if window_df is None or len(window_df) == 0:
         return {"points": []}
 
@@ -102,18 +186,8 @@ def build_fit_preview(window_df: Any, model_params: Dict[str, Any], dt: float, m
     if indices[-1] != n - 1:
         indices.append(n - 1)
 
-    K = float(model_params["K"])
-    T = float(model_params["T"])
-    L = float(model_params["L"])
-    delay_steps = int(round(max(L, 0.0) / max(dt, 1e-6)))
-    alpha = dt / (max(T, 1e-6) + dt)
-    mv_delta = mv - mv[0]
-    simulated_delta = []
-    y = 0.0
-    for i in range(n):
-        delayed_u = mv_delta[i - delay_steps] if i >= delay_steps else 0.0
-        y = (1.0 - alpha) * y + K * alpha * delayed_u
-        simulated_delta.append(y)
+    model_type = str(model_params.get("model_type", "FOPDT")).upper()
+    simulated_delta = _simulate_model_preview(model_type, mv, model_params, dt)
     pv_fit = pv[0] + np.asarray(simulated_delta)
 
     timestamp_strings = None
@@ -134,10 +208,41 @@ def build_fit_preview(window_df: Any, model_params: Dict[str, Any], dt: float, m
 
     return {
         "points": points,
+        "model_type": model_type,
         "x_axis": "timestamp" if timestamp_strings is not None else "index",
         "start_time": timestamp_strings[0] if timestamp_strings is not None else None,
         "end_time": timestamp_strings[-1] if timestamp_strings is not None else None,
     }
+
+
+def _build_tuning_model(model_type: str, model_params: Dict[str, Any], dt: float, n_points: int) -> Dict[str, float]:
+    K = float(model_params.get("K", 0.0))
+    T = float(model_params.get("T", 0.0) or 0.0)
+    L = float(model_params.get("L", 0.0) or 0.0)
+
+    if model_type == "FO":
+        return {"K": K, "T": max(T, dt), "L": 0.0}
+
+    if model_type == "IPDT":
+        # Conservative self-regulating surrogate for current tuning pipeline.
+        surrogate_t = max(float(n_points) * dt / 4.0, dt * 20.0)
+        return {"K": max(abs(K), 1e-3), "T": surrogate_t, "L": max(L, dt)}
+    if model_type == "SOPDT":
+        t1 = float(model_params.get("T1", T or dt))
+        t2 = float(model_params.get("T2", T or dt))
+        return {"K": K, "T": max(t1 + t2, dt), "L": max(L, 0.0)}
+
+    return {"K": K, "T": max(T, dt), "L": max(L, 0.0)}
+
+
+def _fit_model_by_type(model_type: str, mv_array: np.ndarray, pv_array: np.ndarray, actual_dt: float) -> Dict[str, Any]:
+    if model_type == "FO":
+        return fit_fo_model(mv_array, pv_array, actual_dt)
+    if model_type == "IPDT":
+        return fit_ipdt_model(mv_array, pv_array, actual_dt)
+    if model_type == "SOPDT":
+        return fit_sopdt_model(mv_array, pv_array, actual_dt)
+    return fit_fopdt_model(mv_array, pv_array, actual_dt)
 
 
 def fit_best_fopdt_window(
@@ -147,92 +252,120 @@ def fit_best_fopdt_window(
     quality_metrics: Dict[str, Any] | None,
     actual_dt: float,
     benchmark_fn: Callable[[float, float, float, float, float], Dict[str, Any]],
+    loop_type: str = "flow",
 ) -> Dict[str, Any]:
     attempts: List[Dict[str, Any]] = []
-    best_model_params: Dict[str, Any] | None = None
-    best_confidence: Dict[str, Any] | None = None
-    best_benchmark: Dict[str, Any] | None = None
-    best_candidate_df: Any = None
-    best_event: Dict[str, Any] | None = None
-    best_source = ""
+    best_attempt: Dict[str, Any] | None = None
+    loop_name = (loop_type or "flow").strip().lower()
+    model_order = MODEL_ORDER_BY_LOOP_TYPE.get(loop_name, ["FOPDT", "FO", "SOPDT", "IPDT"])
 
     for candidate in extract_candidate_windows(cleaned_df, candidate_windows):
         candidate_df = candidate["df"]
         mv_array = candidate_df["MV"].to_numpy(dtype=float)
         pv_array = candidate_df["PV"].to_numpy(dtype=float)
-        attempt_result = {
-            "window_source": candidate["name"],
-            "points": int(len(candidate_df)),
-        }
-        if candidate.get("event"):
-            attempt_result["window_start_index"] = int(candidate["event"].get("window_start_idx", 0))
-            attempt_result["window_end_index"] = int(candidate["event"].get("window_end_idx", len(candidate_df)))
-            attempt_result["event_type"] = str(candidate["event"].get("type", ""))
 
-        try:
-            model_params = fit_fopdt_model(mv_array, pv_array, actual_dt)
-        except ValueError as exc:
-            attempt_result.update({
-                "success": False,
-                "error": str(exc),
-                "mv_std": float(np.std(mv_array)) if len(mv_array) else 0.0,
-                "pv_std": float(np.std(pv_array)) if len(pv_array) else 0.0,
-            })
+        for model_type in model_order:
+            attempt_result: Dict[str, Any] = {
+                "window_source": candidate["name"],
+                "model_type": model_type,
+                "points": int(len(candidate_df)),
+            }
+            if candidate.get("event"):
+                attempt_result["window_start_index"] = int(candidate["event"].get("window_start_idx", 0))
+                attempt_result["window_end_index"] = int(candidate["event"].get("window_end_idx", len(candidate_df)))
+                attempt_result["event_type"] = str(candidate["event"].get("type", ""))
+
+            try:
+                fitted_model = _fit_model_by_type(model_type, mv_array, pv_array, actual_dt)
+            except ValueError as exc:
+                attempt_result.update(
+                    {
+                        "success": False,
+                        "error": str(exc),
+                        "mv_std": float(np.std(mv_array)) if len(mv_array) else 0.0,
+                        "pv_std": float(np.std(pv_array)) if len(pv_array) else 0.0,
+                    }
+                )
+                attempts.append(attempt_result)
+                continue
+
+            confidence = calculate_model_confidence(
+                fitted_model["normalized_rmse"],
+                fitted_model.get("r2_score"),
+            )
+            tuning_model = _build_tuning_model(model_type, fitted_model, actual_dt, len(candidate_df))
+            benchmark = benchmark_fn(
+                float(tuning_model["K"]),
+                float(tuning_model["T"]),
+                float(tuning_model["L"]),
+                actual_dt,
+                float(confidence["confidence"]),
+            )
+            best_strategy = benchmark.get("best") or {}
+
+            attempt_result.update(
+                {
+                    "K": float(fitted_model["K"]),
+                    "T": float(fitted_model.get("T", 0.0)),
+                    "L": float(fitted_model.get("L", 0.0)),
+                    "residue": float(fitted_model["residue"]),
+                    "normalized_rmse": float(fitted_model["normalized_rmse"]),
+                    "raw_rmse": float(fitted_model["raw_rmse"]),
+                    "r2_score": float(fitted_model["r2_score"]),
+                    "confidence": float(confidence["confidence"]),
+                    "confidence_quality": confidence["quality"],
+                    "benchmark_strategy": best_strategy.get("strategy", ""),
+                    "benchmark_performance_score": float(best_strategy.get("performance_score", 0.0)),
+                    "benchmark_final_rating": float(best_strategy.get("final_rating", 0.0)),
+                    "benchmark_stable": bool(best_strategy.get("is_stable", False)),
+                    "success": bool(fitted_model["success"]),
+                    "tuning_model": tuning_model,
+                }
+            )
             attempts.append(attempt_result)
-            continue
 
-        confidence = calculate_model_confidence(model_params["normalized_rmse"], model_params.get("r2_score"))
-        benchmark = benchmark_fn(
-            float(model_params["K"]),
-            float(model_params["T"]),
-            float(model_params["L"]),
-            actual_dt,
-            float(confidence["confidence"]),
-        )
-        best_strategy = benchmark["best"] or {}
-        attempt_result.update({
-            "K": float(model_params["K"]),
-            "T": float(model_params["T"]),
-            "L": float(model_params["L"]),
-            "residue": float(model_params["residue"]),
-            "normalized_rmse": float(model_params["normalized_rmse"]),
-            "raw_rmse": float(model_params["raw_rmse"]),
-            "r2_score": float(model_params["r2_score"]),
-            "confidence": float(confidence["confidence"]),
-            "confidence_quality": confidence["quality"],
-            "benchmark_strategy": best_strategy.get("strategy", ""),
-            "benchmark_performance_score": float(best_strategy.get("performance_score", 0.0)),
-            "benchmark_final_rating": float(best_strategy.get("final_rating", 0.0)),
-            "benchmark_stable": bool(best_strategy.get("is_stable", False)),
-            "success": bool(model_params["success"]),
-        })
-        attempts.append(attempt_result)
+            if best_attempt is None:
+                best_attempt = {
+                    "candidate_df": candidate_df,
+                    "event": candidate.get("event"),
+                    "source": candidate["name"],
+                    "model_params": fitted_model,
+                    "confidence": confidence,
+                    "benchmark": benchmark,
+                    "tuning_model": tuning_model,
+                    "attempt_result": attempt_result,
+                }
+                continue
 
-        if best_model_params is None:
-            best_model_params = model_params
-            best_confidence = confidence
-            best_benchmark = benchmark
-            best_candidate_df = candidate_df
-            best_event = candidate.get("event")
-            best_source = candidate["name"]
-            continue
+            current_score = float(best_strategy.get("performance_score", 0.0))
+            best_score = float((best_attempt["benchmark"].get("best") or {}).get("performance_score", 0.0))
+            current_confidence = float(confidence["confidence"])
+            best_confidence = float(best_attempt["confidence"].get("confidence", 0.0))
+            if current_score > best_score + 1e-9 or (
+                abs(current_score - best_score) <= 1e-9 and current_confidence > best_confidence + 1e-9
+            ):
+                best_attempt = {
+                    "candidate_df": candidate_df,
+                    "event": candidate.get("event"),
+                    "source": candidate["name"],
+                    "model_params": fitted_model,
+                    "confidence": confidence,
+                    "benchmark": benchmark,
+                    "tuning_model": tuning_model,
+                    "attempt_result": attempt_result,
+                }
 
-        current_score = float(best_strategy.get("performance_score", 0.0))
-        best_score = float((best_benchmark or {}).get("best", {}).get("performance_score", 0.0))
-        tie_confidence = float(confidence["confidence"])
-        best_confidence_score = float((best_confidence or {}).get("confidence", 0.0))
-        if current_score > best_score + 1e-9 or (
-            abs(current_score - best_score) <= 1e-9 and tie_confidence > best_confidence_score + 1e-9
-        ):
-            best_model_params = model_params
-            best_confidence = confidence
-            best_benchmark = benchmark
-            best_candidate_df = candidate_df
-            best_event = candidate.get("event")
-            best_source = candidate["name"]
+    if best_attempt is None:
+        raise ValueError("所有候选辨识窗口中的 MV/PV 变化都过小，无法完成过程模型辨识")
 
-    if best_model_params is None or best_confidence is None:
-        raise ValueError("所有候选辨识窗口中的 MV/PV 变化都过小，无法完成 FOPDT 辨识")
+    best_model_params = best_attempt["model_params"]
+    best_confidence = best_attempt["confidence"]
+    best_benchmark = best_attempt["benchmark"]
+    best_candidate_df = best_attempt["candidate_df"]
+    best_event = best_attempt["event"]
+    best_source = best_attempt["source"]
+    tuning_model = best_attempt["tuning_model"]
+    selected_model_type = str(best_model_params.get("model_type", "FOPDT")).upper()
 
     reason_codes = derive_model_reason_codes(best_model_params, best_confidence, quality_metrics)
     next_actions = derive_next_actions(float(best_confidence.get("confidence", 0.0)), reason_codes)
@@ -249,6 +382,11 @@ def fit_best_fopdt_window(
             "event_type": str(best_event.get("type", "full_range")),
         }
 
+    selection_reason = (
+        f"已对候选窗口尝试 {', '.join(model_order)} 多种过程模型，"
+        f"最终选择 {selected_model_type} 作为当前最优辨识模型，并使用其对应的整定等效模型进入 PID 试算。"
+    )
+
     return {
         "model_params": best_model_params,
         "confidence": best_confidence,
@@ -261,5 +399,8 @@ def fit_best_fopdt_window(
         "next_actions": next_actions,
         "fit_preview": fit_preview,
         "selected_window": selected_window,
+        "selected_model_type": selected_model_type,
+        "selected_model_params": best_model_params,
+        "tuning_model": tuning_model,
+        "selection_reason": selection_reason,
     }
-

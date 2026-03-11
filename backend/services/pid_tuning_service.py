@@ -10,19 +10,64 @@ from skills.rating import ModelRating
 ALL_STRATEGIES = ["IMC", "LAMBDA", "ZN", "CHR"]
 
 
+def _build_model_params_for_evaluation(
+    *,
+    model_type: str,
+    selected_model_params: Dict[str, Any] | None,
+    K: float,
+    T: float,
+    L: float,
+) -> Dict[str, float]:
+    selected_model_params = selected_model_params or {}
+    normalized_model_type = str(model_type or selected_model_params.get("model_type", "FOPDT")).upper()
+
+    if normalized_model_type == "SOPDT":
+        return {
+            "K": float(selected_model_params.get("K", K)),
+            "T1": float(selected_model_params.get("T1", selected_model_params.get("T", T))),
+            "T2": float(selected_model_params.get("T2", selected_model_params.get("T", T))),
+            "L": float(selected_model_params.get("L", L)),
+        }
+    if normalized_model_type == "IPDT":
+        effective_l = max(float(selected_model_params.get("L", L)), 1e-3)
+        return {
+            "K": float(selected_model_params.get("K", K)),
+            "T1": max(4.0 * effective_l, max(float(T), 1.0)),
+            "T2": 0.0,
+            "L": effective_l,
+        }
+    if normalized_model_type == "FO":
+        return {
+            "K": float(selected_model_params.get("K", K)),
+            "T1": float(selected_model_params.get("T", T)),
+            "T2": 0.0,
+            "L": 0.0,
+        }
+    return {"K": float(K), "T1": float(T), "T2": 0.0, "L": float(L)}
+
+
 def _evaluate_strategy(
     *,
     K: float,
     T: float,
     L: float,
+    model_type: str,
+    selected_model_params: Dict[str, Any] | None,
     dt: float,
     confidence_score: float,
     strategy_name: str,
     experience_bonus: float = 0.0,
 ) -> Dict[str, Any]:
-    pid_params = apply_tuning_rules(K, T, L, strategy_name)
+    pid_params = apply_tuning_rules(K, T, L, strategy_name, model_type=model_type, model_params=selected_model_params)
+    model_params = _build_model_params_for_evaluation(
+        model_type=model_type,
+        selected_model_params=selected_model_params,
+        K=K,
+        T=T,
+        L=L,
+    )
     eval_result = ModelRating.evaluate(
-        model_params={"K": K, "T1": T, "T2": 0.0, "L": L},
+        model_params=model_params,
         pid_params={"Kp": pid_params["Kp"], "Ki": pid_params["Ki"], "Kd": pid_params["Kd"]},
         method=strategy_name.lower(),
         method_confidence=confidence_score,
@@ -50,6 +95,8 @@ def _evaluate_pid_params(
     K: float,
     T: float,
     L: float,
+    model_type: str,
+    selected_model_params: Dict[str, Any] | None,
     dt: float,
     confidence_score: float,
     strategy_name: str,
@@ -57,8 +104,15 @@ def _evaluate_pid_params(
     description_suffix: str = "",
     experience_bonus: float = 0.0,
 ) -> Dict[str, Any]:
+    model_params = _build_model_params_for_evaluation(
+        model_type=model_type,
+        selected_model_params=selected_model_params,
+        K=K,
+        T=T,
+        L=L,
+    )
     eval_result = ModelRating.evaluate(
-        model_params={"K": K, "T1": T, "T2": 0.0, "L": L},
+        model_params=model_params,
         pid_params={"Kp": pid_params["Kp"], "Ki": pid_params["Ki"], "Kd": pid_params["Kd"]},
         method=strategy_name.lower(),
         method_confidence=confidence_score,
@@ -101,7 +155,15 @@ def _is_better_candidate(candidate: Dict[str, Any], best: Dict[str, Any] | None)
     return False
 
 
-def benchmark_pid_strategies(K: float, T: float, L: float, dt: float, confidence_score: float) -> Dict[str, Any]:
+def benchmark_pid_strategies(
+    K: float,
+    T: float,
+    L: float,
+    dt: float,
+    confidence_score: float,
+    model_type: str = "FOPDT",
+    selected_model_params: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     best_candidate: Dict[str, Any] | None = None
     best_evaluation: Dict[str, Any] | None = None
     summaries: List[Dict[str, Any]] = []
@@ -111,6 +173,8 @@ def benchmark_pid_strategies(K: float, T: float, L: float, dt: float, confidence
             K=K,
             T=T,
             L=L,
+            model_type=model_type,
+            selected_model_params=selected_model_params,
             dt=dt,
             confidence_score=confidence_score,
             strategy_name=strategy_name,
@@ -223,22 +287,38 @@ def select_best_pid_strategy(
     T: float,
     L: float,
     loop_type: str,
+    model_type: str = "FOPDT",
+    selected_model_params: Dict[str, Any] | None = None,
     confidence_score: float,
     normalized_rmse: float,
     r2_score: float,
     dt: float,
     experience_guidance: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    normalized_model_type = str(model_type or "FOPDT").upper()
     tau_ratio = max(float(L), 0.0) / max(float(T), 1e-6)
     heuristic_selection = select_tuning_strategy(
         loop_type=loop_type,
         K=K,
         T=T,
         L=L,
+        model_type=normalized_model_type,
         model_confidence=confidence_score,
         r2_score=r2_score,
         normalized_rmse=normalized_rmse,
     )
+    if normalized_model_type == "SOPDT" and heuristic_selection.get("strategy") == "ZN":
+        heuristic_selection = {
+            **heuristic_selection,
+            "strategy": "LAMBDA",
+            "reason": "SOPDT 模型更适合优先采用保守的 Lambda/IMC 类整定。",
+        }
+    if normalized_model_type == "IPDT" and heuristic_selection.get("strategy") in {"ZN", "CHR"}:
+        heuristic_selection = {
+            **heuristic_selection,
+            "strategy": "LAMBDA",
+            "reason": "积分过程优先采用更保守的 Lambda/IMC 类整定。",
+        }
 
     preferred_strategy = str((experience_guidance or {}).get("preferred_strategy", "")).upper()
     preferred_matches = (experience_guidance or {}).get("matches") or []
@@ -268,6 +348,8 @@ def select_best_pid_strategy(
                 K=K,
                 T=T,
                 L=L,
+                model_type=normalized_model_type,
+                selected_model_params=selected_model_params,
                 dt=dt,
                 confidence_score=confidence_score,
                 strategy_name=strategy_name,
@@ -299,6 +381,8 @@ def select_best_pid_strategy(
                     K=K,
                     T=T,
                     L=L,
+                    model_type=normalized_model_type,
+                    selected_model_params=selected_model_params,
                     dt=dt,
                     confidence_score=confidence_score,
                     strategy_name=strategy_name,
@@ -332,7 +416,14 @@ def select_best_pid_strategy(
     if best_candidate is None:
         raise ValueError("Failed to generate a usable PID candidate")
 
-    pid_params = apply_tuning_rules(K, T, L, best_candidate["strategy"])
+    pid_params = apply_tuning_rules(
+        K,
+        T,
+        L,
+        best_candidate["strategy"],
+        model_type=normalized_model_type,
+        model_params=selected_model_params,
+    )
     if best_candidate.get("history_refined"):
         pid_params = {
             **pid_params,
@@ -377,6 +468,7 @@ def select_best_pid_strategy(
 
     selection_inputs = {
         "loop_type": loop_type,
+        "model_type": normalized_model_type,
         "model_confidence": confidence_score,
         "normalized_rmse": normalized_rmse,
         "r2_score": r2_score,

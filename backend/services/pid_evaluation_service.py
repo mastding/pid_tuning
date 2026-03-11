@@ -17,9 +17,23 @@ def evaluate_pid_model(
     method_confidence: float,
     model_confidence: Dict[str, Any],
     dt: float,
+    model_type: str = "FOPDT",
+    selected_model_params: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    selected_model_params = selected_model_params or {}
+    normalized_type = str(model_type or selected_model_params.get("model_type", "FOPDT")).upper()
+    if normalized_type == "SOPDT":
+        model_params = {
+            "K": float(selected_model_params.get("K", K)),
+            "T1": float(selected_model_params.get("T1", T)),
+            "T2": float(selected_model_params.get("T2", T)),
+            "L": float(selected_model_params.get("L", L)),
+        }
+    else:
+        model_params = {"K": K, "T1": T, "T2": 0.0, "L": L}
+
     return ModelRating.evaluate(
-        model_params={"K": K, "T1": T, "T2": 0.0, "L": L},
+        model_params=model_params,
         pid_params={"Kp": Kp, "Ki": Ki, "Kd": Kd},
         method=method.lower(),
         method_confidence=method_confidence,

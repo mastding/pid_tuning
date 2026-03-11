@@ -226,7 +226,7 @@ async def run_multi_agent_collaboration(
             if event_type == "ThoughtEvent":
                 continue
             content = getattr(event, "content", None)
-            if content:
+            if content and "ThoughtEvent" not in str(content):
                 yield {
                     "type": "thought",
                     "agent": current_agent or "系统",
@@ -256,6 +256,10 @@ async def run_multi_agent_collaboration(
                 "qualityMetrics": quality_metrics,
             },
             "model": {
+                "modelType": shared_data.get("model_type", "FOPDT"),
+                "selectedModelParams": shared_data.get("selected_model_params", {}),
+                "modelSelectionReason": shared_data.get("model_selection_reason", ""),
+                "tuningModel": shared_data.get("tuning_model", {}),
                 "K": shared_data.get("K", 0.0),
                 "T": shared_data.get("T", 0.0),
                 "L": shared_data.get("L", 0.0),

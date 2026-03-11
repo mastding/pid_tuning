@@ -78,6 +78,7 @@ def fit_fopdt_tool(
     fit_best_fopdt_window_fn: Callable[..., Dict[str, Any]],
     build_window_overview_fn: Callable[..., Dict[str, Any]],
     benchmark_fn: Callable[[float, float, float, float, float], Dict[str, Any]],
+    loop_type: str = "flow",
 ) -> Dict[str, Any]:
     if "mv" not in session_store or "pv" not in session_store:
         raise ValueError("请先调用 tool_load_data 加载数据")
@@ -89,6 +90,7 @@ def fit_fopdt_tool(
         quality_metrics=session_store.get("quality_metrics") or {},
         actual_dt=actual_dt,
         benchmark_fn=benchmark_fn,
+        loop_type=loop_type,
     )
 
     best_model_params = identification["model_params"]
@@ -102,6 +104,10 @@ def fit_fopdt_tool(
     next_actions = identification["next_actions"]
     fit_preview = identification["fit_preview"]
     selected_window_payload = identification["selected_window"]
+    selected_model_type = identification.get("selected_model_type", "FOPDT")
+    selected_model_params = identification.get("selected_model_params", best_model_params)
+    tuning_model = identification.get("tuning_model", best_model_params)
+    selection_reason = identification.get("selection_reason", "")
 
     if best_candidate_df is not None:
         session_store["window_df"] = best_candidate_df
@@ -117,9 +123,12 @@ def fit_fopdt_tool(
             selected_window_payload,
         )
 
-    session_store["K"] = float(best_model_params["K"])
-    session_store["T"] = float(best_model_params["T"])
-    session_store["L"] = float(best_model_params["L"])
+    session_store["model_type"] = selected_model_type
+    session_store["selected_model_params"] = selected_model_params
+    session_store["tuning_model"] = tuning_model
+    session_store["K"] = float(tuning_model["K"])
+    session_store["T"] = float(tuning_model["T"])
+    session_store["L"] = float(tuning_model["L"])
     session_store["residue"] = float(best_model_params["residue"])
     session_store["normalized_rmse"] = float(best_model_params["normalized_rmse"])
     session_store["raw_rmse"] = float(best_model_params["raw_rmse"])
@@ -131,11 +140,17 @@ def fit_fopdt_tool(
     session_store["model_selected_source"] = best_source
     session_store["fit_preview"] = fit_preview
     session_store["window_benchmark"] = (best_benchmark or {}).get("best", {})
+    session_store["model_selection_reason"] = selection_reason
 
     return {
-        "K": float(best_model_params["K"]),
-        "T": float(best_model_params["T"]),
-        "L": float(best_model_params["L"]),
+        "model_type": selected_model_type,
+        "selected_model_params": selected_model_params,
+        "model_selection_reason": selection_reason,
+        "K": float(tuning_model["K"]),
+        "T": float(tuning_model["T"]),
+        "L": float(tuning_model["L"]),
+        "T1": selected_model_params.get("T1"),
+        "T2": selected_model_params.get("T2"),
         "dt": actual_dt,
         "residue": float(best_model_params["residue"]),
         "normalized_rmse": float(best_model_params["normalized_rmse"]),
@@ -154,6 +169,7 @@ def fit_fopdt_tool(
         "attempts": attempts,
         "fit_preview": fit_preview,
         "window_benchmark": (best_benchmark or {}).get("best", {}),
+        "tuning_model": tuning_model,
     }
 
 
@@ -173,6 +189,7 @@ def tune_pid_tool(
     }
     experience_guidance = retrieve_experience_guidance(
         loop_type=loop_type,
+        model_type=str(session_store.get("model_type", "FOPDT")),
         K=float(K),
         T=float(T),
         L=float(L),
@@ -184,6 +201,8 @@ def tune_pid_tool(
         T=float(T),
         L=float(L),
         loop_type=loop_type,
+        model_type=str(session_store.get("model_type", "FOPDT")),
+        selected_model_params=dict(session_store.get("selected_model_params") or {}),
         confidence_score=confidence_score,
         normalized_rmse=selected_model["normalized_rmse"],
         r2_score=selected_model["r2_score"],
@@ -275,6 +294,8 @@ def evaluate_pid_tool(
             method_confidence=method_confidence,
             model_confidence=model_confidence,
             dt=float(session_store.get("dt", 1.0)),
+            model_type=str(session_store.get("model_type", "FOPDT")),
+            selected_model_params=dict(session_store.get("selected_model_params") or {}),
         )
 
     base_eval_result = eval_result

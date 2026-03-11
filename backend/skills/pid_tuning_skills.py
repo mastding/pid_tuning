@@ -1,4 +1,3 @@
-# PID Tuning Skills
 from __future__ import annotations
 
 from typing import Dict
@@ -24,34 +23,67 @@ def select_tuning_strategy(
     K: float,
     T: float,
     L: float,
+    model_type: str = "FOPDT",
     model_confidence: float,
     r2_score: float,
     normalized_rmse: float,
 ) -> Dict[str, str]:
     loop_name = (loop_type or "flow").strip().lower()
+    normalized_model_type = (model_type or "FOPDT").strip().upper()
     tau_ratio = max(float(L), 0.0) / max(float(T), 1e-6)
     fast_process = float(T) <= 5.0
-    high_quality_model = (
-        model_confidence >= 0.88
-        and normalized_rmse <= 0.05
-        and r2_score >= 0.97
-    )
+    high_quality_model = model_confidence >= 0.88 and normalized_rmse <= 0.05 and r2_score >= 0.97
 
     if model_confidence < 0.35:
+        return {
+            "strategy": "IMC",
+            "reason": "模型可信度很低，优先采用最保守的 IMC 整定。",
+            "loop_type": loop_name,
+            "model_type": normalized_model_type,
+        }
+    if model_confidence < 0.55 or normalized_rmse > 0.1 or r2_score < 0.75:
+        return {
+            "strategy": "LAMBDA",
+            "reason": "模型质量一般，优先采用更稳健的 Lambda 整定。",
+            "loop_type": loop_name,
+            "model_type": normalized_model_type,
+        }
+
+    if normalized_model_type == "FO":
+        if loop_name in {"flow", "pressure"} and high_quality_model and not fast_process:
+            strategy = "IMC"
+            reason = "一阶对象且模型质量较高，采用 FO-IMC 整定。"
+        else:
+            strategy = "LAMBDA"
+            reason = "一阶对象优先采用保守的 Lambda/IMC 类整定。"
+        return {"strategy": strategy, "reason": reason, "loop_type": loop_name, "model_type": normalized_model_type}
+
+    if normalized_model_type == "IPDT":
+        return {
+            "strategy": "LAMBDA",
+            "reason": "积分过程优先采用积分过程专用的保守 Lambda 整定。",
+            "loop_type": loop_name,
+            "model_type": normalized_model_type,
+        }
+
+    if normalized_model_type == "SOPDT":
+        strategy = "LAMBDA" if loop_name in {"temperature", "level"} else "IMC"
+        return {
+            "strategy": strategy,
+            "reason": "SOPDT 模型优先采用保守的 Lambda/IMC，必要时再做降阶近似。",
+            "loop_type": loop_name,
+            "model_type": normalized_model_type,
+        }
+
+    if loop_name == "temperature":
         strategy = "IMC"
-        reason = "模型可信度很低，采用最保守的 IMC。"
-    elif model_confidence < 0.55 or normalized_rmse > 0.1 or r2_score < 0.75:
-        strategy = "LAMBDA"
-        reason = "模型质量一般，优先采用更稳健的 Lambda 整定。"
-    elif loop_name == "temperature":
-        strategy = "IMC"
-        reason = "温度回路通常惯性较大，优先抑制超调。"
+        reason = "温度回路惯性较大，优先抑制超调。"
     elif loop_name == "level":
         strategy = "LAMBDA"
-        reason = "液位回路更关注平稳性与鲁棒性。"
+        reason = "液位回路更关注稳定性与鲁棒性。"
     elif loop_name == "pressure":
         strategy = "IMC" if tau_ratio >= 0.3 else "LAMBDA"
-        reason = "压力回路偏快，优先选稳健策略控制波动。"
+        reason = "压力回路偏快，优先选择稳健策略控制波动。"
     elif loop_name == "flow":
         if high_quality_model and tau_ratio >= 0.08 and not fast_process:
             strategy = "ZN"
@@ -66,12 +98,41 @@ def select_tuning_strategy(
         strategy = "IMC"
         reason = "未识别回路类型，使用默认稳健策略 IMC。"
 
-    return {"strategy": strategy, "reason": reason, "loop_type": loop_name}
+    return {"strategy": strategy, "reason": reason, "loop_type": loop_name, "model_type": normalized_model_type}
 
 
-def apply_tuning_rules(K: float, T: float, L: float, strategy: str = "IMC") -> Dict:
+def tune_fo(K: float, T: float, strategy: str) -> Dict:
+    strategy_name = (strategy or "LAMBDA").strip().upper()
+    abs_k = max(abs(float(K)), 1e-6)
+    T = max(float(T), 1e-3)
+
+    if strategy_name in {"IMC", "LAMBDA", "LAMBDA_TUNING"}:
+        lambda_c = max(0.8 * T, 1e-3)
+        Kp = T / (abs_k * lambda_c)
+        Ti = T
+        Td = 0.0
+        description = "FO Lambda/IMC"
+    elif strategy_name == "ZN":
+        Kp = 0.8 / abs_k
+        Ti = max(T, 1e-3)
+        Td = 0.0
+        description = "FO moderated ZN"
+    else:
+        Kp = 0.7 / abs_k
+        Ti = max(1.1 * T, 1e-3)
+        Td = 0.0
+        description = "FO conservative fallback"
+
+    Ki = _safe_div(Kp, Ti, 0.0)
+    Kd = Kp * Td
+    params = _clamp_pid_params(Kp, Ki, Kd)
+    params.update({"strategy": strategy_name, "model_type": "FO", "description": description, "Ti": float(Ti), "Td": float(Td)})
+    return params
+
+
+def tune_fopdt(K: float, T: float, L: float, strategy: str) -> Dict:
     strategy_name = (strategy or "IMC").strip().upper()
-    abs_k = max(abs(K), 1e-6)
+    abs_k = max(abs(float(K)), 1e-6)
     T = max(float(T), 1e-3)
     L = max(float(L), 0.0)
 
@@ -80,31 +141,73 @@ def apply_tuning_rules(K: float, T: float, L: float, strategy: str = "IMC") -> D
         Kp = T / (abs_k * (lambda_c + L))
         Ti = max(T, 1e-3)
         Td = 0.5 * L if L > 0 else 0.0
-        tuning_type = "Conservative IMC"
+        description = "Conservative IMC"
     elif strategy_name in {"LAMBDA", "LAMBDA_TUNING"}:
         lambda_c = max(1.5 * L, T, 1e-3)
         Kp = T / (abs_k * (lambda_c + L))
         Ti = max(T + 0.5 * L, 1e-3)
         Td = 0.0
-        tuning_type = "Lambda Tuning"
+        description = "Lambda Tuning"
     elif strategy_name == "ZN":
         effective_l = max(L, 0.1 * T, 1e-3)
         Kp = 1.2 * T / (abs_k * effective_l)
         Ti = 2.0 * effective_l
         Td = 0.5 * effective_l
-        tuning_type = "Aggressive Ziegler-Nichols"
+        description = "Aggressive Ziegler-Nichols"
     elif strategy_name in {"CHR", "CHR_0OS"}:
         effective_l = max(L, 0.1 * T, 1e-3)
         Kp = 0.6 * T / (abs_k * effective_l)
         Ti = max(T, 1e-3)
         Td = 0.5 * effective_l
-        tuning_type = "CHR 0% Overshoot"
+        description = "CHR 0% Overshoot"
     else:
         lambda_c = max(L, T, 1e-3)
         Kp = T / (abs_k * (lambda_c + L))
         Ti = max(T, 1e-3)
         Td = 0.0
-        tuning_type = "Fallback IMC-like"
+        description = "Fallback IMC-like"
+
+    Ki = _safe_div(Kp, Ti, 0.0)
+    Kd = Kp * Td
+    params = _clamp_pid_params(Kp, Ki, Kd)
+    params.update({"strategy": strategy_name, "model_type": "FOPDT", "description": description, "Ti": float(Ti), "Td": float(Td)})
+    return params
+
+
+def tune_sopdt(K: float, T1: float, T2: float, L: float, strategy: str) -> Dict:
+    strategy_name = (strategy or "LAMBDA").strip().upper()
+    abs_k = max(abs(float(K)), 1e-6)
+    T1 = max(float(T1), 1e-3)
+    T2 = max(float(T2), 1e-3)
+    L = max(float(L), 0.0)
+    smaller_tau = min(T1, T2)
+    t_equiv = T1 + T2
+    l_equiv = L + 0.4 * smaller_tau
+
+    if strategy_name in {"LAMBDA", "LAMBDA_TUNING"}:
+        lambda_c = max(t_equiv, 1.5 * l_equiv, 1e-3)
+        Kp = t_equiv / (abs_k * (lambda_c + l_equiv))
+        Ti = max(1.2 * t_equiv + 0.5 * l_equiv, 1e-3)
+        Td = min(0.25 * t_equiv, max(l_equiv, 0.0))
+        description = "SOPDT Lambda reduced-order"
+    elif strategy_name == "IMC":
+        lambda_c = max(0.8 * t_equiv, l_equiv, 1e-3)
+        Kp = t_equiv / (abs_k * (lambda_c + l_equiv))
+        Ti = max(1.1 * t_equiv, 1e-3)
+        Td = min(0.2 * t_equiv, max(l_equiv, 0.0))
+        description = "SOPDT IMC reduced-order"
+    elif strategy_name == "ZN":
+        effective_l = max(l_equiv, 0.15 * t_equiv, 1e-3)
+        Kp = 0.9 * t_equiv / (abs_k * effective_l)
+        Ti = 2.5 * effective_l
+        Td = 0.35 * effective_l
+        description = "SOPDT moderated ZN"
+    else:
+        effective_l = max(l_equiv, 0.15 * t_equiv, 1e-3)
+        Kp = 0.45 * t_equiv / (abs_k * effective_l)
+        Ti = max(t_equiv, 1e-3)
+        Td = 0.25 * effective_l
+        description = "SOPDT CHR-like"
 
     Ki = _safe_div(Kp, Ti, 0.0)
     Kd = Kp * Td
@@ -112,12 +215,65 @@ def apply_tuning_rules(K: float, T: float, L: float, strategy: str = "IMC") -> D
     params.update(
         {
             "strategy": strategy_name,
-            "description": tuning_type,
+            "model_type": "SOPDT",
+            "description": description,
             "Ti": float(Ti),
             "Td": float(Td),
+            "T1": float(T1),
+            "T2": float(T2),
+            "L_equiv": float(l_equiv),
+            "T_equiv": float(t_equiv),
         }
     )
     return params
+
+
+def tune_ipdt(K: float, L: float, strategy: str) -> Dict:
+    strategy_name = (strategy or "LAMBDA").strip().upper()
+    abs_k = max(abs(float(K)), 1e-6)
+    effective_l = max(float(L), 1e-3)
+
+    if strategy_name in {"LAMBDA", "LAMBDA_TUNING", "IMC"}:
+        lambda_c = max(2.5 * effective_l, 1e-3)
+        Kp = 1.0 / (abs_k * max(lambda_c + effective_l, 1e-3))
+        Ti = max(4.0 * effective_l, 1e-3)
+        Td = 0.0
+        description = "Conservative Integrating Lambda"
+    elif strategy_name == "ZN":
+        Kp = 0.35 / max(abs_k * effective_l, 1e-3)
+        Ti = max(3.5 * effective_l, 1e-3)
+        Td = 0.0
+        description = "Integrating ZN-like"
+    else:
+        Kp = 0.30 / max(abs_k * effective_l, 1e-3)
+        Ti = max(4.0 * effective_l, 1e-3)
+        Td = 0.0
+        description = "Integrating conservative fallback"
+
+    Ki = _safe_div(Kp, Ti, 0.0)
+    Kd = Kp * Td
+    params = _clamp_pid_params(Kp, Ki, Kd)
+    params.update({"strategy": strategy_name, "model_type": "IPDT", "description": description, "Ti": float(Ti), "Td": float(Td)})
+    return params
+
+
+def apply_tuning_rules(K: float, T: float, L: float, strategy: str = "IMC", model_type: str = "FOPDT", model_params: Dict | None = None) -> Dict:
+    normalized_model_type = (model_type or "FOPDT").strip().upper()
+    model_params = model_params or {}
+
+    if normalized_model_type == "FO":
+        return tune_fo(K=float(model_params.get("K", K)), T=float(model_params.get("T", T)), strategy=strategy)
+    if normalized_model_type == "SOPDT":
+        return tune_sopdt(
+            K=float(model_params.get("K", K)),
+            T1=float(model_params.get("T1", model_params.get("T", T))),
+            T2=float(model_params.get("T2", model_params.get("T", T))),
+            L=float(model_params.get("L", L)),
+            strategy=strategy,
+        )
+    if normalized_model_type == "IPDT":
+        return tune_ipdt(K=float(model_params.get("K", K)), L=float(model_params.get("L", L)), strategy=strategy)
+    return tune_fopdt(K=float(model_params.get("K", K)), T=float(model_params.get("T", T)), L=float(model_params.get("L", L)), strategy=strategy)
 
 
 def controller_logic_translator(raw_params: Dict, brand: str = "Siemens") -> Dict:

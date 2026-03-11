@@ -49,6 +49,7 @@ def _safe_scale(numerator: float, denominator: float, default: float = 1.0) -> f
 def _experience_similarity_score(
     *,
     target_loop_type: str,
+    target_model_type: str,
     target_K: float,
     target_T: float,
     target_L: float,
@@ -61,6 +62,11 @@ def _experience_similarity_score(
     score = 0.0
     if str(record.get("loop_type", "")).lower() == target_loop_type.lower():
         score += 5.0
+    record_model_type = str(model.get("model_type", "FOPDT")).upper()
+    if record_model_type == str(target_model_type or "FOPDT").upper():
+        score += 4.0
+    if record_model_type == "IPDT" and target_loop_type.lower() == "level":
+        score += 1.0
 
     score += max(0.0, 3.0 - _log_distance(target_K, _safe_float(model.get("K"), 0.0)))
     score += max(0.0, 3.0 - _log_distance(target_T, _safe_float(model.get("T"), 0.0)))
@@ -114,6 +120,7 @@ def _build_refine_delta(
 def retrieve_experience_guidance(
     *,
     loop_type: str,
+    model_type: str = "FOPDT",
     K: float,
     T: float,
     L: float,
@@ -130,6 +137,7 @@ def retrieve_experience_guidance(
     for record in records:
         score = _experience_similarity_score(
             target_loop_type=loop_type,
+            target_model_type=model_type,
             target_K=K,
             target_T=T,
             target_L=L,
@@ -150,6 +158,7 @@ def retrieve_experience_guidance(
                 "passed": bool((record.get("evaluation") or {}).get("passed", False)),
                 "lessons": record.get("lessons", []),
                 "model": record.get("model", {}),
+                "model_type": str((record.get("model") or {}).get("model_type", "FOPDT")),
                 "refine_delta": refine_delta,
                 "refine_pattern": str(refine_delta.get("pattern", "")),
             }
@@ -300,6 +309,8 @@ def build_experience_record(
         tags.append("dead_time_small")
     if _safe_float(model.get("T")) <= 5.0:
         tags.append("fast_process")
+    if str(model.get("modelType", "FOPDT")).upper() == "IPDT":
+        tags.append("integrating_process")
     if auto_refine_result.get("applied"):
         tags.append("auto_refined")
     if evaluation.get("passed"):
@@ -315,6 +326,8 @@ def build_experience_record(
         "data_source": data_source,
         "history_range": {"start_time": start_time, "end_time": end_time},
         "model": {
+            "model_type": str(model.get("modelType", "FOPDT")),
+            "selected_model_params": model.get("selectedModelParams", {}),
             "K": _safe_float(model.get("K")),
             "T": _safe_float(model.get("T")),
             "L": _safe_float(model.get("L")),

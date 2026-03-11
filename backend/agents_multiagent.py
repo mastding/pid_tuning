@@ -182,7 +182,7 @@ async def tool_load_data(csv_path: str) -> Dict[str, Any]:
 
 
 async def tool_fit_fopdt(dt: float = 1.0) -> Dict[str, Any]:
-    """Fit the best FOPDT model from candidate windows via the identification service."""
+    """Identify the best process model from candidate windows via the identification service."""
     result = await asyncio.to_thread(
         service_fit_fopdt_tool,
         session_store=_shared_data_store,
@@ -190,6 +190,7 @@ async def tool_fit_fopdt(dt: float = 1.0) -> Dict[str, Any]:
         fit_best_fopdt_window_fn=fit_best_fopdt_window,
         build_window_overview_fn=_build_window_overview,
         benchmark_fn=_benchmark_pid_strategies,
+        loop_type=str(_shared_data_store.get("loop_type", "flow")),
     )
     return _to_jsonable(result)
 

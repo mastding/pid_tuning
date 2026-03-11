@@ -15,7 +15,11 @@ for path in (str(ROOT), str(BACKEND_ROOT)):
         sys.path.insert(0, path)
 
 from backend.services.data_service import build_window_overview
-from backend.services.identification_service import derive_model_reason_codes, derive_next_actions
+from backend.services.identification_service import (
+    derive_model_reason_codes,
+    derive_next_actions,
+    fit_best_fopdt_window,
+)
 from backend.services.pid_evaluation_service import build_initial_assessment, diagnose_evaluation_failure
 from backend.services.pid_tuning_service import benchmark_pid_strategies, refine_pid_for_performance
 from backend.memory import experience_store
@@ -50,8 +54,54 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
         self.assertIn("模型置信度偏低", reason_codes)
         actions = derive_next_actions(0.48, reason_codes)
         self.assertIn("尝试其他辨识窗口", actions)
-        self.assertIn("确认对象是否偏离FOPDT假设", actions)
+        self.assertIn("确认对象是否偏离当前模型假设", actions)
         self.assertIn("检查采样周期或补采更高频数据", actions)
+
+    def test_identification_service_returns_selected_model_type(self) -> None:
+        df = pd.DataFrame(
+            {
+                "MV": [0.0] * 20 + [1.0] * 80,
+                "PV": [0.0] * 20
+                + [0.10, 0.18, 0.25, 0.31, 0.36, 0.40, 0.43, 0.46, 0.48, 0.50]
+                + [0.50] * 70,
+            }
+        )
+        result = fit_best_fopdt_window(
+            cleaned_df=df,
+            candidate_windows=[],
+            quality_metrics={},
+            actual_dt=1.0,
+            benchmark_fn=lambda K, T, L, dt, confidence: {
+                "best": {"strategy": "IMC", "performance_score": 6.0, "final_rating": 6.5, "is_stable": True}
+            },
+            loop_type="flow",
+        )
+        self.assertIn(result["selected_model_type"], {"FO", "FOPDT", "IPDT"})
+        self.assertIn("K", result["tuning_model"])
+        self.assertIn("T", result["tuning_model"])
+        self.assertIn("L", result["tuning_model"])
+
+    def test_temperature_loop_can_try_sopdt(self) -> None:
+        df = pd.DataFrame(
+            {
+                "MV": [0.0] * 10 + [1.0] * 110,
+                "PV": [0.0] * 10
+                + [0.01, 0.03, 0.05, 0.08, 0.12, 0.16, 0.21, 0.27, 0.33, 0.40]
+                + [0.48, 0.55, 0.61, 0.66, 0.70, 0.74, 0.77, 0.80, 0.83, 0.85]
+                + [0.87] * 90,
+            }
+        )
+        result = fit_best_fopdt_window(
+            cleaned_df=df,
+            candidate_windows=[],
+            quality_metrics={},
+            actual_dt=1.0,
+            benchmark_fn=lambda K, T, L, dt, confidence: {
+                "best": {"strategy": "LAMBDA", "performance_score": 6.0, "final_rating": 6.5, "is_stable": True}
+            },
+            loop_type="temperature",
+        )
+        self.assertIn(result["selected_model_type"], {"SOPDT", "FOPDT", "FO", "IPDT"})
 
     def test_pid_benchmark_and_refine_return_structured_results(self) -> None:
         benchmark = benchmark_pid_strategies(K=0.45, T=1.95, L=0.0, dt=1.0, confidence_score=0.8)
@@ -204,6 +254,7 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
             experience_store.append_experience_record(record)
             guidance = retrieve_experience_guidance(
                 loop_type="flow",
+                model_type="FOPDT",
                 K=0.46,
                 T=1.95,
                 L=0.0,
@@ -215,6 +266,70 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
             self.assertEqual(guidance["summary"]["preferred_refine_pattern"], "tighten_kp+tighten_ki")
             self.assertAlmostEqual(guidance["summary"]["recommended_kp_scale"], 0.75, places=2)
             self.assertAlmostEqual(guidance["summary"]["recommended_ki_scale"], 0.5, places=2)
+        finally:
+            experience_store.MEMORY_ROOT = old_root
+            experience_store.EXPERIENCE_FILE = old_file
+            experience_store.INDEX_FILE = old_index
+            gc.collect()
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_experience_guidance_prefers_same_model_type(self) -> None:
+        old_root = experience_store.MEMORY_ROOT
+        old_file = experience_store.EXPERIENCE_FILE
+        old_index = experience_store.INDEX_FILE
+        tmpdir = tempfile.mkdtemp()
+        try:
+            tmp_path = Path(tmpdir)
+            experience_store.MEMORY_ROOT = tmp_path
+            experience_store.EXPERIENCE_FILE = tmp_path / "pid_experiences.jsonl"
+            experience_store.INDEX_FILE = tmp_path / "pid_experiences.db"
+
+            base_final_result = {
+                "model": {
+                    "modelType": "IPDT",
+                    "selectedModelParams": {"K": 0.2, "L": 3.0},
+                    "K": 0.2,
+                    "T": 20.0,
+                    "L": 3.0,
+                    "normalizedRmse": 0.07,
+                    "r2Score": 0.95,
+                    "confidence": 0.82,
+                },
+                "pidParams": {"strategyRequested": "AUTO", "strategyUsed": "LAMBDA", "Kp": 0.9, "Ki": 0.1, "Kd": 0.0},
+                "evaluation": {
+                    "performance_score": 8.5,
+                    "method_confidence": 0.82,
+                    "final_rating": 8.1,
+                    "passed": True,
+                    "failure_reason": "",
+                    "feedback_target": "",
+                    "initial_assessment": {"evaluated_pid": {"Kp": 1.0, "Ki": 0.2, "Kd": 0.0}},
+                    "auto_refine_result": {"applied": True},
+                },
+                "dataAnalysis": {"windowPoints": 200, "stepEvents": 2},
+            }
+            record = build_experience_record(
+                loop_name="LIC_101A",
+                loop_type="level",
+                loop_uri="/pid/demo2",
+                data_source="history",
+                start_time="1",
+                end_time="2",
+                shared_data={"experience_guidance": {}},
+                final_result=base_final_result,
+            )
+            experience_store.append_experience_record(record)
+            guidance = retrieve_experience_guidance(
+                loop_type="level",
+                model_type="IPDT",
+                K=0.21,
+                T=22.0,
+                L=3.0,
+                limit=3,
+                candidate_strategies=["IMC", "LAMBDA"],
+            )
+            self.assertTrue(guidance["matches"])
+            self.assertEqual(guidance["matches"][0]["model_type"], "IPDT")
         finally:
             experience_store.MEMORY_ROOT = old_root
             experience_store.EXPERIENCE_FILE = old_file

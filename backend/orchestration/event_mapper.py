@@ -84,8 +84,8 @@ def build_agent_response(
         sampling_time = latest_result.get("sampling_time", 1.0)
         step_events = latest_result.get("step_events", [])
         return (
-            f"已完成数据加载与预处理，共获得 {points} 个数据点，"
-            f"当前用于辨识的窗口为 {window_points} 点，采样周期约 {_format_float(sampling_time, 2)} s，"
+            f"已完成数据加载与预处理，共获得 {points} 个数据点，当前用于辨识的窗口为 "
+            f"{window_points} 点，采样周期约 {_format_float(sampling_time, 2)} s，"
             f"检测到 {len(step_events) if isinstance(step_events, list) else 0} 个候选阶跃事件。"
         )
 
@@ -97,12 +97,42 @@ def build_agent_response(
         next_actions = latest_result.get("next_actions", [])
         if isinstance(next_actions, list) and next_actions:
             extra_parts.append(f"建议动作：{', '.join(next_actions)}。")
+        selection_reason = latest_result.get("model_selection_reason", "")
+        model_type = latest_result.get("model_type", "FOPDT")
+        selected_model_params = latest_result.get("selected_model_params", {}) or {}
         extra = f" {' '.join(extra_parts)}" if extra_parts else ""
+        if model_type == "SOPDT":
+            raw_model_summary = (
+                f"原始模型参数为 K={_format_float(selected_model_params.get('K'))}、"
+                f"T1={_format_float(selected_model_params.get('T1'))}、"
+                f"T2={_format_float(selected_model_params.get('T2'))}、"
+                f"L={_format_float(selected_model_params.get('L'))}。"
+            )
+        elif model_type == "FO":
+            raw_model_summary = (
+                f"原始模型参数为 K={_format_float(selected_model_params.get('K'))}、"
+                f"T={_format_float(selected_model_params.get('T'))}。"
+            )
+        elif model_type == "IPDT":
+            raw_model_summary = (
+                f"原始模型参数为 K={_format_float(selected_model_params.get('K'))}、"
+                f"L={_format_float(selected_model_params.get('L'))}。"
+            )
+        else:
+            raw_model_summary = (
+                f"原始模型参数为 K={_format_float(selected_model_params.get('K'))}、"
+                f"T={_format_float(selected_model_params.get('T'))}、"
+                f"L={_format_float(selected_model_params.get('L'))}。"
+            )
         return (
-            f"FOPDT 模型辨识完成，得到 K={_format_float(latest_result.get('K'))}，"
-            f"T={_format_float(latest_result.get('T'))}，L={_format_float(latest_result.get('L'))}，"
+            f"{model_type} 过程模型辨识完成，{raw_model_summary} 用于整定的等效参数为 "
+            f"K={_format_float(latest_result.get('K'))}、"
+            f"T={_format_float(latest_result.get('T'))}、"
+            f"L={_format_float(latest_result.get('L'))}，"
             f"标准化RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}，"
-            f"R² {_format_float(latest_result.get('r2_score'), 3)}，模型置信度 {_format_float(latest_result.get('confidence'), 2)}。"
+            f"R² {_format_float(latest_result.get('r2_score'), 3)}，"
+            f"模型置信度 {_format_float(latest_result.get('confidence'), 2)}。"
+            f"{(' ' + selection_reason) if selection_reason else ''}"
             f"{extra}"
         )
 
@@ -135,14 +165,14 @@ def build_agent_response(
         if not latest_result.get("passed") and latest_result.get("feedback_target"):
             extra = (
                 f" 未通过主因：{latest_result.get('failure_reason', '')}"
-                f" 建议下一步回流给 {latest_result.get('feedback_target')}，"
+                f" 建议下一步回流给 {latest_result.get('feedback_target')}："
                 f"{latest_result.get('feedback_action', '')}"
             )
         return (
             f"闭环评估完成，性能评分 {_format_float(latest_result.get('performance_score'), 2)}，"
             f"方法置信度 {_format_float(latest_result.get('method_confidence'), 2)}，"
             f"最终评分 {_format_float(latest_result.get('final_rating'), 2)}，"
-            f"{'通过' if latest_result.get('passed') else '未通过'}当前整定校核。{extra}"
+            f"{'通过' if latest_result.get('passed') else '未通过'}当前整定核验。{extra}"
         )
 
     return ""
@@ -258,39 +288,8 @@ def build_feedback_turns(
                     }
                 ],
                 "response": (
-                    "PID 细调后仍未达标，已自动回流系统辨识智能体并切换到候选窗口 "
-                    f"{model_retry_result.get('window_source', '-')}"
-                    "，重新辨识模型并生成新的整定结果。"
-                ),
-            }
-        )
-
-    final_rating = float(shared_data.get("final_rating", 0.0) or 0.0)
-    performance_score = float(shared_data.get("performance_score", 0.0) or 0.0)
-    passed = bool(shared_data.get("passed", False))
-    if auto_refine_result.get("applied") or model_retry_result.get("applied"):
-        turns.append(
-            {
-                "type": "agent_turn",
-                "agent": display_agent_names["evaluation_expert"],
-                "tools": [
-                    {
-                        "tool_name": "tool_evaluate_pid",
-                        "args": {"phase": "post_feedback_evaluation"},
-                        "result": to_jsonable(
-                            {
-                                "passed": passed,
-                                "performance_score": performance_score,
-                                "final_rating": final_rating,
-                                "feedback_target": shared_data.get("feedback_target", ""),
-                                "failure_reason": shared_data.get("failure_reason", ""),
-                            }
-                        ),
-                    }
-                ],
-                "response": (
-                    f"自动回流后已完成重新评估，当前 performance_score={performance_score:.2f}，"
-                    f"final_rating={final_rating:.2f}，结果为{'通过' if passed else '未通过'}。"
+                    "基于评估反馈，系统已自动切换到其他候选辨识窗口并重新辨识模型，"
+                    f"当前采用窗口来源：{model_retry_result.get('selected_window_source', '')}。"
                 ),
             }
         )
