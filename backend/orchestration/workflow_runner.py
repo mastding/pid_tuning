@@ -59,11 +59,7 @@ def _parse_tool_result(content: Any) -> Dict[str, Any]:
     return {"result": str(content)}
 
 
-def _build_display_result(
-    result_data: Dict[str, Any],
-    *,
-    current_tool_name: str,
-) -> Dict[str, Any]:
+def _build_display_result(result_data: Dict[str, Any], *, current_tool_name: str) -> Dict[str, Any]:
     if current_tool_name == "tool_evaluate_pid" and result_data.get("initial_assessment"):
         initial_assessment = result_data.get("initial_assessment") or {}
         initial_eval_result = initial_assessment.get("evaluation_result") or {}
@@ -103,6 +99,8 @@ async def run_multi_agent_collaboration(
     create_pid_agents: Callable[..., Any],
     finalize_agent_turn: Callable[[Dict[str, Any] | None], Dict[str, Any] | None],
     build_feedback_turns: Callable[[Dict[str, Any]], list[Dict[str, Any]]],
+    build_experience_record: Callable[..., Dict[str, Any]],
+    persist_experience_record: Callable[[Dict[str, Any]], str],
     to_jsonable: Callable[[Any], Any],
 ) -> AsyncGenerator[Dict[str, Any], None]:
     shared_data_store.clear()
@@ -157,8 +155,10 @@ async def run_multi_agent_collaboration(
             if isinstance(event, ToolCallRequestEvent):
                 if event_agent and event_agent != last_agent:
                     if current_turn_data is not None:
-                        yield finalize_agent_turn(current_turn_data)
-                        await asyncio.sleep(0.3)
+                        finalized = finalize_agent_turn(current_turn_data)
+                        if finalized is not None:
+                            yield finalized
+                            await asyncio.sleep(0.3)
 
                     current_turn_data = {
                         "type": "agent_turn",
@@ -216,8 +216,10 @@ async def run_multi_agent_collaboration(
 
             if isinstance(event, TaskResult):
                 if current_turn_data is not None:
-                    yield finalize_agent_turn(current_turn_data)
-                    await asyncio.sleep(0.3)
+                    finalized = finalize_agent_turn(current_turn_data)
+                    if finalized is not None:
+                        yield finalized
+                        await asyncio.sleep(0.3)
                 break
 
             event_type = type(event).__name__
@@ -281,6 +283,7 @@ async def run_multi_agent_collaboration(
                 "loopType": loop_type,
                 "selectionReason": shared_data.get("selection_reason", ""),
                 "selectionInputs": shared_data.get("selection_inputs", {}),
+                "experienceGuidance": shared_data.get("experience_guidance", {}),
                 "candidateStrategies": shared_data.get("candidate_strategies", []),
                 "description": effective_pid_params.get("description", shared_data.get("description", "")),
             },
@@ -304,6 +307,22 @@ async def run_multi_agent_collaboration(
                 "performance_details": shared_data.get("performance_details", {}),
                 "final_details": shared_data.get("final_details", {}),
             }
+
+        experience_record = build_experience_record(
+            loop_name=loop_name,
+            loop_type=loop_type,
+            loop_uri=loop_uri,
+            data_source="csv" if csv_path else "history",
+            start_time=shared_data.get("start_time", start_time),
+            end_time=shared_data.get("end_time", end_time),
+            shared_data=shared_data,
+            final_result=final_result,
+        )
+        experience_id = persist_experience_record(experience_record)
+        final_result["memory"] = {
+            "experienceId": experience_id,
+            "experienceGuidance": shared_data.get("experience_guidance", {}),
+        }
 
         yield {"type": "result", "data": final_result}
         yield {"type": "done", "status": "succeeded"}

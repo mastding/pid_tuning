@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from memory.experience_service import describe_experience_guidance
 from skills.pid_tuning_skills import apply_tuning_rules, select_tuning_strategy
 from skills.rating import ModelRating
 
@@ -135,6 +136,7 @@ def select_best_pid_strategy(
     normalized_rmse: float,
     r2_score: float,
     dt: float,
+    experience_guidance: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     tau_ratio = max(float(L), 0.0) / max(float(T), 1e-6)
     heuristic_selection = select_tuning_strategy(
@@ -150,6 +152,10 @@ def select_best_pid_strategy(
     candidate_results: List[Dict[str, Any]] = []
     best_candidate: Dict[str, Any] | None = None
 
+    preferred_strategy = str((experience_guidance or {}).get("preferred_strategy", ""))
+    preferred_matches = (experience_guidance or {}).get("matches") or []
+    guidance_text = describe_experience_guidance(experience_guidance or {})
+
     for strategy_name in candidate_strategies:
         pid_params = apply_tuning_rules(K, T, L, strategy_name)
         eval_result = ModelRating.evaluate(
@@ -160,6 +166,7 @@ def select_best_pid_strategy(
             method_confidence_details={"source": "model_identification_confidence"},
             dt=dt,
         )
+        experience_bonus = 0.15 if preferred_strategy and strategy_name == preferred_strategy else 0.0
         candidate = {
             "strategy": strategy_name,
             "Kp": float(pid_params["Kp"]),
@@ -171,6 +178,7 @@ def select_best_pid_strategy(
             "performance_score": float(eval_result["performance_score"]),
             "final_rating": float(eval_result.get("final_rating", 0.0)),
             "is_stable": bool(eval_result["simulation"].get("is_stable", False)),
+            "experience_bonus": experience_bonus,
             "evaluation_result": eval_result,
         }
         candidate_results.append(candidate)
@@ -178,13 +186,15 @@ def select_best_pid_strategy(
             best_candidate = candidate
             continue
 
-        better_score = candidate["performance_score"] > best_candidate["performance_score"] + 1e-9
+        candidate_composite = candidate["performance_score"] + candidate["experience_bonus"]
+        best_composite = best_candidate["performance_score"] + best_candidate.get("experience_bonus", 0.0)
+        better_score = candidate_composite > best_composite + 1e-9
         tie_break = (
-            abs(candidate["performance_score"] - best_candidate["performance_score"]) <= 1e-9
+            abs(candidate_composite - best_composite) <= 1e-9
             and candidate["final_rating"] > best_candidate["final_rating"] + 1e-9
         )
         stable_break = (
-            abs(candidate["performance_score"] - best_candidate["performance_score"]) <= 1e-9
+            abs(candidate_composite - best_composite) <= 1e-9
             and abs(candidate["final_rating"] - best_candidate["final_rating"]) <= 1e-9
             and candidate["is_stable"]
             and not best_candidate["is_stable"]
@@ -208,13 +218,13 @@ def select_best_pid_strategy(
             "performance_score": item["performance_score"],
             "final_rating": item["final_rating"],
             "is_stable": item["is_stable"],
+            "experience_bonus": item["experience_bonus"],
         }
         for item in candidate_results
     ]
-    selection_reason = (
-        f"已对 {', '.join(candidate_strategies)} 进行闭环试算，"
-        f"最终选择 performance_score 最高的 {best_candidate['strategy']}。"
-    )
+    selection_reason = f"已对 {', '.join(candidate_strategies)} 进行闭环试算，最终选择 performance_score 最高的 {best_candidate['strategy']}。"
+    if guidance_text:
+        selection_reason += f" {guidance_text}"
     selection_inputs = {
         "loop_type": loop_type,
         "model_confidence": confidence_score,
@@ -225,6 +235,8 @@ def select_best_pid_strategy(
         "T": float(T),
         "L": float(L),
         "heuristic_strategy": heuristic_selection["strategy"],
+        "experience_preferred_strategy": preferred_strategy,
+        "experience_match_count": len(preferred_matches) if isinstance(preferred_matches, list) else 0,
     }
     return {
         "heuristic_selection": heuristic_selection,
@@ -235,5 +247,5 @@ def select_best_pid_strategy(
         "pid_params": pid_params,
         "selection_reason": selection_reason,
         "selection_inputs": selection_inputs,
+        "experience_guidance": experience_guidance or {},
     }
-

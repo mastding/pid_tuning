@@ -2,6 +2,9 @@ import unittest
 import sys
 from pathlib import Path
 import asyncio
+import tempfile
+import shutil
+import gc
 
 import pandas as pd
 
@@ -15,6 +18,8 @@ from backend.services.data_service import build_window_overview
 from backend.services.identification_service import derive_model_reason_codes, derive_next_actions
 from backend.services.pid_evaluation_service import build_initial_assessment, diagnose_evaluation_failure
 from backend.services.pid_tuning_service import benchmark_pid_strategies, refine_pid_for_performance
+from backend.memory import experience_store
+from backend.memory.experience_service import build_experience_record, retrieve_experience_guidance
 from backend.orchestration.workflow_runner import run_multi_agent_collaboration
 
 
@@ -140,6 +145,12 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
                         create_pid_agents=lambda **kwargs: [],
                         finalize_agent_turn=lambda turn: turn,
                         build_feedback_turns=lambda shared: [],
+                        build_experience_record=lambda **kwargs: {
+                            "experience_id": "exp_test",
+                            "loop_type": kwargs["loop_type"],
+                            "evaluation": {"final_rating": 8.0, "passed": True},
+                        },
+                        persist_experience_record=lambda record: record["experience_id"],
                         to_jsonable=lambda value: value,
                     ):
                         events.append(event)
@@ -153,6 +164,60 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
         self.assertEqual(events[0]["type"], "user")
         self.assertEqual(events[-2]["type"], "result")
         self.assertEqual(events[-1]["type"], "done")
+        self.assertEqual(events[-2]["data"]["memory"]["experienceId"], "exp_test")
+
+    def test_experience_guidance_prefers_successful_similar_strategy(self) -> None:
+        old_root = experience_store.MEMORY_ROOT
+        old_file = experience_store.EXPERIENCE_FILE
+        old_index = experience_store.INDEX_FILE
+        tmpdir = tempfile.mkdtemp()
+        try:
+            tmp_path = Path(tmpdir)
+            experience_store.MEMORY_ROOT = tmp_path
+            experience_store.EXPERIENCE_FILE = tmp_path / "pid_experiences.jsonl"
+            experience_store.INDEX_FILE = tmp_path / "pid_experiences.db"
+
+            record = build_experience_record(
+                loop_name="FIC_101A",
+                loop_type="flow",
+                loop_uri="/pid/demo",
+                data_source="history",
+                start_time="1",
+                end_time="2",
+                shared_data={"experience_guidance": {}},
+                final_result={
+                    "model": {"K": 0.45, "T": 2.0, "L": 0.0, "normalizedRmse": 0.08, "r2Score": 0.99, "confidence": 0.8},
+                    "pidParams": {"strategyRequested": "AUTO", "strategyUsed": "LAMBDA", "Kp": 1.5, "Ki": 0.5, "Kd": 0.0},
+                    "evaluation": {
+                        "performance_score": 9.2,
+                        "method_confidence": 0.8,
+                        "final_rating": 8.9,
+                        "passed": True,
+                        "failure_reason": "",
+                        "feedback_target": "",
+                        "initial_assessment": {"evaluated_pid": {"Kp": 2.0, "Ki": 1.0, "Kd": 0.0}},
+                        "auto_refine_result": {"applied": True},
+                    },
+                    "dataAnalysis": {"windowPoints": 180, "stepEvents": 3},
+                },
+            )
+            experience_store.append_experience_record(record)
+            guidance = retrieve_experience_guidance(
+                loop_type="flow",
+                K=0.46,
+                T=1.95,
+                L=0.0,
+                limit=3,
+                candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
+            )
+            self.assertEqual(guidance["preferred_strategy"], "LAMBDA")
+            self.assertTrue(guidance["matches"])
+        finally:
+            experience_store.MEMORY_ROOT = old_root
+            experience_store.EXPERIENCE_FILE = old_file
+            experience_store.INDEX_FILE = old_index
+            gc.collect()
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 if __name__ == "__main__":

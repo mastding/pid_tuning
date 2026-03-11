@@ -53,7 +53,7 @@ def build_agent_response(
         return (
             f"FOPDT 模型辨识完成，得到 K={_format_float(latest_result.get('K'))}，"
             f"T={_format_float(latest_result.get('T'))}，L={_format_float(latest_result.get('L'))}，"
-            f"标准化 RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}，"
+            f"标准化RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}，"
             f"R² {_format_float(latest_result.get('r2_score'), 3)}，模型置信度 {_format_float(latest_result.get('confidence'), 2)}。"
             f"{extra}"
         )
@@ -73,6 +73,12 @@ def build_agent_response(
         )
         if tune_result.get("selection_reason"):
             response += f" 策略选择依据：{tune_result.get('selection_reason')}"
+        experience_guidance = tune_result.get("experience_guidance") or {}
+        guidance_text = experience_guidance.get("guidance", "")
+        if guidance_text:
+            response += f" 历史经验参考：{guidance_text}"
+        elif "experience_guidance" in tune_result:
+            response += " 历史经验参考：当前未检索到足够相似的已沉淀案例，本次主要依据当前模型闭环试算选择策略。"
         return response
 
     if agent_name == display_agent_names["evaluation_expert"]:

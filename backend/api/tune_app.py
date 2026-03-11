@@ -6,8 +6,15 @@ import tempfile
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict
 
 from fastapi import FastAPI, File, Form, UploadFile
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from memory.experience_service import (
+    get_experience_center_stats,
+    get_experience_record,
+    list_experience_summaries,
+    retrieve_experience_guidance,
+)
 
 RunCollaborationFn = Callable[..., AsyncGenerator[Dict[str, Any], None]]
 
@@ -75,6 +82,54 @@ def create_app(
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
             },
+        )
+
+    @app.get("/api/experiences/stats")
+    async def experience_stats() -> JSONResponse:
+        return JSONResponse(get_experience_center_stats())
+
+    @app.get("/api/experiences")
+    async def experience_list(
+        loop_type: str = "",
+        passed: str = "",
+        strategy: str = "",
+        keyword: str = "",
+        limit: int = 50,
+    ) -> JSONResponse:
+        return JSONResponse(
+            {
+                "items": list_experience_summaries(
+                    loop_type=loop_type,
+                    passed=passed,
+                    strategy=strategy,
+                    keyword=keyword,
+                    limit=limit,
+                )
+            }
+        )
+
+    @app.get("/api/experiences/{experience_id}")
+    async def experience_detail(experience_id: str) -> JSONResponse:
+        record = get_experience_record(experience_id)
+        return JSONResponse({"item": record})
+
+    @app.post("/api/experiences/search")
+    async def experience_search(
+        loop_type: str = Form("flow"),
+        K: float = Form(...),
+        T: float = Form(...),
+        L: float = Form(...),
+        limit: int = Form(3),
+    ) -> JSONResponse:
+        return JSONResponse(
+            retrieve_experience_guidance(
+                loop_type=loop_type,
+                K=K,
+                T=T,
+                L=L,
+                limit=limit,
+                candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
+            )
         )
 
     return app

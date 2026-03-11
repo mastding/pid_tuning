@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Mapping
 
+from memory.experience_service import retrieve_experience_guidance
+
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -169,6 +171,14 @@ def tune_pid_tool(
         "normalized_rmse": _safe_float(session_store.get("normalized_rmse"), _safe_float(session_store.get("residue"))),
         "r2_score": _safe_float(session_store.get("r2_score")),
     }
+    experience_guidance = retrieve_experience_guidance(
+        loop_type=loop_type,
+        K=float(K),
+        T=float(T),
+        L=float(L),
+        limit=3,
+        candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
+    )
     selection = select_best_pid_strategy_fn(
         K=float(K),
         T=float(T),
@@ -178,6 +188,7 @@ def tune_pid_tool(
         normalized_rmse=selected_model["normalized_rmse"],
         r2_score=selected_model["r2_score"],
         dt=float(session_store.get("dt", 1.0)),
+        experience_guidance=experience_guidance,
     )
     best_candidate = selection["best_candidate"]
     pid_params = selection["pid_params"]
@@ -188,6 +199,7 @@ def tune_pid_tool(
     session_store["strategy_used"] = best_candidate["strategy"]
     session_store["selection_reason"] = selection["selection_reason"]
     session_store["selection_inputs"] = selection["selection_inputs"]
+    session_store["experience_guidance"] = selection.get("experience_guidance", experience_guidance)
     session_store["selected_pid_params"] = {
         "Kp": float(pid_params["Kp"]),
         "Ki": float(pid_params["Ki"]),
@@ -212,6 +224,7 @@ def tune_pid_tool(
         "loop_type": loop_type,
         "selection_reason": session_store["selection_reason"],
         "selection_inputs": session_store["selection_inputs"],
+        "experience_guidance": session_store.get("experience_guidance", {}),
         "candidate_strategies": public_candidate_results,
         "description": str(pid_params["description"]),
     }

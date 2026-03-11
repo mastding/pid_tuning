@@ -47,6 +47,7 @@ from orchestration.agent_factory import create_pid_agents as orchestration_creat
 from orchestration.constants import DISPLAY_AGENT_NAMES
 from orchestration.workflow_runner import run_multi_agent_collaboration as orchestration_run_multi_agent_collaboration
 from api.tune_app import create_app
+from memory.experience_service import build_experience_record, persist_experience_record
 from state.session_store import SessionStore
 
 
@@ -289,6 +290,8 @@ async def run_multi_agent_collaboration(
         create_pid_agents=create_pid_agents,
         finalize_agent_turn=_finalize_agent_turn,
         build_feedback_turns=_build_feedback_turns,
+        build_experience_record=build_experience_record,
+        persist_experience_record=persist_experience_record,
         to_jsonable=_to_jsonable,
     ):
         yield event
