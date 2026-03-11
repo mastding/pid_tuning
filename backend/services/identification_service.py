@@ -308,6 +308,7 @@ def fit_best_fopdt_window(
                     "K": float(fitted_model["K"]),
                     "T": float(fitted_model.get("T", 0.0)),
                     "L": float(fitted_model.get("L", 0.0)),
+                    "selected_model_params": fitted_model,
                     "residue": float(fitted_model["residue"]),
                     "normalized_rmse": float(fitted_model["normalized_rmse"]),
                     "raw_rmse": float(fitted_model["raw_rmse"]),
@@ -384,7 +385,7 @@ def fit_best_fopdt_window(
 
     selection_reason = (
         f"已对候选窗口尝试 {', '.join(model_order)} 多种过程模型，"
-        f"最终选择 {selected_model_type} 作为当前最优辨识模型，并使用其对应的整定等效模型进入 PID 试算。"
+        f"最终选择 {selected_model_type} 作为当前最优辨识模型，并进入对应模型类型的 PID 试算。"
     )
 
     return {

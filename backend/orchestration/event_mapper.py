@@ -42,6 +42,7 @@ def _inject_experience_tool(
         "tool_name": "tool_search_experience",
         "args": {
             "loop_type": selection_inputs.get("loop_type"),
+            "model_type": selection_inputs.get("model_type"),
             "K": selection_inputs.get("K"),
             "T": selection_inputs.get("T"),
             "L": selection_inputs.get("L"),
@@ -49,13 +50,72 @@ def _inject_experience_tool(
         },
         "result": {
             "preferred_strategy": experience_guidance.get("preferred_strategy", ""),
+            "preferred_model_type": experience_guidance.get("preferred_model_type", ""),
             "summary": experience_guidance.get("summary", {}),
             "guidance": experience_guidance.get("guidance", ""),
             "matches": experience_guidance.get("matches", []),
+            "preferred_refine_pattern": experience_guidance.get("preferred_refine_pattern", ""),
+            "recommended_kp_scale": experience_guidance.get("recommended_kp_scale"),
+            "recommended_ki_scale": experience_guidance.get("recommended_ki_scale"),
+            "recommended_kd_scale": experience_guidance.get("recommended_kd_scale"),
         },
         "is_error": False,
     }
     return [lookup_tool, *tools]
+
+
+def _summarize_raw_model(model_type: str, model_params: Dict[str, Any]) -> str:
+    normalized = (model_type or "FOPDT").upper()
+    if normalized == "SOPDT":
+        return (
+            f"原始模型参数 K={_format_float(model_params.get('K'))}、"
+            f"T1={_format_float(model_params.get('T1'))}、"
+            f"T2={_format_float(model_params.get('T2'))}、"
+            f"L={_format_float(model_params.get('L'))}。"
+        )
+    if normalized == "FO":
+        return (
+            f"原始模型参数 K={_format_float(model_params.get('K'))}、"
+            f"T={_format_float(model_params.get('T'))}。"
+        )
+    if normalized == "IPDT":
+        return (
+            f"原始模型参数 K={_format_float(model_params.get('K'))}、"
+            f"L={_format_float(model_params.get('L'))}。"
+        )
+    return (
+        f"原始模型参数 K={_format_float(model_params.get('K'))}、"
+        f"T={_format_float(model_params.get('T'))}、"
+        f"L={_format_float(model_params.get('L'))}。"
+    )
+
+
+def _summarize_tuning_model(model_type: str, latest_result: Dict[str, Any]) -> str:
+    if model_type == "SOPDT":
+        return (
+            f"当前整定阶段采用的工作模型参数为 "
+            f"K={_format_float(latest_result.get('K'))}、"
+            f"T={_format_float(latest_result.get('T'))}、"
+            f"L={_format_float(latest_result.get('L'))}。"
+        )
+    if model_type == "IPDT":
+        return (
+            f"当前整定阶段采用积分过程参数 "
+            f"K={_format_float(latest_result.get('K'))}、"
+            f"L={_format_float(latest_result.get('L'))}。"
+        )
+    if model_type == "FO":
+        return (
+            f"当前整定阶段采用一阶工作模型参数 "
+            f"K={_format_float(latest_result.get('K'))}、"
+            f"T={_format_float(latest_result.get('T'))}。"
+        )
+    return (
+        f"当前整定阶段采用工作模型参数 "
+        f"K={_format_float(latest_result.get('K'))}、"
+        f"T={_format_float(latest_result.get('T'))}、"
+        f"L={_format_float(latest_result.get('L'))}。"
+    )
 
 
 def build_agent_response(
@@ -84,8 +144,9 @@ def build_agent_response(
         sampling_time = latest_result.get("sampling_time", 1.0)
         step_events = latest_result.get("step_events", [])
         return (
-            f"已完成数据加载与预处理，共获得 {points} 个数据点，当前用于辨识的窗口为 "
-            f"{window_points} 点，采样周期约 {_format_float(sampling_time, 2)} s，"
+            f"已完成数据加载与预处理，共获得 {points} 个数据点，"
+            f"当前用于辨识的窗口为 {window_points} 点，"
+            f"采样周期约 {_format_float(sampling_time, 2)} s，"
             f"检测到 {len(step_events) if isinstance(step_events, list) else 0} 个候选阶跃事件。"
         )
 
@@ -97,44 +158,20 @@ def build_agent_response(
         next_actions = latest_result.get("next_actions", [])
         if isinstance(next_actions, list) and next_actions:
             extra_parts.append(f"建议动作：{', '.join(next_actions)}。")
+
         selection_reason = latest_result.get("model_selection_reason", "")
-        model_type = latest_result.get("model_type", "FOPDT")
+        model_type = str(latest_result.get("model_type", "FOPDT")).upper()
         selected_model_params = latest_result.get("selected_model_params", {}) or {}
-        extra = f" {' '.join(extra_parts)}" if extra_parts else ""
-        if model_type == "SOPDT":
-            raw_model_summary = (
-                f"原始模型参数为 K={_format_float(selected_model_params.get('K'))}、"
-                f"T1={_format_float(selected_model_params.get('T1'))}、"
-                f"T2={_format_float(selected_model_params.get('T2'))}、"
-                f"L={_format_float(selected_model_params.get('L'))}。"
-            )
-        elif model_type == "FO":
-            raw_model_summary = (
-                f"原始模型参数为 K={_format_float(selected_model_params.get('K'))}、"
-                f"T={_format_float(selected_model_params.get('T'))}。"
-            )
-        elif model_type == "IPDT":
-            raw_model_summary = (
-                f"原始模型参数为 K={_format_float(selected_model_params.get('K'))}、"
-                f"L={_format_float(selected_model_params.get('L'))}。"
-            )
-        else:
-            raw_model_summary = (
-                f"原始模型参数为 K={_format_float(selected_model_params.get('K'))}、"
-                f"T={_format_float(selected_model_params.get('T'))}、"
-                f"L={_format_float(selected_model_params.get('L'))}。"
-            )
-        return (
-            f"{model_type} 过程模型辨识完成，{raw_model_summary} 用于整定的等效参数为 "
-            f"K={_format_float(latest_result.get('K'))}、"
-            f"T={_format_float(latest_result.get('T'))}、"
-            f"L={_format_float(latest_result.get('L'))}，"
-            f"标准化RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}，"
-            f"R² {_format_float(latest_result.get('r2_score'), 3)}，"
+        raw_model_summary = _summarize_raw_model(model_type, selected_model_params)
+        tuning_model_summary = _summarize_tuning_model(model_type, latest_result)
+        quality_summary = (
+            f"标准化 RMSE {_format_float(latest_result.get('normalized_rmse', latest_result.get('residue')))}、"
+            f"R² {_format_float(latest_result.get('r2_score'), 3)}、"
             f"模型置信度 {_format_float(latest_result.get('confidence'), 2)}。"
-            f"{(' ' + selection_reason) if selection_reason else ''}"
-            f"{extra}"
         )
+        suffix = f" 选模依据：{selection_reason}" if selection_reason else ""
+        extra = f" {' '.join(extra_parts)}" if extra_parts else ""
+        return f"{model_type} 过程模型辨识完成，{raw_model_summary} {tuning_model_summary} {quality_summary}{suffix}{extra}"
 
     if agent_name == display_agent_names["pid_expert"]:
         tune_result = None
@@ -147,7 +184,8 @@ def build_agent_response(
 
         response = (
             f"已按 {tune_result.get('strategy_used', tune_result.get('strategy', '当前策略'))} 策略完成整定，"
-            f"Kp={_format_float(tune_result.get('Kp'))}，Ki={_format_float(tune_result.get('Ki'))}，"
+            f"Kp={_format_float(tune_result.get('Kp'))}，"
+            f"Ki={_format_float(tune_result.get('Ki'))}，"
             f"Kd={_format_float(tune_result.get('Kd'))}。"
         )
         if tune_result.get("selection_reason"):
@@ -165,14 +203,14 @@ def build_agent_response(
         if not latest_result.get("passed") and latest_result.get("feedback_target"):
             extra = (
                 f" 未通过主因：{latest_result.get('failure_reason', '')}"
-                f" 建议下一步回流给 {latest_result.get('feedback_target')}："
+                f" 建议下一步回流给 {latest_result.get('feedback_target')}，"
                 f"{latest_result.get('feedback_action', '')}"
             )
         return (
             f"闭环评估完成，性能评分 {_format_float(latest_result.get('performance_score'), 2)}，"
             f"方法置信度 {_format_float(latest_result.get('method_confidence'), 2)}，"
             f"最终评分 {_format_float(latest_result.get('final_rating'), 2)}，"
-            f"{'通过' if latest_result.get('passed') else '未通过'}当前整定核验。{extra}"
+            f"{'通过' if latest_result.get('passed') else '未通过'}当前整定校验。{extra}"
         )
 
     return ""

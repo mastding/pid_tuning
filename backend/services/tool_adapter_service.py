@@ -193,6 +193,7 @@ def tune_pid_tool(
         K=float(K),
         T=float(T),
         L=float(L),
+        selected_model_params=dict(session_store.get("selected_model_params") or {}),
         limit=3,
         candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
     )
@@ -321,8 +322,35 @@ def evaluate_pid_tool(
     session_store["initial_assessment"] = initial_assessment
 
     if not passed and diagnosis.get("feedback_target") == "pid_expert":
+        model_type = str(session_store.get("model_type", "FOPDT")).upper()
+        selected_model_params = dict(session_store.get("selected_model_params") or {})
+        if model_type == "SOPDT":
+            refine_model_params = {
+                "model_type": "SOPDT",
+                "K": float(selected_model_params.get("K", K)),
+                "T1": float(selected_model_params.get("T1", T)),
+                "T2": float(selected_model_params.get("T2", T)),
+                "L": float(selected_model_params.get("L", L)),
+            }
+        elif model_type == "IPDT":
+            refine_model_params = {
+                "model_type": "IPDT",
+                "K": float(selected_model_params.get("K", K)),
+                "L": max(float(selected_model_params.get("L", L)), 1e-3),
+            }
+        elif model_type == "FO":
+            refine_model_params = {
+                "model_type": "FO",
+                "K": float(selected_model_params.get("K", K)),
+                "T1": float(selected_model_params.get("T", T)),
+                "T2": 0.0,
+                "L": 0.0,
+            }
+        else:
+            refine_model_params = {"model_type": "FOPDT", "K": float(K), "T1": float(T), "T2": 0.0, "L": float(L)}
+
         refined = refine_pid_for_performance_fn(
-            model_params={"K": float(K), "T1": float(T), "T2": 0.0, "L": float(L)},
+            model_params=refine_model_params,
             base_pid_params={"Kp": float(Kp), "Ki": float(Ki), "Kd": float(Kd)},
             method_confidence=method_confidence,
             dt=float(session_store.get("dt", 1.0)),

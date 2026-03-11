@@ -101,6 +101,7 @@ async def run_multi_agent_collaboration(
     build_feedback_turns: Callable[[Dict[str, Any]], list[Dict[str, Any]]],
     build_experience_record: Callable[..., Dict[str, Any]],
     persist_experience_record: Callable[[Dict[str, Any]], str],
+    register_experience_reuse: Callable[..., Dict[str, Any]] | None,
     to_jsonable: Callable[[Any], Any],
 ) -> AsyncGenerator[Dict[str, Any], None]:
     shared_data_store.clear()
@@ -325,9 +326,18 @@ async def run_multi_agent_collaboration(
             final_result=final_result,
         )
         experience_id = persist_experience_record(experience_record)
+        referenced_experience_ids = experience_record.get("referenced_experience_ids") or []
+        reuse_summary = {}
+        if register_experience_reuse and referenced_experience_ids:
+            reuse_summary = register_experience_reuse(
+                referenced_experience_ids,
+                follow_up_passed=bool(final_result.get("evaluation", {}).get("passed", False)),
+                follow_up_final_rating=float(final_result.get("evaluation", {}).get("final_rating", 0.0) or 0.0),
+            )
         final_result["memory"] = {
             "experienceId": experience_id,
             "experienceGuidance": shared_data.get("experience_guidance", {}),
+            "referenceReuse": reuse_summary,
         }
 
         yield {"type": "result", "data": final_result}

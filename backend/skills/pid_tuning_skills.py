@@ -41,6 +41,7 @@ def select_tuning_strategy(
             "loop_type": loop_name,
             "model_type": normalized_model_type,
         }
+
     if model_confidence < 0.55 or normalized_rmse > 0.1 or r2_score < 0.75:
         return {
             "strategy": "LAMBDA",
@@ -70,7 +71,7 @@ def select_tuning_strategy(
         strategy = "LAMBDA" if loop_name in {"temperature", "level"} else "IMC"
         return {
             "strategy": strategy,
-            "reason": "SOPDT 模型优先采用保守的 Lambda/IMC，必要时再做降阶近似。",
+            "reason": "SOPDT 模型优先采用保守的 Lambda/IMC，并保留主导与次级时间常数信息。",
             "loop_type": loop_name,
             "model_type": normalized_model_type,
         }
@@ -180,32 +181,38 @@ def tune_sopdt(K: float, T1: float, T2: float, L: float, strategy: str) -> Dict:
     T1 = max(float(T1), 1e-3)
     T2 = max(float(T2), 1e-3)
     L = max(float(L), 0.0)
-    smaller_tau = min(T1, T2)
-    t_equiv = T1 + T2
-    l_equiv = L + 0.4 * smaller_tau
+
+    dominant_tau = max(T1, T2)
+    secondary_tau = min(T1, T2)
+    tau_ratio = secondary_tau / max(dominant_tau, 1e-6)
+
+    # Keep the dominant/secondary structure visible rather than collapsing directly to T1+T2.
+    damping_buffer = 0.25 + 0.35 * min(max(tau_ratio, 0.0), 1.0)
+    t_work = dominant_tau + damping_buffer * secondary_tau
+    l_work = L + (0.20 + 0.15 * min(max(tau_ratio, 0.0), 1.0)) * secondary_tau
 
     if strategy_name in {"LAMBDA", "LAMBDA_TUNING"}:
-        lambda_c = max(t_equiv, 1.5 * l_equiv, 1e-3)
-        Kp = t_equiv / (abs_k * (lambda_c + l_equiv))
-        Ti = max(1.2 * t_equiv + 0.5 * l_equiv, 1e-3)
-        Td = min(0.25 * t_equiv, max(l_equiv, 0.0))
-        description = "SOPDT Lambda reduced-order"
+        lambda_c = max(1.15 * t_work, 1.8 * l_work, 1e-3)
+        Kp = t_work / (abs_k * (lambda_c + l_work))
+        Ti = max(dominant_tau + 0.85 * secondary_tau + 0.4 * l_work, 1e-3)
+        Td = min(0.22 * dominant_tau + 0.08 * secondary_tau, max(l_work, 0.0))
+        description = "SOPDT Lambda dominant-secondary"
     elif strategy_name == "IMC":
-        lambda_c = max(0.8 * t_equiv, l_equiv, 1e-3)
-        Kp = t_equiv / (abs_k * (lambda_c + l_equiv))
-        Ti = max(1.1 * t_equiv, 1e-3)
-        Td = min(0.2 * t_equiv, max(l_equiv, 0.0))
-        description = "SOPDT IMC reduced-order"
+        lambda_c = max(0.95 * t_work, 1.2 * l_work, 1e-3)
+        Kp = t_work / (abs_k * (lambda_c + l_work))
+        Ti = max(dominant_tau + 0.65 * secondary_tau, 1e-3)
+        Td = min(0.18 * dominant_tau + 0.06 * secondary_tau, max(l_work, 0.0))
+        description = "SOPDT IMC dominant-secondary"
     elif strategy_name == "ZN":
-        effective_l = max(l_equiv, 0.15 * t_equiv, 1e-3)
-        Kp = 0.9 * t_equiv / (abs_k * effective_l)
+        effective_l = max(l_work, 0.18 * t_work, 1e-3)
+        Kp = 0.75 * t_work / (abs_k * effective_l)
         Ti = 2.5 * effective_l
         Td = 0.35 * effective_l
         description = "SOPDT moderated ZN"
     else:
-        effective_l = max(l_equiv, 0.15 * t_equiv, 1e-3)
-        Kp = 0.45 * t_equiv / (abs_k * effective_l)
-        Ti = max(t_equiv, 1e-3)
+        effective_l = max(l_work, 0.18 * t_work, 1e-3)
+        Kp = 0.42 * t_work / (abs_k * effective_l)
+        Ti = max(t_work, 1e-3)
         Td = 0.25 * effective_l
         description = "SOPDT CHR-like"
 
@@ -221,8 +228,11 @@ def tune_sopdt(K: float, T1: float, T2: float, L: float, strategy: str) -> Dict:
             "Td": float(Td),
             "T1": float(T1),
             "T2": float(T2),
-            "L_equiv": float(l_equiv),
-            "T_equiv": float(t_equiv),
+            "T_dominant": float(dominant_tau),
+            "T_secondary": float(secondary_tau),
+            "tau_ratio": float(tau_ratio),
+            "L_work": float(l_work),
+            "T_work": float(t_work),
         }
     )
     return params
@@ -257,12 +267,23 @@ def tune_ipdt(K: float, L: float, strategy: str) -> Dict:
     return params
 
 
-def apply_tuning_rules(K: float, T: float, L: float, strategy: str = "IMC", model_type: str = "FOPDT", model_params: Dict | None = None) -> Dict:
+def apply_tuning_rules(
+    K: float,
+    T: float,
+    L: float,
+    strategy: str = "IMC",
+    model_type: str = "FOPDT",
+    model_params: Dict | None = None,
+) -> Dict:
     normalized_model_type = (model_type or "FOPDT").strip().upper()
     model_params = model_params or {}
 
     if normalized_model_type == "FO":
-        return tune_fo(K=float(model_params.get("K", K)), T=float(model_params.get("T", T)), strategy=strategy)
+        return tune_fo(
+            K=float(model_params.get("K", K)),
+            T=float(model_params.get("T", T)),
+            strategy=strategy,
+        )
     if normalized_model_type == "SOPDT":
         return tune_sopdt(
             K=float(model_params.get("K", K)),
@@ -272,8 +293,17 @@ def apply_tuning_rules(K: float, T: float, L: float, strategy: str = "IMC", mode
             strategy=strategy,
         )
     if normalized_model_type == "IPDT":
-        return tune_ipdt(K=float(model_params.get("K", K)), L=float(model_params.get("L", L)), strategy=strategy)
-    return tune_fopdt(K=float(model_params.get("K", K)), T=float(model_params.get("T", T)), L=float(model_params.get("L", L)), strategy=strategy)
+        return tune_ipdt(
+            K=float(model_params.get("K", K)),
+            L=float(model_params.get("L", L)),
+            strategy=strategy,
+        )
+    return tune_fopdt(
+        K=float(model_params.get("K", K)),
+        T=float(model_params.get("T", T)),
+        L=float(model_params.get("L", L)),
+        strategy=strategy,
+    )
 
 
 def controller_logic_translator(raw_params: Dict, brand: str = "Siemens") -> Dict:

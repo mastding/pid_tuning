@@ -14,6 +14,7 @@ from memory.experience_service import (
     get_experience_center_stats,
     get_experience_record,
     list_experience_summaries,
+    rebuild_experience_center_index,
     retrieve_experience_guidance,
 )
 
@@ -92,6 +93,7 @@ def create_app(
     @app.get("/api/experiences")
     async def experience_list(
         loop_type: str = "",
+        model_type: str = "",
         passed: str = "",
         strategy: str = "",
         keyword: str = "",
@@ -101,6 +103,7 @@ def create_app(
             {
                 "items": list_experience_summaries(
                     loop_type=loop_type,
+                    model_type=model_type,
                     passed=passed,
                     strategy=strategy,
                     keyword=keyword,
@@ -117,6 +120,7 @@ def create_app(
     @app.post("/api/experiences/search")
     async def experience_search(
         loop_type: str = Form("flow"),
+        model_type: str = Form("FOPDT"),
         K: float = Form(...),
         T: float = Form(...),
         L: float = Form(...),
@@ -125,6 +129,7 @@ def create_app(
         return JSONResponse(
             retrieve_experience_guidance(
                 loop_type=loop_type,
+                model_type=model_type,
                 K=K,
                 T=T,
                 L=L,
@@ -136,5 +141,9 @@ def create_app(
     @app.post("/api/experiences/actions/clear")
     async def experience_clear() -> JSONResponse:
         return JSONResponse(clear_experience_center())
+
+    @app.post("/api/experiences/actions/reindex")
+    async def experience_reindex() -> JSONResponse:
+        return JSONResponse(rebuild_experience_center_index())
 
     return app

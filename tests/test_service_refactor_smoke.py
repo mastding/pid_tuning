@@ -20,8 +20,8 @@ from backend.services.identification_service import (
     derive_next_actions,
     fit_best_fopdt_window,
 )
-from backend.services.pid_evaluation_service import build_initial_assessment, diagnose_evaluation_failure
-from backend.services.pid_tuning_service import benchmark_pid_strategies, refine_pid_for_performance
+from backend.services.pid_evaluation_service import build_initial_assessment, diagnose_evaluation_failure, evaluate_pid_model
+from backend.services.pid_tuning_service import benchmark_pid_strategies, refine_pid_for_performance, select_best_pid_strategy
 from backend.memory import experience_store
 from backend.memory.experience_service import build_experience_record, retrieve_experience_guidance
 from backend.orchestration.workflow_runner import run_multi_agent_collaboration
@@ -151,6 +151,25 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
         self.assertFalse(assessment["passed"])
         self.assertEqual(assessment["feedback_target"], "pid_expert")
 
+    def test_ipdt_evaluation_uses_integrating_process_model(self) -> None:
+        result = evaluate_pid_model(
+            K=0.12,
+            T=0.0,
+            L=2.0,
+            Kp=1.2,
+            Ki=0.08,
+            Kd=0.0,
+            method="lambda",
+            method_confidence=0.75,
+            model_confidence={"quality": "good", "recommendation": ""},
+            dt=1.0,
+            model_type="IPDT",
+            selected_model_params={"model_type": "IPDT", "K": 0.12, "L": 2.0},
+        )
+        self.assertIn("simulation", result)
+        self.assertIn("performance_score", result)
+        self.assertIsInstance(result["simulation"]["pv_history"], list)
+
     def test_workflow_runner_emits_user_result_done(self) -> None:
         class DummyTeam:
             def __init__(self, *args, **kwargs):
@@ -201,6 +220,7 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
                             "evaluation": {"final_rating": 8.0, "passed": True},
                         },
                         persist_experience_record=lambda record: record["experience_id"],
+                        register_experience_reuse=lambda *args, **kwargs: {"updated": 0},
                         to_jsonable=lambda value: value,
                     ):
                         events.append(event)
@@ -251,6 +271,7 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
                     "dataAnalysis": {"windowPoints": 180, "stepEvents": 3},
                 },
             )
+            self.assertIn("tuning_model", record["model"])
             experience_store.append_experience_record(record)
             guidance = retrieve_experience_guidance(
                 loop_type="flow",
@@ -258,11 +279,13 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
                 K=0.46,
                 T=1.95,
                 L=0.0,
+                selected_model_params={"model_type": "FOPDT", "K": 0.46, "T": 1.95, "L": 0.0},
                 limit=3,
                 candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
             )
             self.assertEqual(guidance["preferred_strategy"], "LAMBDA")
             self.assertTrue(guidance["matches"])
+            self.assertEqual(guidance["preferred_model_type"], "FOPDT")
             self.assertEqual(guidance["summary"]["preferred_refine_pattern"], "tighten_kp+tighten_ki")
             self.assertAlmostEqual(guidance["summary"]["recommended_kp_scale"], 0.75, places=2)
             self.assertAlmostEqual(guidance["summary"]["recommended_ki_scale"], 0.5, places=2)
@@ -325,11 +348,77 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
                 K=0.21,
                 T=22.0,
                 L=3.0,
+                selected_model_params={"model_type": "IPDT", "K": 0.21, "L": 3.0},
                 limit=3,
                 candidate_strategies=["IMC", "LAMBDA"],
             )
             self.assertTrue(guidance["matches"])
             self.assertEqual(guidance["matches"][0]["model_type"], "IPDT")
+        finally:
+            experience_store.MEMORY_ROOT = old_root
+            experience_store.EXPERIENCE_FILE = old_file
+            experience_store.INDEX_FILE = old_index
+            gc.collect()
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_experience_guidance_prefers_matching_raw_sopdt_model(self) -> None:
+        old_root = experience_store.MEMORY_ROOT
+        old_file = experience_store.EXPERIENCE_FILE
+        old_index = experience_store.INDEX_FILE
+        tmpdir = tempfile.mkdtemp()
+        try:
+            tmp_path = Path(tmpdir)
+            experience_store.MEMORY_ROOT = tmp_path
+            experience_store.EXPERIENCE_FILE = tmp_path / "pid_experiences.jsonl"
+            experience_store.INDEX_FILE = tmp_path / "pid_experiences.db"
+
+            record = build_experience_record(
+                loop_name="TIC_201",
+                loop_type="temperature",
+                loop_uri="/pid/temp",
+                data_source="history",
+                start_time="1",
+                end_time="2",
+                shared_data={"experience_guidance": {}},
+                final_result={
+                    "model": {
+                        "modelType": "SOPDT",
+                        "selectedModelParams": {"model_type": "SOPDT", "K": 1.2, "T1": 15.0, "T2": 30.0, "L": 5.0},
+                        "K": 1.2,
+                        "T": 45.0,
+                        "L": 5.0,
+                        "normalizedRmse": 0.06,
+                        "r2Score": 0.99,
+                        "confidence": 0.82,
+                    },
+                    "pidParams": {"strategyRequested": "AUTO", "strategyUsed": "LAMBDA", "Kp": 1.0, "Ki": 0.1, "Kd": 0.0},
+                    "evaluation": {
+                        "performance_score": 8.8,
+                        "method_confidence": 0.82,
+                        "final_rating": 8.2,
+                        "passed": True,
+                        "failure_reason": "",
+                        "feedback_target": "",
+                        "initial_assessment": {"evaluated_pid": {"Kp": 1.2, "Ki": 0.15, "Kd": 0.0}},
+                        "auto_refine_result": {"applied": True},
+                    },
+                    "dataAnalysis": {"windowPoints": 200, "stepEvents": 2},
+                },
+            )
+            experience_store.append_experience_record(record)
+            guidance = retrieve_experience_guidance(
+                loop_type="temperature",
+                model_type="SOPDT",
+                K=1.18,
+                T=45.0,
+                L=5.2,
+                selected_model_params={"model_type": "SOPDT", "K": 1.18, "T1": 14.5, "T2": 31.0, "L": 5.2},
+                limit=3,
+                candidate_strategies=["IMC", "LAMBDA"],
+            )
+            self.assertTrue(guidance["matches"])
+            self.assertEqual(guidance["matches"][0]["model_type"], "SOPDT")
+            self.assertEqual(guidance["preferred_strategy"], "LAMBDA")
         finally:
             experience_store.MEMORY_ROOT = old_root
             experience_store.EXPERIENCE_FILE = old_file
@@ -384,6 +473,112 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
             experience_store.INDEX_FILE = old_index
             gc.collect()
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_register_experience_references_updates_reuse_counters(self) -> None:
+        old_root = experience_store.MEMORY_ROOT
+        old_file = experience_store.EXPERIENCE_FILE
+        old_index = experience_store.INDEX_FILE
+        tmpdir = tempfile.mkdtemp()
+        try:
+            tmp_path = Path(tmpdir)
+            experience_store.MEMORY_ROOT = tmp_path
+            experience_store.EXPERIENCE_FILE = tmp_path / "pid_experiences.jsonl"
+            experience_store.INDEX_FILE = tmp_path / "pid_experiences.db"
+
+            record = build_experience_record(
+                loop_name="TIC_301",
+                loop_type="temperature",
+                loop_uri="/pid/tic301",
+                data_source="history",
+                start_time="1",
+                end_time="2",
+                shared_data={"experience_guidance": {}},
+                final_result={
+                    "model": {
+                        "modelType": "SOPDT",
+                        "selectedModelParams": {"model_type": "SOPDT", "K": 1.1, "T1": 12.0, "T2": 24.0, "L": 4.0},
+                        "K": 1.1,
+                        "T": 36.0,
+                        "L": 4.0,
+                        "normalizedRmse": 0.05,
+                        "r2Score": 0.99,
+                        "confidence": 0.86,
+                    },
+                    "pidParams": {"strategyRequested": "AUTO", "strategyUsed": "LAMBDA", "Kp": 0.9, "Ki": 0.08, "Kd": 0.0},
+                    "evaluation": {
+                        "performance_score": 8.9,
+                        "method_confidence": 0.86,
+                        "final_rating": 8.4,
+                        "passed": True,
+                        "failure_reason": "",
+                        "feedback_target": "",
+                        "initial_assessment": {"evaluated_pid": {"Kp": 1.1, "Ki": 0.12, "Kd": 0.0}},
+                        "auto_refine_result": {"applied": True},
+                    },
+                    "dataAnalysis": {"windowPoints": 220, "stepEvents": 2},
+                },
+            )
+            exp_id = experience_store.append_experience_record(record)
+            summary = experience_store.register_experience_references(
+                [exp_id],
+                hit_time="2026-03-12T10:00:00+08:00",
+                follow_up_passed=True,
+                follow_up_final_rating=8.8,
+            )
+            self.assertEqual(summary["updated"], 1)
+
+            listed = experience_store.list_experiences(limit=5)
+            self.assertEqual(listed[0]["reuse"]["hit_count"], 1)
+            self.assertEqual(listed[0]["reuse"]["follow_up_success_count"], 1)
+            self.assertEqual(listed[0]["reuse"]["last_hit_at"], "2026-03-12T10:00:00+08:00")
+
+            detail = experience_store.get_experience_detail(exp_id)
+            self.assertEqual(detail["reuse"]["hit_count"], 1)
+            self.assertTrue(detail["reuse"]["last_follow_up_passed"])
+        finally:
+            experience_store.MEMORY_ROOT = old_root
+            experience_store.EXPERIENCE_FILE = old_file
+            experience_store.INDEX_FILE = old_index
+            gc.collect()
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_select_best_pid_strategy_can_emit_history_seeded_candidate(self) -> None:
+        guidance = {
+            "preferred_strategy": "LAMBDA",
+            "matches": [
+                {
+                    "experience_id": "exp_seed",
+                    "model_type": "SOPDT",
+                    "model": {"selected_model_params": {"model_type": "SOPDT", "K": 1.0, "T1": 10.0, "T2": 20.0, "L": 4.0}},
+                    "pid": {"final": {"Kp": 0.8, "Ki": 0.06, "Kd": 0.0}},
+                    "evaluation": {"final_rating": 8.5, "performance_score": 8.7, "passed": True},
+                    "similarity_score": 12.0,
+                }
+            ],
+            "summary": {
+                "preferred_strategy": "LAMBDA",
+                "preferred_model_type": "SOPDT",
+                "recommended_kp_scale": 0.85,
+                "recommended_ki_scale": 0.8,
+                "recommended_kd_scale": 1.0,
+                "preferred_refine_pattern": "tighten_kp+tighten_ki",
+            },
+        }
+        result = select_best_pid_strategy(
+            K=1.02,
+            T=30.0,
+            L=4.2,
+            loop_type="temperature",
+            model_type="SOPDT",
+            selected_model_params={"model_type": "SOPDT", "K": 1.02, "T1": 11.0, "T2": 19.0, "L": 4.2},
+            confidence_score=0.82,
+            normalized_rmse=0.05,
+            r2_score=0.98,
+            dt=1.0,
+            experience_guidance=guidance,
+        )
+        self.assertTrue(any(item.get("history_seeded") for item in result["public_candidate_results"]))
+        self.assertEqual(result["selection_inputs"]["experience_top_match_id"], "exp_seed")
 
 
 if __name__ == "__main__":

@@ -741,6 +741,7 @@ class ModelRating:
         eps = 1e-10
         
         # 解析模型参数
+        model_type = str(model_params.get('model_type', 'FOPDT')).upper()
         K = model_params.get('K', 1.0)
         T1 = max(model_params.get('T1', 10.0), eps)
         T2 = model_params.get('T2', 0.0)
@@ -811,16 +812,20 @@ class ModelRating:
             delta_mv_delayed = delta_mv_buf.popleft()
             
             # 过程模型更新
-            alpha1 = dt / T1
-            if T2 > eps:
-                # 二阶
-                alpha2 = dt / max(T2, T1 * 0.1)
-                delta_pv_new = delta_pv + alpha1 * (K * delta_mv_delayed - delta_pv)
-                delta_x2 = delta_x2 + alpha2 * (delta_pv_new - delta_x2)
-                delta_pv = delta_x2
+            if model_type == 'IPDT':
+                # Integrating-plus-dead-time: dPV/dt = K * delayed_dMV
+                delta_pv = delta_pv + K * delta_mv_delayed * dt
             else:
-                # 一阶
-                delta_pv = delta_pv + alpha1 * (K * delta_mv_delayed - delta_pv)
+                alpha1 = dt / T1
+                if T2 > eps:
+                    # 二阶
+                    alpha2 = dt / max(T2, T1 * 0.1)
+                    delta_pv_new = delta_pv + alpha1 * (K * delta_mv_delayed - delta_pv)
+                    delta_x2 = delta_x2 + alpha2 * (delta_pv_new - delta_x2)
+                    delta_pv = delta_x2
+                else:
+                    # 一阶
+                    delta_pv = delta_pv + alpha1 * (K * delta_mv_delayed - delta_pv)
         
         # 计算指标
         pv_resp = pv_hist[step_time:]

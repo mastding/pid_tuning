@@ -24,13 +24,28 @@ def evaluate_pid_model(
     normalized_type = str(model_type or selected_model_params.get("model_type", "FOPDT")).upper()
     if normalized_type == "SOPDT":
         model_params = {
+            "model_type": "SOPDT",
             "K": float(selected_model_params.get("K", K)),
             "T1": float(selected_model_params.get("T1", T)),
             "T2": float(selected_model_params.get("T2", T)),
             "L": float(selected_model_params.get("L", L)),
         }
+    elif normalized_type == "IPDT":
+        model_params = {
+            "model_type": "IPDT",
+            "K": float(selected_model_params.get("K", K)),
+            "L": max(float(selected_model_params.get("L", L)), 1e-3),
+        }
+    elif normalized_type == "FO":
+        model_params = {
+            "model_type": "FO",
+            "K": float(selected_model_params.get("K", K)),
+            "T1": float(selected_model_params.get("T", T)),
+            "T2": 0.0,
+            "L": 0.0,
+        }
     else:
-        model_params = {"K": K, "T1": T, "T2": 0.0, "L": L}
+        model_params = {"model_type": "FOPDT", "K": K, "T1": T, "T2": 0.0, "L": L}
 
     return ModelRating.evaluate(
         model_params=model_params,
@@ -133,7 +148,7 @@ def choose_alternative_model_attempt(
     loop_type: str,
     dt: float,
     pass_threshold: float,
-    benchmark_fn: Callable[[float, float, float, float, float], Dict[str, Any]],
+    benchmark_fn: Callable[..., Dict[str, Any]],
     refine_fn: Callable[[Dict[str, float], Dict[str, float], float, float, str], Dict[str, Any]],
 ) -> Dict[str, Any]:
     if len(attempts) <= 1:
@@ -148,14 +163,41 @@ def choose_alternative_model_attempt(
         K = float(attempt["K"])
         T = float(attempt["T"])
         L = float(attempt["L"])
+        model_type = str(attempt.get("model_type", "FOPDT")).upper()
+        selected_model_params = dict(attempt.get("selected_model_params") or {})
         confidence_score = float(attempt.get("confidence", 0.0))
-        benchmark = benchmark_fn(K, T, L, dt, confidence_score)
+        benchmark = benchmark_fn(K, T, L, dt, confidence_score, model_type, selected_model_params)
         best_strategy = benchmark.get("best") or {}
         if not best_strategy:
             continue
 
+        if model_type == "SOPDT":
+            model_params = {
+                "model_type": "SOPDT",
+                "K": float(selected_model_params.get("K", K)),
+                "T1": float(selected_model_params.get("T1", T)),
+                "T2": float(selected_model_params.get("T2", T)),
+                "L": float(selected_model_params.get("L", L)),
+            }
+        elif model_type == "IPDT":
+            model_params = {
+                "model_type": "IPDT",
+                "K": float(selected_model_params.get("K", K)),
+                "L": max(float(selected_model_params.get("L", L)), 1e-3),
+            }
+        elif model_type == "FO":
+            model_params = {
+                "model_type": "FO",
+                "K": float(selected_model_params.get("K", K)),
+                "T1": float(selected_model_params.get("T", T)),
+                "T2": 0.0,
+                "L": 0.0,
+            }
+        else:
+            model_params = {"model_type": "FOPDT", "K": K, "T1": T, "T2": 0.0, "L": L}
+
         refined = refine_fn(
-            {"K": K, "T1": T, "T2": 0.0, "L": L},
+            model_params,
             {
                 "Kp": float(best_strategy["Kp"]),
                 "Ki": float(best_strategy["Ki"]),
@@ -173,6 +215,7 @@ def choose_alternative_model_attempt(
         result = {
             "window_source": source,
             "loop_type": loop_type,
+            "model_type": model_type,
             "K": K,
             "T": T,
             "L": L,

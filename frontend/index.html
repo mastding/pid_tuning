@@ -348,6 +348,17 @@
           </select>
         </div>
 
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">模型类型</label>
+          <select v-model="experienceFilters.model_type" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
+            <option value="">全部</option>
+            <option value="FO">FO</option>
+            <option value="FOPDT">FOPDT</option>
+            <option value="SOPDT">SOPDT</option>
+            <option value="IPDT">IPDT</option>
+          </select>
+        </div>
+
         <div class="grid grid-cols-2 gap-2 pt-4 border-t border-slate-200">
           <button @click="loadExperienceCenter"
             class="px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold transition-all">
@@ -417,6 +428,15 @@
                 </select>
               </div>
               <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-2">模型类型</label>
+                <select v-model="experienceSearchForm.model_type" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                  <option value="FO">FO</option>
+                  <option value="FOPDT">FOPDT</option>
+                  <option value="SOPDT">SOPDT</option>
+                  <option value="IPDT">IPDT</option>
+                </select>
+              </div>
+              <div>
                 <label class="block text-xs font-semibold text-slate-600 mb-2">K</label>
                 <input v-model="experienceSearchForm.K" type="number" step="any" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
               </div>
@@ -444,7 +464,7 @@
                     <div>
                       <div class="font-semibold text-slate-900">{{ match.loop_name || match.experience_id }}</div>
                       <div class="mt-1 text-sm text-slate-600">
-                        策略 {{ match.strategy || '-' }} · 综合评分 {{ formatNumber(match.final_rating, 2) }} · 相似度 {{ formatNumber(match.similarity_score, 2) }}
+                        模型 {{ match.model_type || '-' }} · 策略 {{ match.strategy || '-' }} · 综合评分 {{ formatNumber(match.final_rating, 2) }} · 相似度 {{ formatNumber(match.similarity_score, 2) }}
                       </div>
                     </div>
                     <button
@@ -475,6 +495,41 @@
             <div class="rounded-xl border border-purple-200 bg-white p-4 shadow-sm">
               <div class="text-xs font-semibold text-slate-500">最常用策略</div>
               <div class="mt-2 text-2xl font-bold text-purple-700">{{ experienceStats.top_strategy || '-' }}</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div class="text-sm font-semibold text-slate-800">回路类型分布</div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <template v-if="experienceStats.loop_type_distribution?.length">
+                  <span
+                    v-for="item in experienceStats.loop_type_distribution"
+                    :key="`loop-${item.loop_type}`"
+                    class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700"
+                  >
+                    <span>{{ item.loop_type || '-' }}</span>
+                    <span class="font-mono text-slate-500">{{ item.count }}</span>
+                  </span>
+                </template>
+                <span v-else class="text-xs text-slate-500">暂无分布数据</span>
+              </div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div class="text-sm font-semibold text-slate-800">模型类型分布</div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <template v-if="experienceStats.model_type_distribution?.length">
+                  <span
+                    v-for="item in experienceStats.model_type_distribution"
+                    :key="`model-${item.model_type}`"
+                    class="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700"
+                  >
+                    <span>{{ item.model_type || '-' }}</span>
+                    <span class="font-mono text-indigo-500">{{ item.count }}</span>
+                  </span>
+                </template>
+                <span v-else class="text-xs text-slate-500">暂无分布数据</span>
+              </div>
             </div>
           </div>
 
@@ -509,7 +564,7 @@
                         </span>
                       </div>
                       <div class="mt-2 text-sm text-slate-600">
-                        策略 {{ item.final_strategy || '-' }} · 评分 {{ formatNumber(item.final_rating, 2) }} · 模型 K={{ formatNumber(item.K, 3) }}, T={{ formatNumber(item.T, 3) }}, L={{ formatNumber(item.L, 3) }}
+                        模型 {{ item.model_type || '-' }} · 策略 {{ item.final_strategy || '-' }} · 评分 {{ formatNumber(item.final_rating, 2) }} · 参数 K={{ formatNumber(item.K, 3) }}, T={{ formatNumber(item.T, 3) }}, L={{ formatNumber(item.L, 3) }}
                       </div>
                       <div class="mt-1 text-xs text-slate-400">{{ item.created_at || '-' }}</div>
                     </div>
@@ -540,9 +595,25 @@
                     <div class="text-xs text-slate-500">回路类型</div>
                     <div class="mt-1 font-semibold text-slate-800">{{ selectedExperience.loop_type || '-' }}</div>
                   </div>
+                  <div class="rounded-lg bg-slate-50 p-3">
+                    <div class="text-xs text-slate-500">模型类型</div>
+                    <div class="mt-1 font-semibold text-slate-800">{{ selectedExperience.model?.model_type || '-' }}</div>
+                  </div>
+                  <div class="rounded-lg bg-slate-50 p-3">
+                    <div class="text-xs text-slate-500">最终策略</div>
+                    <div class="mt-1 font-semibold text-slate-800">{{ selectedExperience.strategy?.final || '-' }}</div>
+                  </div>
                 </div>
                 <div class="rounded-lg border border-blue-100 bg-blue-50 p-4">
                   <div class="text-sm font-semibold text-slate-800 mb-2">模型信息</div>
+                  <div class="mb-3 rounded-lg border border-blue-200 bg-white/70 p-3 text-sm">
+                    <div class="text-slate-500 mb-1">原始模型参数</div>
+                    <div class="font-mono text-slate-800 break-all">{{ summarizeModelParams(selectedExperience.model?.selected_model_params || selectedExperience.model) }}</div>
+                  </div>
+                  <div v-if="modelParamsDiffer(selectedExperience.model?.selected_model_params || selectedExperience.model, selectedExperience.model?.tuning_model || { K: selectedExperience.model?.K, T: selectedExperience.model?.T, L: selectedExperience.model?.L })" class="mb-3 rounded-lg border border-slate-200 bg-white/70 p-3 text-sm">
+                    <div class="text-slate-500 mb-1">当前工作模型参数</div>
+                    <div class="font-mono text-slate-800 break-all">{{ summarizeModelParams(selectedExperience.model?.tuning_model || { K: selectedExperience.model?.K, T: selectedExperience.model?.T, L: selectedExperience.model?.L }) }}</div>
+                  </div>
                   <div class="grid grid-cols-3 gap-2 text-sm">
                     <div><span class="text-slate-500">K</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.model?.K, 3) }}</div></div>
                     <div><span class="text-slate-500">T</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.model?.T, 3) }}</div></div>
@@ -569,6 +640,68 @@
                     <div><span class="text-slate-500">性能分</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.evaluation?.performance_score, 2) }}</div></div>
                     <div><span class="text-slate-500">综合分</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.evaluation?.final_rating, 2) }}</div></div>
                     <div><span class="text-slate-500">结果</span><div class="font-semibold" :class="selectedExperience.evaluation?.passed ? 'text-emerald-700' : 'text-red-700'">{{ selectedExperience.evaluation?.passed ? '通过' : '未通过' }}</div></div>
+                  </div>
+                </div>
+                <div v-if="selectedExperience.pid?.initial || selectedExperience.refine_delta" class="rounded-lg border border-amber-100 bg-amber-50 p-4">
+                  <div class="text-sm font-semibold text-slate-800 mb-2">参数修正记录</div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div class="rounded-lg border border-amber-200 bg-white/80 p-3">
+                      <div class="text-xs font-semibold text-slate-500 mb-2">初始 PID</div>
+                      <div class="grid grid-cols-3 gap-2 text-sm">
+                        <div><span class="text-slate-500">Kp</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.pid?.initial?.Kp, 4) }}</div></div>
+                        <div><span class="text-slate-500">Ki</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.pid?.initial?.Ki, 4) }}</div></div>
+                        <div><span class="text-slate-500">Kd</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.pid?.initial?.Kd, 4) }}</div></div>
+                      </div>
+                    </div>
+                    <div class="rounded-lg border border-amber-200 bg-white/80 p-3">
+                      <div class="text-xs font-semibold text-slate-500 mb-2">修正比例</div>
+                      <div class="grid grid-cols-3 gap-2 text-sm">
+                        <div><span class="text-slate-500">Kp×</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.refine_delta?.kp_scale, 3) }}</div></div>
+                        <div><span class="text-slate-500">Ki×</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.refine_delta?.ki_scale, 3) }}</div></div>
+                        <div><span class="text-slate-500">Kd×</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.refine_delta?.kd_scale, 3) }}</div></div>
+                      </div>
+                      <div class="mt-2 text-xs text-slate-600">
+                        修正模式：<span class="font-mono text-slate-800">{{ selectedExperience.refine_delta?.pattern || '-' }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="selectedExperience.refine_gain" class="rounded-lg border border-emerald-100 bg-white p-4">
+                  <div class="text-sm font-semibold text-slate-800 mb-2">修正收益</div>
+                  <div class="grid grid-cols-2 gap-3 text-sm">
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">性能分提升</div>
+                      <div class="mt-1 font-mono text-emerald-700">+{{ formatNumber(selectedExperience.refine_gain?.performance_score_gain, 2) }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">综合分提升</div>
+                      <div class="mt-1 font-mono text-emerald-700">+{{ formatNumber(selectedExperience.refine_gain?.final_rating_gain, 2) }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="selectedExperience.experience_guidance_used?.matches && selectedExperience.experience_guidance_used.matches.length" class="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+                  <div class="text-sm font-semibold text-slate-800 mb-2">参考的历史案例</div>
+                  <div class="space-y-2">
+                    <div
+                      v-for="match in selectedExperience.experience_guidance_used.matches"
+                      :key="match.experience_id"
+                      class="rounded-lg border border-indigo-200 bg-white/80 p-3 text-sm"
+                    >
+                      <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                          <div class="font-semibold text-slate-900">{{ match.loop_name || match.experience_id }}</div>
+                          <div class="mt-1 text-xs text-slate-600">
+                            模型 {{ match.model_type || '-' }} · 策略 {{ match.strategy || '-' }} · 综合评分 {{ formatNumber(match.final_rating, 2) }} · 相似度 {{ formatNumber(match.similarity_score, 2) }}
+                          </div>
+                        </div>
+                        <button
+                          @click="openExperienceDetail(match.experience_id)"
+                          class="rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 transition-all"
+                        >
+                          查看
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div v-if="selectedExperience.lessons && selectedExperience.lessons.length" class="rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -759,12 +892,16 @@
                       <div class="text-slate-600 text-xs mb-1">原始模型参数</div>
                       <div class="font-mono font-semibold text-indigo-700 break-all">{{ summarizeModelParams(msg.data.model.selectedModelParams) }}</div>
                     </div>
+                    <div v-if="modelParamsDiffer(msg.data.model.selectedModelParams, msg.data.model.tuningModel || { K: msg.data.model.K, T: msg.data.model.T, L: msg.data.model.L })" class="bg-slate-50 rounded-lg p-3 border border-slate-200 md:col-span-2">
+                      <div class="text-slate-600 text-xs mb-1">当前工作模型参数</div>
+                      <div class="font-mono font-semibold text-slate-700 break-all">{{ summarizeModelParams(msg.data.model.tuningModel || { K: msg.data.model.K, T: msg.data.model.T, L: msg.data.model.L }) }}</div>
+                    </div>
                   </div>
-                  <div v-if="msg.data.model.modelSelectionReason || msg.data.model.tuningModel" class="mb-3 space-y-2 text-sm">
+                  <div v-if="msg.data.model.modelSelectionReason || modelParamsDiffer(msg.data.model.selectedModelParams, msg.data.model.tuningModel || { K: msg.data.model.K, T: msg.data.model.T, L: msg.data.model.L })" class="mb-3 space-y-2 text-sm">
                     <div v-if="msg.data.model.modelSelectionReason" class="bg-indigo-50 rounded-lg p-3 border border-indigo-100 text-slate-700">
                       <span class="font-semibold text-slate-800">选模依据：</span>{{ msg.data.model.modelSelectionReason }}
                     </div>
-                    <div v-if="msg.data.model.tuningModel" class="bg-slate-50 rounded-lg p-3 border border-slate-200 text-slate-700">
+                    <div v-if="modelParamsDiffer(msg.data.model.selectedModelParams, msg.data.model.tuningModel || { K: msg.data.model.K, T: msg.data.model.T, L: msg.data.model.L })" class="bg-slate-50 rounded-lg p-3 border border-slate-200 text-slate-700">
                       <div class="font-semibold text-slate-800 mb-1">用于整定的等效模型</div>
                       <div class="font-mono break-all">{{ summarizeModelParams(msg.data.model.tuningModel) }}</div>
                     </div>
@@ -1053,6 +1190,23 @@
                         <div class="font-mono text-slate-800">{{ msg.data.memory.experienceId || '-' }}</div>
                       </div>
                     </div>
+                    <div class="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                      <div class="bg-white rounded p-2 border border-indigo-100">
+                        <div class="text-slate-500">历史偏好模型</div>
+                        <div class="font-mono text-slate-800">{{ msg.data.memory.experienceGuidance?.matches?.[0]?.model_type || msg.data.model?.modelType || '-' }}</div>
+                      </div>
+                      <div class="bg-white rounded p-2 border border-indigo-100">
+                        <div class="text-slate-500">推荐收紧比例</div>
+                        <div class="font-mono text-slate-800">
+                          Kp×{{ formatNumber(msg.data.memory.experienceGuidance?.summary?.recommended_kp_scale, 2) }} /
+                          Ki×{{ formatNumber(msg.data.memory.experienceGuidance?.summary?.recommended_ki_scale, 2) }}
+                        </div>
+                      </div>
+                      <div class="bg-white rounded p-2 border border-indigo-100">
+                        <div class="text-slate-500">经验修正模式</div>
+                        <div class="font-mono text-slate-800">{{ msg.data.memory.experienceGuidance?.summary?.preferred_refine_pattern || '-' }}</div>
+                      </div>
+                    </div>
                   </div>
                   <div v-if="false && msg.data.pidParams.candidateStrategies && msg.data.pidParams.candidateStrategies.length" class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
                     <div class="text-sm font-semibold text-slate-700 mb-2">候选方法试算</div>
@@ -1253,6 +1407,7 @@
           experienceSearchLoading: false,
           experienceSearchForm: {
             loop_type: 'flow',
+            model_type: 'FOPDT',
             K: '',
             T: '',
             L: ''
@@ -1268,6 +1423,7 @@
           helpCenterShortcuts: [],
           experienceFilters: {
             loop_type: '',
+            model_type: '',
             passed: '',
             strategy: '',
             keyword: ''
@@ -1450,6 +1606,7 @@
           const model = result?.model || {};
           this.experienceSearchForm = {
             loop_type: result?.pidParams?.loopType || this.loopType || 'flow',
+            model_type: model.modelType || 'FOPDT',
             K: Number.isFinite(model.K) ? String(model.K) : '',
             T: Number.isFinite(model.T) ? String(model.T) : '',
             L: Number.isFinite(model.L) ? String(model.L) : ''
@@ -1509,6 +1666,7 @@
           try {
             const params = new URLSearchParams();
             if (this.experienceFilters.loop_type) params.set('loop_type', this.experienceFilters.loop_type);
+            if (this.experienceFilters.model_type) params.set('model_type', this.experienceFilters.model_type);
             if (this.experienceFilters.passed) params.set('passed', this.experienceFilters.passed);
             if (this.experienceFilters.strategy) params.set('strategy', this.experienceFilters.strategy);
             if (this.experienceFilters.keyword) params.set('keyword', this.experienceFilters.keyword);
@@ -1525,6 +1683,7 @@
               final_rating: item.final_rating ?? item.evaluation?.final_rating ?? 0,
               performance_score: item.performance_score ?? item.evaluation?.performance_score ?? 0,
               passed: item.passed ?? item.evaluation?.passed ?? false,
+              model_type: item.model_type || item.model?.model_type || 'FOPDT',
               K: item.K ?? item.model?.K ?? 0,
               T: item.T ?? item.model?.T ?? 0,
               L: item.L ?? item.model?.L ?? 0,
@@ -1567,6 +1726,7 @@
         async resetExperienceFilters() {
           this.experienceFilters = {
             loop_type: '',
+            model_type: '',
             passed: '',
             strategy: '',
             keyword: ''
@@ -1590,6 +1750,7 @@
           try {
             const formData = new FormData();
             formData.append('loop_type', this.experienceSearchForm.loop_type || 'flow');
+            formData.append('model_type', this.experienceSearchForm.model_type || 'FOPDT');
             formData.append('K', String(K));
             formData.append('T', String(T));
             formData.append('L', String(Number.isFinite(L) ? L : 0));
@@ -1900,6 +2061,15 @@ end_time: ${this.endTime || '1772553600000'}
           return entries.length ? entries.join(', ') : '-';
         },
 
+        modelParamsDiffer(rawModel, workingModel) {
+          const rawSummary = this.summarizeModelParams(rawModel);
+          const workingSummary = this.summarizeModelParams(workingModel);
+          if (rawSummary === '-' || workingSummary === '-') {
+            return false;
+          }
+          return rawSummary !== workingSummary;
+        },
+
         buildTrendPath(points, key, width = 420, height = 180) {
           if (!Array.isArray(points) || points.length < 2) return '';
           const paddingX = 18;
@@ -2012,7 +2182,9 @@ end_time: ${this.endTime || '1772553600000'}
             `系统模型:\n` +
             `  模型类型 = ${data.model?.modelType || 'FOPDT'}\n` +
             `  原始模型参数 = ${this.summarizeModelParams(data.model?.selectedModelParams)}\n` +
-            `  用于整定的等效模型 = ${this.summarizeModelParams(data.model?.tuningModel)}\n` +
+            (this.modelParamsDiffer(data.model?.selectedModelParams, data.model?.tuningModel)
+              ? `  当前工作模型 = ${this.summarizeModelParams(data.model?.tuningModel)}\n`
+              : '') +
             `  选模依据 = ${data.model?.modelSelectionReason || '-'}\n` +
             `  K = ${data.model?.K.toFixed(3)}\n` +
             `  T = ${data.model?.T.toFixed(2)}s\n` +
@@ -2031,7 +2203,9 @@ end_time: ${this.endTime || '1772553600000'}
             `  实际策略 = ${data.pidParams?.strategyUsed || data.pidParams?.strategy}\n` +
             `  回路类型 = ${data.pidParams?.loopType || '-'}\n` +
             `  历史经验偏好 = ${data.memory?.experienceGuidance?.summary?.preferred_strategy || '-'}\n` +
-            `  历史相似案例数 = ${data.memory?.experienceGuidance?.summary?.match_count ?? 0}\n\n` +
+            `  历史偏好模型 = ${data.memory?.experienceGuidance?.matches?.[0]?.model_type || data.model?.modelType || '-'}\n` +
+            `  历史相似案例数 = ${data.memory?.experienceGuidance?.summary?.match_count ?? 0}\n` +
+            `  推荐收紧比例 = Kp×${this.formatNumber(data.memory?.experienceGuidance?.summary?.recommended_kp_scale, 2)} / Ki×${this.formatNumber(data.memory?.experienceGuidance?.summary?.recommended_ki_scale, 2)}\n\n` +
             `${data.evaluation?.initial_assessment?.evaluated_pid && data.evaluation?.auto_refine_result?.applied ? `首次评估PID参数:\n  Kp = ${this.formatNumber(data.evaluation.initial_assessment.evaluated_pid.Kp, 4)}\n  Ki = ${this.formatNumber(data.evaluation.initial_assessment.evaluated_pid.Ki, 4)}\n  Kd = ${this.formatNumber(data.evaluation.initial_assessment.evaluated_pid.Kd, 4)}\n\n` : ''}` +
             `性能评分: ${data.evaluation?.performance_score.toFixed(2)}/10`;
 

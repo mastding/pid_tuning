@@ -47,7 +47,7 @@ from orchestration.agent_factory import create_pid_agents as orchestration_creat
 from orchestration.constants import DISPLAY_AGENT_NAMES
 from orchestration.workflow_runner import run_multi_agent_collaboration as orchestration_run_multi_agent_collaboration
 from api.tune_app import create_app
-from memory.experience_service import build_experience_record, persist_experience_record
+from memory.experience_service import build_experience_record, persist_experience_record, register_experience_reuse
 from state.session_store import SessionStore
 
 
@@ -99,8 +99,24 @@ def _to_jsonable(value: Any) -> Any:
 
 
 
-def _benchmark_pid_strategies(K: float, T: float, L: float, dt: float, confidence_score: float) -> Dict[str, Any]:
-    return service_benchmark_pid_strategies(K, T, L, dt, confidence_score)
+def _benchmark_pid_strategies(
+    K: float,
+    T: float,
+    L: float,
+    dt: float,
+    confidence_score: float,
+    model_type: str = "FOPDT",
+    selected_model_params: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    return service_benchmark_pid_strategies(
+        K,
+        T,
+        L,
+        dt,
+        confidence_score,
+        model_type=model_type,
+        selected_model_params=selected_model_params,
+    )
 
 
 def _refine_pid_for_performance(
@@ -293,6 +309,7 @@ async def run_multi_agent_collaboration(
         build_feedback_turns=_build_feedback_turns,
         build_experience_record=build_experience_record,
         persist_experience_record=persist_experience_record,
+        register_experience_reuse=register_experience_reuse,
         to_jsonable=_to_jsonable,
     ):
         yield event

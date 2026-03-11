@@ -14,6 +14,8 @@ from .experience_store import (
     list_experiences,
     load_experience_records,
     load_indexed_experience_candidates,
+    register_experience_references,
+    rebuild_experience_index,
 )
 
 
@@ -46,6 +48,56 @@ def _safe_scale(numerator: float, denominator: float, default: float = 1.0) -> f
     return _safe_float(numerator, default) / denom
 
 
+def _raw_model_similarity_score(
+    *,
+    target_model_type: str,
+    target_model_params: Dict[str, Any],
+    record_model: Dict[str, Any],
+) -> float:
+    record_model_type = str(record_model.get("model_type", "FOPDT")).upper()
+    target_model_type = str(target_model_type or "FOPDT").upper()
+    if record_model_type != target_model_type:
+        return 0.0
+
+    record_selected = dict(record_model.get("selected_model_params") or {})
+    target_selected = dict(target_model_params or {})
+    score = 0.0
+
+    if record_model_type == "SOPDT":
+        score += max(0.0, 3.0 - _log_distance(_safe_float(target_selected.get("K")), _safe_float(record_selected.get("K"))))
+        score += max(0.0, 2.5 - _log_distance(_safe_float(target_selected.get("T1")), _safe_float(record_selected.get("T1"))))
+        score += max(0.0, 2.5 - _log_distance(_safe_float(target_selected.get("T2")), _safe_float(record_selected.get("T2"))))
+        score += max(
+            0.0,
+            2.0 - abs(_safe_float(target_selected.get("L")) - _safe_float(record_selected.get("L")))
+            / max(_safe_float(target_selected.get("L"), 1.0), 1.0),
+        )
+        return score
+
+    if record_model_type == "IPDT":
+        score += max(0.0, 4.0 - _log_distance(_safe_float(target_selected.get("K")), _safe_float(record_selected.get("K"))))
+        score += max(
+            0.0,
+            3.0 - abs(_safe_float(target_selected.get("L")) - _safe_float(record_selected.get("L")))
+            / max(_safe_float(target_selected.get("L"), 1.0), 1.0),
+        )
+        return score
+
+    if record_model_type == "FO":
+        score += max(0.0, 3.5 - _log_distance(_safe_float(target_selected.get("K")), _safe_float(record_selected.get("K"))))
+        score += max(0.0, 3.5 - _log_distance(_safe_float(target_selected.get("T")), _safe_float(record_selected.get("T"))))
+        return score
+
+    score += max(0.0, 3.0 - _log_distance(_safe_float(target_selected.get("K")), _safe_float(record_selected.get("K"))))
+    score += max(0.0, 3.0 - _log_distance(_safe_float(target_selected.get("T")), _safe_float(record_selected.get("T"))))
+    score += max(
+        0.0,
+        2.0 - abs(_safe_float(target_selected.get("L")) - _safe_float(record_selected.get("L")))
+        / max(_safe_float(target_selected.get("L"), 1.0), 1.0),
+    )
+    return score
+
+
 def _experience_similarity_score(
     *,
     target_loop_type: str,
@@ -53,6 +105,7 @@ def _experience_similarity_score(
     target_K: float,
     target_T: float,
     target_L: float,
+    target_model_params: Dict[str, Any] | None,
     record: Dict[str, Any],
 ) -> float:
     model = record.get("model") or {}
@@ -62,18 +115,29 @@ def _experience_similarity_score(
     score = 0.0
     if str(record.get("loop_type", "")).lower() == target_loop_type.lower():
         score += 5.0
+
     record_model_type = str(model.get("model_type", "FOPDT")).upper()
-    if record_model_type == str(target_model_type or "FOPDT").upper():
+    target_model_type = str(target_model_type or "FOPDT").upper()
+    if record_model_type == target_model_type:
         score += 4.0
     if record_model_type == "IPDT" and target_loop_type.lower() == "level":
         score += 1.0
 
-    score += max(0.0, 3.0 - _log_distance(target_K, _safe_float(model.get("K"), 0.0)))
-    score += max(0.0, 3.0 - _log_distance(target_T, _safe_float(model.get("T"), 0.0)))
-    score += max(
-        0.0,
-        2.0 - abs(_tau_ratio(target_T, target_L) - _tau_ratio(_safe_float(model.get("T")), _safe_float(model.get("L")))) * 5.0,
+    raw_similarity = _raw_model_similarity_score(
+        target_model_type=target_model_type,
+        target_model_params=target_model_params or {},
+        record_model=model,
     )
+    if raw_similarity > 0.0:
+        score += raw_similarity
+    else:
+        score += max(0.0, 3.0 - _log_distance(target_K, _safe_float(model.get("K"))))
+        score += max(0.0, 3.0 - _log_distance(target_T, _safe_float(model.get("T"))))
+        score += max(
+            0.0,
+            2.0 - abs(_tau_ratio(target_T, target_L) - _tau_ratio(_safe_float(model.get("T")), _safe_float(model.get("L")))) * 5.0,
+        )
+
     score += min(max(_safe_float(evaluation.get("final_rating")) / 2.0, 0.0), 5.0)
     if bool(evaluation.get("passed", False)):
         score += 2.0
@@ -101,13 +165,13 @@ def _build_refine_delta(
 
     pattern_parts: List[str] = []
     if kp_scale < 0.95:
-      pattern_parts.append("tighten_kp")
+        pattern_parts.append("tighten_kp")
     if ki_scale < 0.95:
-      pattern_parts.append("tighten_ki")
+        pattern_parts.append("tighten_ki")
     if kd_scale < 0.95 and abs(kd_initial) > 1e-9:
-      pattern_parts.append("tighten_kd")
+        pattern_parts.append("tighten_kd")
     if not pattern_parts and auto_refined:
-      pattern_parts.append("refined_no_major_delta")
+        pattern_parts.append("refined_no_major_delta")
 
     return {
         "kp_scale": round(kp_scale, 4),
@@ -124,6 +188,7 @@ def retrieve_experience_guidance(
     K: float,
     T: float,
     L: float,
+    selected_model_params: Dict[str, Any] | None = None,
     limit: int = 3,
     candidate_strategies: List[str] | None = None,
 ) -> Dict[str, Any]:
@@ -141,10 +206,12 @@ def retrieve_experience_guidance(
             target_K=K,
             target_T=T,
             target_L=L,
+            target_model_params=selected_model_params or {},
             record=record,
         )
         if score <= 0:
             continue
+
         refine_delta = record.get("refine_delta") or {}
         scored_matches.append(
             {
@@ -158,13 +225,18 @@ def retrieve_experience_guidance(
                 "passed": bool((record.get("evaluation") or {}).get("passed", False)),
                 "lessons": record.get("lessons", []),
                 "model": record.get("model", {}),
-                "model_type": str((record.get("model") or {}).get("model_type", "FOPDT")),
+                "model_type": str((record.get("model") or {}).get("model_type", "FOPDT")).upper(),
                 "refine_delta": refine_delta,
                 "refine_pattern": str(refine_delta.get("pattern", "")),
+                "pid": record.get("pid", {}),
+                "reuse": record.get("reuse", {}),
             }
         )
 
-    scored_matches.sort(key=lambda item: (item["similarity_score"], item["final_rating"], item["performance_score"]), reverse=True)
+    scored_matches.sort(
+        key=lambda item: (item["similarity_score"], item["final_rating"], item["performance_score"]),
+        reverse=True,
+    )
     top_matches = scored_matches[: max(limit, 0)]
     if not top_matches:
         return {"matches": [], "preferred_strategy": "", "guidance": "", "summary": {}}
@@ -175,6 +247,10 @@ def retrieve_experience_guidance(
         if match["strategy"] and (not candidate_strategies or match["strategy"] in candidate_strategies)
     )
     preferred_strategy = strategy_counter.most_common(1)[0][0] if strategy_counter else ""
+
+    model_counter = Counter(match["model_type"] for match in top_matches if match.get("model_type"))
+    preferred_model_type = model_counter.most_common(1)[0][0] if model_counter else str(model_type or "FOPDT").upper()
+
     ratings = [match["final_rating"] for match in top_matches if match["final_rating"] > 0]
     avg_rating = mean(ratings) if ratings else 0.0
     passed_count = sum(1 for match in top_matches if match["passed"])
@@ -184,9 +260,21 @@ def retrieve_experience_guidance(
         for match in top_matches
         if match["passed"] and str(match.get("refine_pattern", "")) not in {"", "base_formula"}
     ]
-    recommended_kp_scale = mean([_safe_float((match.get("refine_delta") or {}).get("kp_scale"), 1.0) for match in successful_refined]) if successful_refined else 1.0
-    recommended_ki_scale = mean([_safe_float((match.get("refine_delta") or {}).get("ki_scale"), 1.0) for match in successful_refined]) if successful_refined else 1.0
-    recommended_kd_scale = mean([_safe_float((match.get("refine_delta") or {}).get("kd_scale"), 1.0) for match in successful_refined]) if successful_refined else 1.0
+    recommended_kp_scale = (
+        mean([_safe_float((match.get("refine_delta") or {}).get("kp_scale"), 1.0) for match in successful_refined])
+        if successful_refined
+        else 1.0
+    )
+    recommended_ki_scale = (
+        mean([_safe_float((match.get("refine_delta") or {}).get("ki_scale"), 1.0) for match in successful_refined])
+        if successful_refined
+        else 1.0
+    )
+    recommended_kd_scale = (
+        mean([_safe_float((match.get("refine_delta") or {}).get("kd_scale"), 1.0) for match in successful_refined])
+        if successful_refined
+        else 1.0
+    )
     refine_pattern_counter = Counter(
         str((match.get("refine_delta") or {}).get("pattern", ""))
         for match in successful_refined
@@ -199,12 +287,14 @@ def retrieve_experience_guidance(
         "avg_final_rating": round(avg_rating, 3),
         "passed_count": passed_count,
         "preferred_strategy": preferred_strategy,
+        "preferred_model_type": preferred_model_type,
         "top_loop_names": [str(match["loop_name"]) for match in top_matches[:2] if match.get("loop_name")],
         "preferred_refine_pattern": preferred_refine_pattern,
         "recommended_kp_scale": round(recommended_kp_scale, 4),
         "recommended_ki_scale": round(recommended_ki_scale, 4),
         "recommended_kd_scale": round(recommended_kd_scale, 4),
         "refine_reference_count": len(successful_refined),
+        "referenced_experience_ids": [str(match["experience_id"]) for match in top_matches],
     }
     guidance = describe_experience_guidance(
         {
@@ -216,6 +306,7 @@ def retrieve_experience_guidance(
     return {
         "matches": top_matches,
         "preferred_strategy": preferred_strategy,
+        "preferred_model_type": preferred_model_type,
         "guidance": guidance,
         "summary": summary,
     }
@@ -225,6 +316,7 @@ def describe_experience_guidance(experience_guidance: Dict[str, Any]) -> str:
     matches = experience_guidance.get("matches") or []
     summary = experience_guidance.get("summary") or {}
     preferred_strategy = str(experience_guidance.get("preferred_strategy") or summary.get("preferred_strategy") or "")
+    preferred_model_type = str(summary.get("preferred_model_type") or "")
     if not matches:
         return ""
 
@@ -233,6 +325,7 @@ def describe_experience_guidance(experience_guidance: Dict[str, Any]) -> str:
     avg_rating = _safe_float(summary.get("avg_final_rating"))
     passed_count = int(summary.get("passed_count", 0) or 0)
     strategy_text = f"优先参考历史上表现较好的 {preferred_strategy} 策略" if preferred_strategy else "可参考历史成功案例"
+    model_text = f"，历史偏好模型为 {preferred_model_type}" if preferred_model_type else ""
 
     refine_reference_count = int(summary.get("refine_reference_count", 0) or 0)
     refine_pattern = str(summary.get("preferred_refine_pattern") or "")
@@ -242,12 +335,13 @@ def describe_experience_guidance(experience_guidance: Dict[str, Any]) -> str:
         ki_scale = _safe_float(summary.get("recommended_ki_scale"), 1.0)
         refine_text = (
             f" 历史上有 {refine_reference_count} 条相似成功案例采用了参数收紧，"
-            f"常见修正模式为 {refine_pattern or 'refine'}，建议优先尝试 Kp×{kp_scale:.2f}、Ki×{ki_scale:.2f} 的经验修正版。"
+            f"常见修正模式为 {refine_pattern or 'refine'}，建议优先尝试 "
+            f"Kp×{kp_scale:.2f}、Ki×{ki_scale:.2f} 的经验修正版。"
         )
 
     return (
         f"已检索到 {len(matches)} 条相似回路经验{names_text}，其中 {passed_count} 条最终通过，"
-        f"平均综合评分约 {avg_rating:.2f}，{strategy_text}。{refine_text}"
+        f"平均综合评分约 {avg_rating:.2f}。{strategy_text}{model_text}。{refine_text}".strip()
     )
 
 
@@ -269,6 +363,7 @@ def build_experience_record(
     initial_assessment = evaluation.get("initial_assessment") or {}
     evaluated_pid = initial_assessment.get("evaluated_pid") or {}
     auto_refine_result = evaluation.get("auto_refine_result") or {}
+    experience_guidance_used = shared_data.get("experience_guidance") or {}
 
     initial_pid = {
         "Kp": _safe_float(evaluated_pid.get("Kp")),
@@ -293,13 +388,13 @@ def build_experience_record(
     }
 
     lessons: List[str] = []
+    final_strategy = pid.get("strategyUsed") or pid.get("strategy")
     if evaluation.get("passed"):
-        lessons.append(
-            f"{pid.get('strategyUsed') or pid.get('strategy')} 策略最终通过，综合评分 {float(evaluation.get('final_rating', 0.0)):.2f}"
-        )
+        lessons.append(f"{final_strategy} 策略最终通过，综合评分 {float(evaluation.get('final_rating', 0.0)):.2f}")
     if auto_refine_result.get("applied"):
         lessons.append(
-            f"首次评估未通过后，收紧 Kp 和 Ki 可显著提升闭环表现（Kp×{refine_delta['kp_scale']:.2f}, Ki×{refine_delta['ki_scale']:.2f}）。"
+            f"首次评估未通过后，收紧 Kp 和 Ki 可显著提升闭环表现（Kp×{refine_delta['kp_scale']:.2f}，"
+            f"Ki×{refine_delta['ki_scale']:.2f}）。"
         )
     if evaluation.get("failure_reason"):
         lessons.append(str(evaluation.get("failure_reason")))
@@ -328,6 +423,8 @@ def build_experience_record(
         "model": {
             "model_type": str(model.get("modelType", "FOPDT")),
             "selected_model_params": model.get("selectedModelParams", {}),
+            "tuning_model": model.get("tuningModel", {}),
+            "model_selection_reason": str(model.get("modelSelectionReason", "")),
             "K": _safe_float(model.get("K")),
             "T": _safe_float(model.get("T")),
             "L": _safe_float(model.get("L")),
@@ -344,7 +441,7 @@ def build_experience_record(
         "strategy": {
             "initial": pid.get("strategyRequested", ""),
             "heuristic": (pid.get("selectionInputs") or {}).get("heuristic_strategy", ""),
-            "final": pid.get("strategyUsed") or pid.get("strategy", ""),
+            "final": final_strategy or "",
             "auto_refined": bool(auto_refine_result.get("applied")),
         },
         "pid": {
@@ -363,7 +460,15 @@ def build_experience_record(
         },
         "lessons": lessons,
         "tags": tags,
-        "experience_guidance_used": shared_data.get("experience_guidance") or {},
+        "experience_guidance_used": experience_guidance_used,
+        "referenced_experience_ids": (experience_guidance_used.get("summary") or {}).get("referenced_experience_ids", []),
+        "reuse": {
+            "hit_count": 0,
+            "follow_up_success_count": 0,
+            "last_hit_at": "",
+            "last_follow_up_passed": False,
+            "last_follow_up_final_rating": 0.0,
+        },
     }
 
 
@@ -374,6 +479,7 @@ def persist_experience_record(record: Dict[str, Any]) -> str:
 def list_experience_summaries(
     *,
     loop_type: str = "",
+    model_type: str = "",
     passed: str = "",
     strategy: str = "",
     keyword: str = "",
@@ -381,6 +487,7 @@ def list_experience_summaries(
 ) -> List[Dict[str, Any]]:
     return list_experiences(
         loop_type=loop_type,
+        model_type=model_type,
         passed=passed,
         strategy=strategy,
         keyword=keyword,
@@ -398,3 +505,21 @@ def get_experience_record(experience_id: str) -> Dict[str, Any] | None:
 
 def clear_experience_center() -> Dict[str, Any]:
     return clear_experience_store()
+
+
+def rebuild_experience_center_index() -> Dict[str, Any]:
+    return rebuild_experience_index()
+
+
+def register_experience_reuse(
+    referenced_experience_ids: List[str],
+    *,
+    follow_up_passed: bool,
+    follow_up_final_rating: float,
+) -> Dict[str, Any]:
+    return register_experience_references(
+        referenced_experience_ids,
+        hit_time=datetime.now().astimezone().isoformat(timespec="seconds"),
+        follow_up_passed=follow_up_passed,
+        follow_up_final_rating=follow_up_final_rating,
+    )

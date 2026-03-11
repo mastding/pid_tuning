@@ -10,6 +10,60 @@ from skills.rating import ModelRating
 ALL_STRATEGIES = ["IMC", "LAMBDA", "ZN", "CHR"]
 
 
+def _build_history_seed_pid(
+    *,
+    top_match: Dict[str, Any] | None,
+    base_candidate: Dict[str, Any],
+    K: float,
+    T: float,
+    L: float,
+    model_type: str,
+    selected_model_params: Dict[str, Any] | None,
+) -> Dict[str, Any] | None:
+    if not top_match:
+        return None
+
+    top_pid = dict((top_match.get("pid") or {}).get("final") or {})
+    if not top_pid:
+        return None
+
+    top_model = dict(top_match.get("model") or {})
+    top_selected = dict(top_model.get("selected_model_params") or {})
+    normalized_model_type = str(model_type or "FOPDT").upper()
+    if str(top_match.get("model_type", top_model.get("model_type", "FOPDT"))).upper() != normalized_model_type:
+        return None
+
+    k_scale = max(abs(float(K)), 1e-6) / max(abs(float(top_model.get("K", K))), 1e-6)
+    t_scale = 1.0
+    l_scale = 1.0
+    if normalized_model_type == "SOPDT":
+        current_t_sum = max(float((selected_model_params or {}).get("T1", 0.0)) + float((selected_model_params or {}).get("T2", 0.0)), 1e-6)
+        ref_t_sum = max(float(top_selected.get("T1", 0.0)) + float(top_selected.get("T2", 0.0)), 1e-6)
+        t_scale = current_t_sum / ref_t_sum
+        l_scale = max(float((selected_model_params or {}).get("L", L)), 1e-6) / max(float(top_selected.get("L", top_model.get("L", L))), 1e-6)
+    elif normalized_model_type == "IPDT":
+        t_scale = 1.0
+        l_scale = max(float((selected_model_params or {}).get("L", L)), 1e-6) / max(float(top_selected.get("L", top_model.get("L", L))), 1e-6)
+    else:
+        t_scale = max(float(T), 1e-6) / max(float(top_model.get("T", T)), 1e-6)
+        l_scale = max(float(L), 1e-6) / max(float(top_model.get("L", L)), 1e-6)
+
+    seed_kp = float(top_pid.get("Kp", base_candidate["Kp"])) * k_scale
+    seed_ki = float(top_pid.get("Ki", base_candidate["Ki"])) * min(max(t_scale, 0.35), 2.0)
+    seed_kd = float(top_pid.get("Kd", base_candidate["Kd"])) * min(max(l_scale, 0.35), 2.0)
+    if seed_kd < 1e-9:
+        seed_kd = 0.0
+
+    return {
+        "Kp": seed_kp,
+        "Ki": seed_ki,
+        "Kd": seed_kd,
+        "Ti": float(base_candidate["Ti"]),
+        "Td": float(base_candidate["Td"]),
+        "description": f"{base_candidate['description']} + history_seed",
+    }
+
+
 def _build_model_params_for_evaluation(
     *,
     model_type: str,
@@ -23,27 +77,27 @@ def _build_model_params_for_evaluation(
 
     if normalized_model_type == "SOPDT":
         return {
+            "model_type": "SOPDT",
             "K": float(selected_model_params.get("K", K)),
             "T1": float(selected_model_params.get("T1", selected_model_params.get("T", T))),
             "T2": float(selected_model_params.get("T2", selected_model_params.get("T", T))),
             "L": float(selected_model_params.get("L", L)),
         }
     if normalized_model_type == "IPDT":
-        effective_l = max(float(selected_model_params.get("L", L)), 1e-3)
         return {
+            "model_type": "IPDT",
             "K": float(selected_model_params.get("K", K)),
-            "T1": max(4.0 * effective_l, max(float(T), 1.0)),
-            "T2": 0.0,
-            "L": effective_l,
+            "L": max(float(selected_model_params.get("L", L)), 1e-3),
         }
     if normalized_model_type == "FO":
         return {
+            "model_type": "FO",
             "K": float(selected_model_params.get("K", K)),
             "T1": float(selected_model_params.get("T", T)),
             "T2": 0.0,
             "L": 0.0,
         }
-    return {"K": float(K), "T1": float(T), "T2": 0.0, "L": float(L)}
+    return {"model_type": "FOPDT", "K": float(K), "T1": float(T), "T2": 0.0, "L": float(L)}
 
 
 def _evaluate_strategy(
@@ -322,6 +376,7 @@ def select_best_pid_strategy(
 
     preferred_strategy = str((experience_guidance or {}).get("preferred_strategy", "")).upper()
     preferred_matches = (experience_guidance or {}).get("matches") or []
+    top_match = preferred_matches[0] if preferred_matches else None
     summary = (experience_guidance or {}).get("summary") or {}
     guidance_text = describe_experience_guidance(experience_guidance or {})
     recommended_kp_scale = float(summary.get("recommended_kp_scale", 1.0) or 1.0)
@@ -358,6 +413,36 @@ def select_best_pid_strategy(
             candidate_results.append(candidate)
             if _is_better_candidate(candidate, best_candidate):
                 best_candidate = candidate
+
+            history_seed_pid = _build_history_seed_pid(
+                top_match=top_match,
+                base_candidate=candidate,
+                K=K,
+                T=T,
+                L=L,
+                model_type=normalized_model_type,
+                selected_model_params=selected_model_params,
+            )
+            if history_seed_pid:
+                seeded_candidate = _evaluate_pid_params(
+                    K=K,
+                    T=T,
+                    L=L,
+                    model_type=normalized_model_type,
+                    selected_model_params=selected_model_params,
+                    dt=dt,
+                    confidence_score=confidence_score,
+                    strategy_name=strategy_name,
+                    pid_params=history_seed_pid,
+                    description_suffix=" (history_seeded)",
+                    experience_bonus=experience_bonus + 0.12,
+                )
+                seeded_candidate["history_seeded"] = True
+                if top_match:
+                    seeded_candidate["seed_experience_id"] = top_match.get("experience_id", "")
+                candidate_results.append(seeded_candidate)
+                if _is_better_candidate(seeded_candidate, best_candidate):
+                    best_candidate = seeded_candidate
 
             should_try_refined = (
                 preferred_refine_pattern
@@ -448,6 +533,8 @@ def select_best_pid_strategy(
             "is_stable": item["is_stable"],
             "experience_bonus": item["experience_bonus"],
             "history_refined": bool(item.get("history_refined", False)),
+            "history_seeded": bool(item.get("history_seeded", False)),
+            "seed_experience_id": item.get("seed_experience_id", ""),
         }
         for item in candidate_results
     ]
@@ -478,7 +565,9 @@ def select_best_pid_strategy(
         "L": float(L),
         "heuristic_strategy": heuristic_selection["strategy"],
         "experience_preferred_strategy": preferred_strategy,
+        "experience_preferred_model_type": str(summary.get("preferred_model_type", "")),
         "experience_match_count": len(preferred_matches) if isinstance(preferred_matches, list) else 0,
+        "experience_top_match_id": (top_match or {}).get("experience_id", ""),
         "preferred_refine_pattern": preferred_refine_pattern,
         "recommended_kp_scale": recommended_kp_scale,
         "recommended_ki_scale": recommended_ki_scale,
