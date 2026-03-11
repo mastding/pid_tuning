@@ -15,6 +15,7 @@ ENV/
 # Logs
 *.log
 *.log.*
+backend/memory/records/
 
 # Backup
 backup/

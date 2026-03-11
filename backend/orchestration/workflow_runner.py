@@ -223,6 +223,8 @@ async def run_multi_agent_collaboration(
                 break
 
             event_type = type(event).__name__
+            if event_type == "ThoughtEvent":
+                continue
             content = getattr(event, "content", None)
             if content:
                 yield {

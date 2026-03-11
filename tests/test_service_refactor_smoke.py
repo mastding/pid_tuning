@@ -212,6 +212,57 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
             )
             self.assertEqual(guidance["preferred_strategy"], "LAMBDA")
             self.assertTrue(guidance["matches"])
+            self.assertEqual(guidance["summary"]["preferred_refine_pattern"], "tighten_kp+tighten_ki")
+            self.assertAlmostEqual(guidance["summary"]["recommended_kp_scale"], 0.75, places=2)
+            self.assertAlmostEqual(guidance["summary"]["recommended_ki_scale"], 0.5, places=2)
+        finally:
+            experience_store.MEMORY_ROOT = old_root
+            experience_store.EXPERIENCE_FILE = old_file
+            experience_store.INDEX_FILE = old_index
+            gc.collect()
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_clear_experience_store_removes_records(self) -> None:
+        old_root = experience_store.MEMORY_ROOT
+        old_file = experience_store.EXPERIENCE_FILE
+        old_index = experience_store.INDEX_FILE
+        tmpdir = tempfile.mkdtemp()
+        try:
+            tmp_path = Path(tmpdir)
+            experience_store.MEMORY_ROOT = tmp_path
+            experience_store.EXPERIENCE_FILE = tmp_path / "pid_experiences.jsonl"
+            experience_store.INDEX_FILE = tmp_path / "pid_experiences.db"
+
+            record = build_experience_record(
+                loop_name="FIC_101A",
+                loop_type="flow",
+                loop_uri="/pid/demo",
+                data_source="history",
+                start_time="1",
+                end_time="2",
+                shared_data={"experience_guidance": {}},
+                final_result={
+                    "model": {"K": 0.45, "T": 2.0, "L": 0.0, "normalizedRmse": 0.08, "r2Score": 0.99, "confidence": 0.8},
+                    "pidParams": {"strategyRequested": "AUTO", "strategyUsed": "LAMBDA", "Kp": 1.5, "Ki": 0.5, "Kd": 0.0},
+                    "evaluation": {
+                        "performance_score": 9.2,
+                        "method_confidence": 0.8,
+                        "final_rating": 8.9,
+                        "passed": True,
+                        "failure_reason": "",
+                        "feedback_target": "",
+                        "initial_assessment": {"evaluated_pid": {"Kp": 2.0, "Ki": 1.0, "Kd": 0.0}},
+                        "auto_refine_result": {"applied": True},
+                    },
+                    "dataAnalysis": {"windowPoints": 180, "stepEvents": 3},
+                },
+            )
+            experience_store.append_experience_record(record)
+            cleared = experience_store.clear_experience_store()
+            self.assertTrue(cleared["cleared"])
+            self.assertEqual(cleared["before"]["total_count"], 1)
+            self.assertEqual(cleared["after"]["total_count"], 0)
+            self.assertEqual(experience_store.load_experience_records(), [])
         finally:
             experience_store.MEMORY_ROOT = old_root
             experience_store.EXPERIENCE_FILE = old_file

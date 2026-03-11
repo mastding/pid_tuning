@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from .experience_store import (
     append_experience_record,
+    clear_experience_store,
     get_experience_detail,
     get_experience_stats,
     list_experiences,
@@ -36,6 +37,13 @@ def _log_distance(lhs: float, rhs: float) -> float:
 
 def _tau_ratio(T: float, L: float) -> float:
     return max(_safe_float(L), 0.0) / max(_safe_float(T), 1e-6)
+
+
+def _safe_scale(numerator: float, denominator: float, default: float = 1.0) -> float:
+    denom = _safe_float(denominator, 0.0)
+    if abs(denom) <= 1e-9:
+        return default
+    return _safe_float(numerator, default) / denom
 
 
 def _experience_similarity_score(
@@ -68,6 +76,41 @@ def _experience_similarity_score(
     return score
 
 
+def _build_refine_delta(
+    initial_pid: Dict[str, Any],
+    final_pid: Dict[str, Any],
+    *,
+    auto_refined: bool,
+) -> Dict[str, Any]:
+    kp_initial = _safe_float(initial_pid.get("Kp"))
+    ki_initial = _safe_float(initial_pid.get("Ki"))
+    kd_initial = _safe_float(initial_pid.get("Kd"))
+    kp_final = _safe_float(final_pid.get("Kp"))
+    ki_final = _safe_float(final_pid.get("Ki"))
+    kd_final = _safe_float(final_pid.get("Kd"))
+
+    kp_scale = _safe_scale(kp_final, kp_initial, 1.0)
+    ki_scale = _safe_scale(ki_final, ki_initial, 1.0)
+    kd_scale = _safe_scale(kd_final, kd_initial, 1.0)
+
+    pattern_parts: List[str] = []
+    if kp_scale < 0.95:
+      pattern_parts.append("tighten_kp")
+    if ki_scale < 0.95:
+      pattern_parts.append("tighten_ki")
+    if kd_scale < 0.95 and abs(kd_initial) > 1e-9:
+      pattern_parts.append("tighten_kd")
+    if not pattern_parts and auto_refined:
+      pattern_parts.append("refined_no_major_delta")
+
+    return {
+        "kp_scale": round(kp_scale, 4),
+        "ki_scale": round(ki_scale, 4),
+        "kd_scale": round(kd_scale, 4),
+        "pattern": "+".join(pattern_parts) if pattern_parts else "base_formula",
+    }
+
+
 def retrieve_experience_guidance(
     *,
     loop_type: str,
@@ -94,6 +137,7 @@ def retrieve_experience_guidance(
         )
         if score <= 0:
             continue
+        refine_delta = record.get("refine_delta") or {}
         scored_matches.append(
             {
                 "experience_id": record.get("experience_id", ""),
@@ -106,6 +150,8 @@ def retrieve_experience_guidance(
                 "passed": bool((record.get("evaluation") or {}).get("passed", False)),
                 "lessons": record.get("lessons", []),
                 "model": record.get("model", {}),
+                "refine_delta": refine_delta,
+                "refine_pattern": str(refine_delta.get("pattern", "")),
             }
         )
 
@@ -122,12 +168,34 @@ def retrieve_experience_guidance(
     preferred_strategy = strategy_counter.most_common(1)[0][0] if strategy_counter else ""
     ratings = [match["final_rating"] for match in top_matches if match["final_rating"] > 0]
     avg_rating = mean(ratings) if ratings else 0.0
+    passed_count = sum(1 for match in top_matches if match["passed"])
+
+    successful_refined = [
+        match
+        for match in top_matches
+        if match["passed"] and str(match.get("refine_pattern", "")) not in {"", "base_formula"}
+    ]
+    recommended_kp_scale = mean([_safe_float((match.get("refine_delta") or {}).get("kp_scale"), 1.0) for match in successful_refined]) if successful_refined else 1.0
+    recommended_ki_scale = mean([_safe_float((match.get("refine_delta") or {}).get("ki_scale"), 1.0) for match in successful_refined]) if successful_refined else 1.0
+    recommended_kd_scale = mean([_safe_float((match.get("refine_delta") or {}).get("kd_scale"), 1.0) for match in successful_refined]) if successful_refined else 1.0
+    refine_pattern_counter = Counter(
+        str((match.get("refine_delta") or {}).get("pattern", ""))
+        for match in successful_refined
+        if str((match.get("refine_delta") or {}).get("pattern", ""))
+    )
+    preferred_refine_pattern = refine_pattern_counter.most_common(1)[0][0] if refine_pattern_counter else ""
+
     summary = {
         "match_count": len(top_matches),
         "avg_final_rating": round(avg_rating, 3),
-        "passed_count": sum(1 for match in top_matches if match["passed"]),
+        "passed_count": passed_count,
         "preferred_strategy": preferred_strategy,
         "top_loop_names": [str(match["loop_name"]) for match in top_matches[:2] if match.get("loop_name")],
+        "preferred_refine_pattern": preferred_refine_pattern,
+        "recommended_kp_scale": round(recommended_kp_scale, 4),
+        "recommended_ki_scale": round(recommended_ki_scale, 4),
+        "recommended_kd_scale": round(recommended_kd_scale, 4),
+        "refine_reference_count": len(successful_refined),
     }
     guidance = describe_experience_guidance(
         {
@@ -156,9 +224,21 @@ def describe_experience_guidance(experience_guidance: Dict[str, Any]) -> str:
     avg_rating = _safe_float(summary.get("avg_final_rating"))
     passed_count = int(summary.get("passed_count", 0) or 0)
     strategy_text = f"优先参考历史上表现较好的 {preferred_strategy} 策略" if preferred_strategy else "可参考历史成功案例"
+
+    refine_reference_count = int(summary.get("refine_reference_count", 0) or 0)
+    refine_pattern = str(summary.get("preferred_refine_pattern") or "")
+    refine_text = ""
+    if refine_reference_count > 0:
+        kp_scale = _safe_float(summary.get("recommended_kp_scale"), 1.0)
+        ki_scale = _safe_float(summary.get("recommended_ki_scale"), 1.0)
+        refine_text = (
+            f" 历史上有 {refine_reference_count} 条相似成功案例采用了参数收紧，"
+            f"常见修正模式为 {refine_pattern or 'refine'}，建议优先尝试 Kp×{kp_scale:.2f}、Ki×{ki_scale:.2f} 的经验修正版。"
+        )
+
     return (
         f"已检索到 {len(matches)} 条相似回路经验{names_text}，其中 {passed_count} 条最终通过，"
-        f"平均综合评分约 {avg_rating:.2f}；{strategy_text}。"
+        f"平均综合评分约 {avg_rating:.2f}，{strategy_text}。{refine_text}"
     )
 
 
@@ -181,13 +261,37 @@ def build_experience_record(
     evaluated_pid = initial_assessment.get("evaluated_pid") or {}
     auto_refine_result = evaluation.get("auto_refine_result") or {}
 
+    initial_pid = {
+        "Kp": _safe_float(evaluated_pid.get("Kp")),
+        "Ki": _safe_float(evaluated_pid.get("Ki")),
+        "Kd": _safe_float(evaluated_pid.get("Kd")),
+    }
+    final_pid = {
+        "Kp": _safe_float(pid.get("Kp")),
+        "Ki": _safe_float(pid.get("Ki")),
+        "Kd": _safe_float(pid.get("Kd")),
+    }
+    refine_delta = _build_refine_delta(initial_pid, final_pid, auto_refined=bool(auto_refine_result.get("applied")))
+    refine_gain = {
+        "performance_score_gain": round(
+            _safe_float(evaluation.get("performance_score")) - _safe_float(initial_assessment.get("performance_score")),
+            4,
+        ),
+        "final_rating_gain": round(
+            _safe_float(evaluation.get("final_rating")) - _safe_float(initial_assessment.get("final_rating")),
+            4,
+        ),
+    }
+
     lessons: List[str] = []
     if evaluation.get("passed"):
         lessons.append(
             f"{pid.get('strategyUsed') or pid.get('strategy')} 策略最终通过，综合评分 {float(evaluation.get('final_rating', 0.0)):.2f}"
         )
     if auto_refine_result.get("applied"):
-        lessons.append("首次评估未通过后，收紧Kp和Ki可显著提升闭环表现")
+        lessons.append(
+            f"首次评估未通过后，收紧 Kp 和 Ki 可显著提升闭环表现（Kp×{refine_delta['kp_scale']:.2f}, Ki×{refine_delta['ki_scale']:.2f}）。"
+        )
     if evaluation.get("failure_reason"):
         lessons.append(str(evaluation.get("failure_reason")))
 
@@ -231,17 +335,11 @@ def build_experience_record(
             "auto_refined": bool(auto_refine_result.get("applied")),
         },
         "pid": {
-            "initial": {
-                "Kp": _safe_float(evaluated_pid.get("Kp")),
-                "Ki": _safe_float(evaluated_pid.get("Ki")),
-                "Kd": _safe_float(evaluated_pid.get("Kd")),
-            },
-            "final": {
-                "Kp": _safe_float(pid.get("Kp")),
-                "Ki": _safe_float(pid.get("Ki")),
-                "Kd": _safe_float(pid.get("Kd")),
-            },
+            "initial": initial_pid,
+            "final": final_pid,
         },
+        "refine_delta": refine_delta,
+        "refine_gain": refine_gain,
         "evaluation": {
             "performance_score": _safe_float(evaluation.get("performance_score")),
             "method_confidence": _safe_float(evaluation.get("method_confidence")),
@@ -283,3 +381,7 @@ def get_experience_center_stats() -> Dict[str, Any]:
 
 def get_experience_record(experience_id: str) -> Dict[str, Any] | None:
     return get_experience_detail(experience_id)
+
+
+def clear_experience_center() -> Dict[str, Any]:
+    return clear_experience_store()

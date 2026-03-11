@@ -31,10 +31,157 @@
     .progress-step.active {
       transform: scale(1.1);
     }
+
+    .help-doc h1,
+    .help-doc h2,
+    .help-doc h3 {
+      margin-top: 1.2rem;
+      margin-bottom: 0.8rem;
+      font-weight: 700;
+      scroll-margin-top: 24px;
+    }
+
+    .help-doc p,
+    .help-doc li {
+      line-height: 1.75;
+    }
+
+    .help-doc h1 { font-size: 1.85rem; }
+    .help-doc h2 {
+      font-size: 1.35rem;
+      padding-top: 0.4rem;
+      border-top: 1px solid #e2e8f0;
+    }
+    .help-doc h3 { font-size: 1.05rem; }
+    .help-doc pre {
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 1rem;
+      border-radius: 0.9rem;
+      overflow-x: auto;
+    }
+    .help-doc code {
+      background: #eef2ff;
+      padding: 0.1rem 0.35rem;
+      border-radius: 0.35rem;
+    }
+    .help-doc pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
+    .help-doc blockquote {
+      border-left: 4px solid #6366f1;
+      background: #eef2ff;
+      margin: 1rem 0;
+      padding: 0.75rem 1rem;
+      border-radius: 0.75rem;
+      color: #334155;
+    }
+    .help-toc a.active {
+      background: #e0e7ff;
+      color: #3730a3;
+      font-weight: 700;
+    }
+    .help-chip.active {
+      background: #312e81;
+      color: #ffffff;
+      border-color: #312e81;
+    }
   </style>
 </head>
 <body>
   <div id="app" class="h-screen flex bg-gradient-to-br from-slate-50 to-slate-100">
+    <button
+      @click="openHelpCenter"
+      class="fixed top-5 right-6 z-40 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-lg hover:bg-slate-50 transition-all"
+    >
+      <span>?</span>
+      <span>帮助中心</span>
+    </button>
+
+    <div v-if="helpCenterOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 md:p-6">
+      <div class="flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900">帮助中心</h2>
+            <p class="mt-1 text-sm text-slate-500">查看当前 PID 智能整定系统的功能说明、架构设计和实现机制。</p>
+          </div>
+          <button
+            @click="closeHelpCenter"
+            class="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div class="border-b border-slate-200 bg-white px-6 py-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-for="shortcut in helpCenterShortcuts"
+              :key="shortcut.id"
+              @click="scrollHelpTo(shortcut.id)"
+              class="help-chip rounded-full border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition-all hover:bg-slate-100"
+              :class="{ active: helpCenterActiveSection === shortcut.id }"
+            >
+              {{ shortcut.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="flex-1 overflow-hidden">
+          <div class="grid h-full min-h-0 grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)]">
+            <aside class="hidden min-h-0 border-r border-slate-200 bg-slate-50 md:flex md:flex-col">
+              <div class="border-b border-slate-200 px-5 py-4">
+                <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">目录导航</div>
+                <div class="mt-2 text-sm text-slate-600">快速跳转到帮助文档的关键章节。</div>
+              </div>
+              <div class="help-toc min-h-0 flex-1 overflow-y-auto px-3 py-4 custom-scrollbar">
+                <template v-for="item in helpCenterToc" :key="item.id">
+                  <div
+                    v-if="item.level === 1 || isHelpTocVisible(item)"
+                    class="mb-1"
+                  >
+                    <div class="flex items-center gap-1">
+                      <button
+                        v-if="item.hasChildren"
+                        @click="toggleHelpToc(item.id)"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-white"
+                      >
+                        {{ isHelpTocExpanded(item.id) ? '−' : '+' }}
+                      </button>
+                      <a
+                        :href="`#${item.id}`"
+                        @click.prevent="scrollHelpTo(item.id)"
+                        class="block flex-1 rounded-xl px-3 py-2 text-sm transition-all hover:bg-white"
+                        :class="[item.level === 1 ? 'font-semibold text-slate-800' : item.level === 2 ? 'ml-2 text-slate-700' : 'ml-5 text-slate-500', helpCenterActiveSection === item.id ? 'active' : '']"
+                      >
+                        {{ item.text }}
+                      </a>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </aside>
+
+            <div ref="helpContentBox" class="min-h-0 overflow-y-auto px-6 py-6 md:px-8 custom-scrollbar" @scroll="onHelpScroll">
+              <div v-if="helpCenterLoading" class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                正在加载帮助文档...
+              </div>
+              <div v-else-if="helpCenterError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                {{ helpCenterError }}
+              </div>
+              <article
+                v-else
+                class="help-doc prose prose-slate max-w-none prose-headings:text-slate-900 prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-slate-900 prose-code:text-indigo-700"
+                v-html="helpCenterHtml"
+              ></article>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <aside class="w-96 bg-white shadow-xl flex flex-col overflow-y-auto border-r border-slate-200">
       <div class="p-6 border-b border-slate-200 bg-gradient-to-r from-blue-600 to-purple-600">
         <div class="flex items-center gap-3 mb-2">
@@ -229,12 +376,20 @@
                 <h2 class="text-2xl font-bold text-slate-800">经验中心</h2>
                 <p class="mt-2 text-sm text-slate-600">查看历史整定经验、筛选成功案例，并为类似回路提供经验参考。</p>
               </div>
-              <button
-                @click="loadExperienceCenter"
-                class="rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 transition-all"
-              >
-                刷新数据
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  @click="loadExperienceCenter"
+                  class="rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 transition-all"
+                >
+                  刷新数据
+                </button>
+                <button
+                  @click="clearExperienceCenter"
+                  class="rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 transition-all"
+                >
+                  清除历史经验
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1084,6 +1239,14 @@
             L: ''
           },
           experienceSearchResults: null,
+          helpCenterOpen: false,
+          helpCenterLoading: false,
+          helpCenterHtml: '',
+          helpCenterError: '',
+          helpCenterToc: [],
+          helpCenterActiveSection: '',
+          helpCenterExpandedSections: {},
+          helpCenterShortcuts: [],
           experienceFilters: {
             loop_type: '',
             passed: '',
@@ -1133,6 +1296,137 @@
           }
         },
 
+        async openHelpCenter() {
+          this.helpCenterOpen = true;
+          if (this.helpCenterLoading) return;
+
+          this.helpCenterLoading = true;
+          this.helpCenterError = '';
+          try {
+            const response = await fetch(`./help-center.md?v=${Date.now()}`, { cache: 'no-store' });
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const markdown = await response.text();
+            this.renderHelpMarkdown(markdown);
+          } catch (error) {
+            console.error('Failed to load help center:', error);
+            this.helpCenterError = `帮助文档加载失败: ${error.message}`;
+          } finally {
+            this.helpCenterLoading = false;
+          }
+        },
+
+        closeHelpCenter() {
+          this.helpCenterOpen = false;
+        },
+
+        renderHelpMarkdown(markdown) {
+          const rawHtml = marked.parse(markdown);
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = rawHtml;
+
+          const toc = [];
+          let headingIndex = 0;
+          wrapper.querySelectorAll('h1, h2, h3').forEach(node => {
+            headingIndex += 1;
+            const id = `help-section-${headingIndex}`;
+            node.id = id;
+            toc.push({
+              id,
+              text: (node.textContent || '').trim(),
+              level: Number(node.tagName.substring(1)),
+            });
+          });
+
+          const expandedSections = {};
+          toc.forEach((item, index) => {
+            const next = toc[index + 1];
+            item.hasChildren = Boolean(next && next.level > item.level);
+            if (item.level === 1) {
+              expandedSections[item.id] = true;
+            }
+          });
+
+          const shortcutLabels = {
+            '系统定位': '系统定位',
+            '多智能体协作流程': '协作流程',
+            '当前评分机制': '评分机制',
+            '经验机制': '经验机制',
+            '当前后端代码结构': '代码结构',
+            '主要接口': '接口说明',
+          };
+          const shortcuts = toc
+            .filter(item => item.level <= 2)
+            .filter(item => shortcutLabels[item.text])
+            .map(item => ({ id: item.id, label: shortcutLabels[item.text] }));
+
+          this.helpCenterHtml = wrapper.innerHTML;
+          this.helpCenterToc = toc;
+          this.helpCenterExpandedSections = expandedSections;
+          this.helpCenterShortcuts = shortcuts;
+          this.helpCenterActiveSection = toc[0]?.id || '';
+          this.$nextTick(() => this.onHelpScroll());
+        },
+
+        scrollHelpTo(sectionId) {
+          const container = this.$refs.helpContentBox;
+          if (!container) return;
+          const target = container.querySelector(`#${sectionId}`);
+          if (!target) return;
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          this.helpCenterActiveSection = sectionId;
+        },
+
+        onHelpScroll() {
+          const container = this.$refs.helpContentBox;
+          if (!container || !this.helpCenterToc.length) return;
+
+          const headings = this.helpCenterToc
+            .map(item => ({
+              id: item.id,
+              top: container.querySelector(`#${item.id}`)?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY,
+            }))
+            .filter(item => Number.isFinite(item.top));
+
+          const current = headings
+            .filter(item => item.top <= 140)
+            .sort((a, b) => b.top - a.top)[0] || headings[0];
+
+          if (current?.id) {
+            this.helpCenterActiveSection = current.id;
+          }
+        },
+
+        toggleHelpToc(sectionId) {
+          this.helpCenterExpandedSections = {
+            ...this.helpCenterExpandedSections,
+            [sectionId]: !this.helpCenterExpandedSections[sectionId],
+          };
+        },
+
+        isHelpTocExpanded(sectionId) {
+          return Boolean(this.helpCenterExpandedSections[sectionId]);
+        },
+
+        isHelpTocVisible(item) {
+          if (item.level === 1) return true;
+          const parent = this.findHelpTocParent(item);
+          if (!parent) return true;
+          return this.isHelpTocExpanded(parent.id);
+        },
+
+        findHelpTocParent(targetItem) {
+          const idx = this.helpCenterToc.findIndex(item => item.id === targetItem.id);
+          if (idx <= 0) return null;
+          for (let i = idx - 1; i >= 0; i -= 1) {
+            if (this.helpCenterToc[i].level < targetItem.level) {
+              return this.helpCenterToc[i];
+            }
+          }
+          return null;
+        },
+
         async openExperienceCenterFromResult(result) {
           const model = result?.model || {};
           this.experienceSearchForm = {
@@ -1152,6 +1446,26 @@
             this.loadExperienceStats(),
             this.loadExperienceItems()
           ]);
+        },
+
+        async clearExperienceCenter() {
+          const confirmed = window.confirm('确认清除全部历史经验吗？此操作便于测试使用，清除后不可恢复。');
+          if (!confirmed) return;
+
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/experiences/actions/clear`, {
+              method: 'POST'
+            });
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            this.selectedExperience = null;
+            this.experienceSearchResults = null;
+            await this.loadExperienceCenter();
+          } catch (error) {
+            console.error('Failed to clear experiences:', error);
+            alert(`清除历史经验失败: ${error.message}`);
+          }
         },
 
         async loadExperienceStats() {

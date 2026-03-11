@@ -101,6 +101,26 @@ def append_experience_record(record: Dict[str, Any]) -> str:
     return experience_id
 
 
+def clear_experience_store() -> Dict[str, Any]:
+    ensure_experience_store()
+    before = get_experience_stats()
+
+    if EXPERIENCE_FILE.exists():
+        EXPERIENCE_FILE.write_text("", encoding="utf-8")
+
+    with sqlite3.connect(INDEX_FILE) as conn:
+        conn.execute("DELETE FROM experiences")
+        conn.commit()
+
+    after = get_experience_stats()
+    return {
+        "cleared": True,
+        "cleared_count": int(before.get("total_count", 0) or 0),
+        "before": before,
+        "after": after,
+    }
+
+
 def load_experience_records(limit: int | None = None) -> List[Dict[str, Any]]:
     store_path = ensure_experience_store()
     records: List[Dict[str, Any]] = []

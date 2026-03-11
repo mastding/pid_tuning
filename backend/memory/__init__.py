@@ -1,5 +1,6 @@
 from .experience_service import (
     build_experience_record,
+    clear_experience_center,
     describe_experience_guidance,
     persist_experience_record,
     retrieve_experience_guidance,
@@ -7,6 +8,7 @@ from .experience_service import (
 
 __all__ = [
     "build_experience_record",
+    "clear_experience_center",
     "describe_experience_guidance",
     "persist_experience_record",
     "retrieve_experience_guidance",

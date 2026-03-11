@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from memory.experience_service import (
+    clear_experience_center,
     get_experience_center_stats,
     get_experience_record,
     list_experience_summaries,
@@ -131,5 +132,9 @@ def create_app(
                 candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
             )
         )
+
+    @app.post("/api/experiences/actions/clear")
+    async def experience_clear() -> JSONResponse:
+        return JSONResponse(clear_experience_center())
 
     return app

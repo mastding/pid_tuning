@@ -10,6 +10,54 @@ def _format_float(value: Any, digits: int = 3) -> str:
         return str(value)
 
 
+def _inject_experience_tool(
+    agent_name: str,
+    tools: List[Dict[str, Any]],
+    *,
+    display_agent_names: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    if agent_name != display_agent_names["pid_expert"]:
+        return tools
+    if any(tool.get("tool_name") == "tool_search_experience" for tool in tools):
+        return tools
+
+    tune_tool = next(
+        (
+            tool
+            for tool in tools
+            if tool.get("tool_name") == "tool_tune_pid" and isinstance(tool.get("result"), dict)
+        ),
+        None,
+    )
+    if tune_tool is None:
+        return tools
+
+    tune_result = tune_tool["result"]
+    experience_guidance = tune_result.get("experience_guidance")
+    if not isinstance(experience_guidance, dict):
+        return tools
+
+    selection_inputs = tune_result.get("selection_inputs") or {}
+    lookup_tool = {
+        "tool_name": "tool_search_experience",
+        "args": {
+            "loop_type": selection_inputs.get("loop_type"),
+            "K": selection_inputs.get("K"),
+            "T": selection_inputs.get("T"),
+            "L": selection_inputs.get("L"),
+            "limit": 3,
+        },
+        "result": {
+            "preferred_strategy": experience_guidance.get("preferred_strategy", ""),
+            "summary": experience_guidance.get("summary", {}),
+            "guidance": experience_guidance.get("guidance", ""),
+            "matches": experience_guidance.get("matches", []),
+        },
+        "is_error": False,
+    }
+    return [lookup_tool, *tools]
+
+
 def build_agent_response(
     agent_name: str,
     tools: List[Dict[str, Any]],
@@ -63,6 +111,7 @@ def build_agent_response(
         for tool in tools:
             if tool.get("tool_name") == "tool_tune_pid" and isinstance(tool.get("result"), dict):
                 tune_result = tool["result"]
+                break
         if tune_result is None:
             tune_result = latest_result if latest_tool_name == "tool_tune_pid" else {}
 
@@ -78,7 +127,7 @@ def build_agent_response(
         if guidance_text:
             response += f" 历史经验参考：{guidance_text}"
         elif "experience_guidance" in tune_result:
-            response += " 历史经验参考：当前未检索到足够相似的已沉淀案例，本次主要依据当前模型闭环试算选择策略。"
+            response += " 历史经验参考：当前未检索到足够相似的已沉淀案例，本次主要依据当前模型和闭环试算选择策略。"
         return response
 
     if agent_name == display_agent_names["evaluation_expert"]:
@@ -106,6 +155,12 @@ def finalize_agent_turn(
 ) -> Dict[str, Any] | None:
     if current_turn_data is None:
         return None
+
+    current_turn_data["tools"] = _inject_experience_tool(
+        current_turn_data.get("agent", ""),
+        current_turn_data.get("tools", []),
+        display_agent_names=display_agent_names,
+    )
 
     existing_response = (current_turn_data.get("response") or "").strip()
     generated = build_agent_response(
