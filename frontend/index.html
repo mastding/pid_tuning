@@ -624,6 +624,10 @@
                     <div><span class="text-slate-500">R²</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.model?.r2_score, 4) }}</div></div>
                     <div><span class="text-slate-500">置信度</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.model?.confidence, 4) }}</div></div>
                   </div>
+                  <div v-if="selectedExperience.model?.model_type === 'SOPDT' && (selectedExperience.model?.shape_index !== undefined || selectedExperience.model?.apparent_order !== undefined)" class="mt-3 grid grid-cols-2 gap-2 text-sm">
+                    <div><span class="text-slate-500">shape_index</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.model?.shape_index, 4) }}</div></div>
+                    <div><span class="text-slate-500">apparent_order</span><div class="font-mono text-slate-800">{{ formatNumber(selectedExperience.model?.apparent_order, 4) }}</div></div>
+                  </div>
                 </div>
                 <div class="rounded-lg border border-purple-100 bg-purple-50 p-4">
                   <div class="text-sm font-semibold text-slate-800 mb-2">策略与参数</div>
@@ -936,6 +940,16 @@
                     <div class="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
                       <span class="text-slate-600">R²</span>
                       <span class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.model.r2Score, 4) }}</span>
+                    </div>
+                  </div>
+                  <div v-if="msg.data.model.modelType === 'SOPDT' && (msg.data.model.selectedModelParams?.shape_index !== undefined || msg.data.model.selectedModelParams?.apparent_order !== undefined)" class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                    <div class="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                      <span class="text-slate-600">shape_index</span>
+                      <span class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.model.selectedModelParams?.shape_index, 4) }}</span>
+                    </div>
+                    <div class="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                      <span class="text-slate-600">apparent_order</span>
+                      <span class="font-mono font-bold text-slate-800">{{ formatNumber(msg.data.model.selectedModelParams?.apparent_order, 4) }}</span>
                     </div>
                   </div>
                   <div v-if="false && msg.data.model.windowOverview && msg.data.model.windowOverview.points && msg.data.model.windowOverview.points.length > 1" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
