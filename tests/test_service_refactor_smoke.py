@@ -22,6 +22,7 @@ from backend.services.identification_service import (
 )
 from backend.services.pid_evaluation_service import build_initial_assessment, diagnose_evaluation_failure, evaluate_pid_model
 from backend.services.pid_tuning_service import benchmark_pid_strategies, refine_pid_for_performance, select_best_pid_strategy
+from backend.skills.pid_tuning_skills import apply_tuning_rules
 from backend.memory import experience_store
 from backend.memory.experience_service import build_experience_record, retrieve_experience_guidance
 from backend.orchestration.workflow_runner import run_multi_agent_collaboration
@@ -579,6 +580,24 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
         )
         self.assertTrue(any(item.get("history_seeded") for item in result["public_candidate_results"]))
         self.assertEqual(result["selection_inputs"]["experience_top_match_id"], "exp_seed")
+
+    def test_sopdt_native_tuning_rule_preserves_second_order_shape_fields(self) -> None:
+        params = apply_tuning_rules(
+            K=1.1,
+            T=30.0,
+            L=4.0,
+            strategy="LAMBDA",
+            model_type="SOPDT",
+            model_params={"model_type": "SOPDT", "K": 1.1, "T1": 12.0, "T2": 24.0, "L": 4.0},
+        )
+        self.assertEqual(params["model_type"], "SOPDT")
+        self.assertAlmostEqual(params["T1"], 12.0)
+        self.assertAlmostEqual(params["T2"], 24.0)
+        self.assertGreater(params["shape_index"], 0.0)
+        self.assertGreater(params["apparent_order"], 1.0)
+        self.assertGreater(params["T_work"], params["T_dominant"])
+        self.assertGreaterEqual(params["L_work"], 4.0)
+        self.assertGreaterEqual(params["Td"], 0.0)
 
 
 if __name__ == "__main__":

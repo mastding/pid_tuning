@@ -186,35 +186,40 @@ def tune_sopdt(K: float, T1: float, T2: float, L: float, strategy: str) -> Dict:
     secondary_tau = min(T1, T2)
     tau_ratio = secondary_tau / max(dominant_tau, 1e-6)
 
-    # Keep the dominant/secondary structure visible rather than collapsing directly to T1+T2.
-    damping_buffer = 0.25 + 0.35 * min(max(tau_ratio, 0.0), 1.0)
-    t_work = dominant_tau + damping_buffer * secondary_tau
-    l_work = L + (0.20 + 0.15 * min(max(tau_ratio, 0.0), 1.0)) * secondary_tau
+    # Use the native second-order shape rather than collapsing directly to T1+T2.
+    # shape_index reflects how distributed the two time constants are.
+    shape_index = min(max(tau_ratio, 0.0), 1.0)
+    apparent_order = 1.0 + shape_index
+    distributed_lag = L + secondary_tau * (0.35 + 0.20 * shape_index)
+    aggregate_tau = dominant_tau + secondary_tau * (0.55 + 0.25 * shape_index)
+    t_work = max(aggregate_tau, 1e-3)
+    l_work = max(distributed_lag, 0.0)
+    derivative_ceiling = max(0.18 * dominant_tau + 0.30 * secondary_tau, 0.0)
 
     if strategy_name in {"LAMBDA", "LAMBDA_TUNING"}:
-        lambda_c = max(1.15 * t_work, 1.8 * l_work, 1e-3)
+        lambda_c = max((1.05 + 0.30 * shape_index) * t_work, 2.0 * l_work, 1e-3)
         Kp = t_work / (abs_k * (lambda_c + l_work))
-        Ti = max(dominant_tau + 0.85 * secondary_tau + 0.4 * l_work, 1e-3)
-        Td = min(0.22 * dominant_tau + 0.08 * secondary_tau, max(l_work, 0.0))
-        description = "SOPDT Lambda dominant-secondary"
+        Ti = max(dominant_tau + (1.05 + 0.35 * shape_index) * secondary_tau + 0.45 * l_work, 1e-3)
+        Td = min(secondary_tau * (0.22 + 0.18 * shape_index), derivative_ceiling)
+        description = "SOPDT native Lambda"
     elif strategy_name == "IMC":
-        lambda_c = max(0.95 * t_work, 1.2 * l_work, 1e-3)
+        lambda_c = max((0.90 + 0.20 * shape_index) * t_work, 1.6 * l_work, 1e-3)
         Kp = t_work / (abs_k * (lambda_c + l_work))
-        Ti = max(dominant_tau + 0.65 * secondary_tau, 1e-3)
-        Td = min(0.18 * dominant_tau + 0.06 * secondary_tau, max(l_work, 0.0))
-        description = "SOPDT IMC dominant-secondary"
+        Ti = max(dominant_tau + (0.75 + 0.20 * shape_index) * secondary_tau + 0.25 * l_work, 1e-3)
+        Td = min(secondary_tau * (0.16 + 0.12 * shape_index), derivative_ceiling)
+        description = "SOPDT native IMC"
     elif strategy_name == "ZN":
-        effective_l = max(l_work, 0.18 * t_work, 1e-3)
-        Kp = 0.75 * t_work / (abs_k * effective_l)
-        Ti = 2.5 * effective_l
-        Td = 0.35 * effective_l
-        description = "SOPDT moderated ZN"
+        effective_l = max(l_work, (0.22 + 0.08 * shape_index) * t_work, 1e-3)
+        Kp = 0.55 * t_work / (abs_k * effective_l)
+        Ti = max(2.8 * effective_l + 0.40 * secondary_tau, 1e-3)
+        Td = min(0.40 * effective_l, 0.35 * secondary_tau)
+        description = "SOPDT native moderated ZN"
     else:
-        effective_l = max(l_work, 0.18 * t_work, 1e-3)
-        Kp = 0.42 * t_work / (abs_k * effective_l)
-        Ti = max(t_work, 1e-3)
-        Td = 0.25 * effective_l
-        description = "SOPDT CHR-like"
+        effective_l = max(l_work, (0.20 + 0.05 * shape_index) * t_work, 1e-3)
+        Kp = 0.38 * t_work / (abs_k * effective_l)
+        Ti = max(t_work + 0.35 * secondary_tau, 1e-3)
+        Td = min(0.30 * effective_l, 0.25 * secondary_tau)
+        description = "SOPDT native CHR-like"
 
     Ki = _safe_div(Kp, Ti, 0.0)
     Kd = Kp * Td
@@ -231,6 +236,8 @@ def tune_sopdt(K: float, T1: float, T2: float, L: float, strategy: str) -> Dict:
             "T_dominant": float(dominant_tau),
             "T_secondary": float(secondary_tau),
             "tau_ratio": float(tau_ratio),
+            "shape_index": float(shape_index),
+            "apparent_order": float(apparent_order),
             "L_work": float(l_work),
             "T_work": float(t_work),
         }
