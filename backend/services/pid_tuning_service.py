@@ -10,6 +10,118 @@ from skills.rating import ModelRating
 ALL_STRATEGIES = ["IMC", "LAMBDA", "ZN", "CHR"]
 
 
+def _normalize_model_params(
+    *,
+    model_type: str,
+    selected_model_params: Dict[str, Any] | None,
+    K: float,
+    T: float,
+    L: float,
+) -> Dict[str, Any]:
+    params = dict(selected_model_params or {})
+    normalized_model_type = str(model_type or params.get("model_type", "FOPDT")).upper()
+    params["model_type"] = normalized_model_type
+
+    if normalized_model_type == "SOPDT":
+        params.setdefault("K", float(K))
+        params.setdefault("T1", float(params.get("T", T)))
+        params.setdefault("T2", float(params.get("T", T)))
+        params.setdefault("L", float(L))
+        return params
+    if normalized_model_type == "IPDT":
+        params.setdefault("K", float(K))
+        params.setdefault("L", float(L))
+        return params
+    if normalized_model_type == "FO":
+        params.setdefault("K", float(K))
+        params.setdefault("T", float(T))
+        return params
+
+    params.setdefault("K", float(K))
+    params.setdefault("T", float(T))
+    params.setdefault("L", float(L))
+    return params
+
+
+def _derive_primary_tuning_inputs(
+    *,
+    model_type: str,
+    selected_model_params: Dict[str, Any] | None,
+    K: float,
+    T: float,
+    L: float,
+) -> Dict[str, Any]:
+    params = _normalize_model_params(
+        model_type=model_type,
+        selected_model_params=selected_model_params,
+        K=K,
+        T=T,
+        L=L,
+    )
+    normalized_model_type = str(params.get("model_type", model_type or "FOPDT")).upper()
+
+    if normalized_model_type == "SOPDT":
+        t1 = max(float(params.get("T1", params.get("T", T))), 1e-6)
+        t2 = max(float(params.get("T2", params.get("T", T))), 1e-6)
+        dominant_tau = max(t1, t2)
+        secondary_tau = min(t1, t2)
+        tau_ratio = secondary_tau / max(dominant_tau, 1e-6)
+        shape_index = min(max(tau_ratio, 0.0), 1.0)
+        apparent_order = 1.0 + shape_index
+        raw_l = max(float(params.get("L", L)), 0.0)
+        aggregate_tau = dominant_tau + secondary_tau
+        t_work = dominant_tau + secondary_tau * (0.55 + 0.25 * shape_index)
+        l_work = raw_l + secondary_tau * (0.35 + 0.20 * shape_index)
+        return {
+            "model_type": normalized_model_type,
+            "K": float(params.get("K", K)),
+            "T1": float(t1),
+            "T2": float(t2),
+            "L": float(raw_l),
+            "selected_model_params": params,
+            "shape_index": float(shape_index),
+            "apparent_order": float(apparent_order),
+            "tau_ratio": float(raw_l / max(aggregate_tau, 1e-6)),
+            "aggregate_tau": float(max(aggregate_tau, 1e-6)),
+            "T_work": float(max(t_work, 1e-6)),
+            "L_work": float(max(l_work, 0.0)),
+        }
+
+    if normalized_model_type == "IPDT":
+        lag_value = max(float(params.get("L", L)), 1e-6)
+        effective_t = max(float(T), lag_value)
+        return {
+            "model_type": normalized_model_type,
+            "K": float(params.get("K", K)),
+            "L": float(lag_value),
+            "selected_model_params": params,
+            "tau_ratio": float(lag_value / max(effective_t, 1e-6)),
+            "T_work": float(effective_t),
+        }
+
+    if normalized_model_type == "FO":
+        t_value = max(float(params.get("T", T)), 1e-6)
+        return {
+            "model_type": normalized_model_type,
+            "K": float(params.get("K", K)),
+            "T": float(t_value),
+            "L": 0.0,
+            "selected_model_params": params,
+            "tau_ratio": 0.0,
+        }
+
+    t_value = max(float(params.get("T", T)), 1e-6)
+    l_value = max(float(params.get("L", L)), 0.0)
+    return {
+        "model_type": normalized_model_type,
+        "K": float(params.get("K", K)),
+        "T": float(t_value),
+        "L": float(l_value),
+        "selected_model_params": params,
+        "tau_ratio": float(l_value / max(t_value, 1e-6)),
+    }
+
+
 def _build_history_seed_pid(
     *,
     top_match: Dict[str, Any] | None,
@@ -349,14 +461,35 @@ def select_best_pid_strategy(
     dt: float,
     experience_guidance: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    normalized_model_type = str(model_type or "FOPDT").upper()
-    tau_ratio = max(float(L), 0.0) / max(float(T), 1e-6)
+    primary_inputs = _derive_primary_tuning_inputs(
+        model_type=model_type,
+        selected_model_params=selected_model_params,
+        K=K,
+        T=T,
+        L=L,
+    )
+    normalized_model_type = str(primary_inputs["model_type"]).upper()
+    selected_model_params = dict(primary_inputs["selected_model_params"] or {})
+    if normalized_model_type == "SOPDT":
+        K = float(selected_model_params.get("K", primary_inputs["K"]))
+        T = float(primary_inputs.get("aggregate_tau", float(selected_model_params.get("T1", 0.0)) + float(selected_model_params.get("T2", 0.0))))
+        L = float(selected_model_params.get("L", primary_inputs.get("L", L)))
+    elif normalized_model_type == "IPDT":
+        K = float(selected_model_params.get("K", primary_inputs["K"]))
+        T = float(primary_inputs.get("T_work", T))
+        L = float(selected_model_params.get("L", primary_inputs.get("L", L)))
+    else:
+        K = float(primary_inputs["K"])
+        T = float(primary_inputs.get("T_work", primary_inputs.get("T", T)))
+        L = float(primary_inputs.get("L_work", primary_inputs.get("L", L)))
+    tau_ratio = float(primary_inputs["tau_ratio"])
     heuristic_selection = select_tuning_strategy(
         loop_type=loop_type,
         K=K,
         T=T,
         L=L,
         model_type=normalized_model_type,
+        model_params=selected_model_params,
         model_confidence=confidence_score,
         r2_score=r2_score,
         normalized_rmse=normalized_rmse,
@@ -560,9 +693,7 @@ def select_best_pid_strategy(
         "normalized_rmse": normalized_rmse,
         "r2_score": r2_score,
         "tau_ratio": tau_ratio,
-        "K": float(K),
-        "T": float(T),
-        "L": float(L),
+        "selected_model_params": selected_model_params or {},
         "heuristic_strategy": heuristic_selection["strategy"],
         "experience_preferred_strategy": preferred_strategy,
         "experience_preferred_model_type": str(summary.get("preferred_model_type", "")),
@@ -572,9 +703,44 @@ def select_best_pid_strategy(
         "recommended_kp_scale": recommended_kp_scale,
         "recommended_ki_scale": recommended_ki_scale,
         "recommended_kd_scale": recommended_kd_scale,
-        "tested_strategies": [item["strategy"] for item in candidate_results],
+        "tested_candidates": [
+            {
+                "strategy": item["strategy"],
+                "source": (
+                    "history_refined"
+                    if item.get("history_refined")
+                    else "history_seeded"
+                    if item.get("history_seeded")
+                    else "heuristic_or_benchmark"
+                ),
+            }
+            for item in candidate_results
+        ],
         "full_benchmark_triggered": full_benchmark_triggered,
     }
+    if normalized_model_type == "SOPDT":
+        selection_inputs["derived_tuning_features"] = {
+            "shape_index": primary_inputs.get("shape_index"),
+            "apparent_order": primary_inputs.get("apparent_order"),
+            "tau_ratio": tau_ratio,
+            "aggregate_tau": float(primary_inputs.get("aggregate_tau", T)),
+            "T_work": float(primary_inputs.get("T_work", T)),
+            "L_work": float(primary_inputs.get("L_work", L)),
+        }
+    elif normalized_model_type == "IPDT":
+        selection_inputs["derived_tuning_features"] = {
+            "tau_ratio": tau_ratio,
+            "T_work": float(T),
+            "L_work": float(L),
+        }
+    elif normalized_model_type in {"FOPDT", "FO"}:
+        selection_inputs.update(
+            {
+                "K": float(K),
+                "T": float(T),
+                "L": float(L),
+            }
+        )
     return {
         "heuristic_selection": heuristic_selection,
         "candidate_strategies": [item["strategy"] for item in candidate_results],

@@ -48,6 +48,18 @@ def _safe_scale(numerator: float, denominator: float, default: float = 1.0) -> f
     return _safe_float(numerator, default) / denom
 
 
+def _sanitize_model_payload(model: Dict[str, Any] | None) -> Dict[str, Any]:
+    payload = dict(model or {})
+    payload.pop("tuning_model", None)
+    model_type = str(payload.get("model_type", "")).upper()
+    selected_model_params = dict(payload.get("selected_model_params") or {})
+    if model_type == "SOPDT":
+        selected_model_params.pop("T", None)
+    if selected_model_params:
+        payload["selected_model_params"] = selected_model_params
+    return payload
+
+
 def _raw_model_similarity_score(
     *,
     target_model_type: str,
@@ -224,7 +236,7 @@ def retrieve_experience_guidance(
                 "performance_score": _safe_float((record.get("evaluation") or {}).get("performance_score")),
                 "passed": bool((record.get("evaluation") or {}).get("passed", False)),
                 "lessons": record.get("lessons", []),
-                "model": record.get("model", {}),
+                "model": _sanitize_model_payload(record.get("model", {})),
                 "model_type": str((record.get("model") or {}).get("model_type", "FOPDT")).upper(),
                 "refine_delta": refine_delta,
                 "refine_pattern": str(refine_delta.get("pattern", "")),
@@ -412,7 +424,7 @@ def build_experience_record(
         tags.append("passed")
 
     created_at = datetime.now().astimezone().isoformat(timespec="seconds")
-    return {
+    record = {
         "experience_id": f"exp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:6]}",
         "created_at": created_at,
         "loop_name": loop_name,
@@ -422,8 +434,9 @@ def build_experience_record(
         "history_range": {"start_time": start_time, "end_time": end_time},
         "model": {
             "model_type": str(model.get("modelType", "FOPDT")),
-            "selected_model_params": model.get("selectedModelParams", {}),
-            "tuning_model": model.get("tuningModel", {}),
+            "selected_model_params": _sanitize_model_payload(
+                {"model_type": str(model.get("modelType", "FOPDT")), "selected_model_params": model.get("selectedModelParams", {})}
+            ).get("selected_model_params", {}),
             "model_selection_reason": str(model.get("modelSelectionReason", "")),
             "K": _safe_float(model.get("K")),
             "T": _safe_float(model.get("T")),
@@ -470,6 +483,8 @@ def build_experience_record(
             "last_follow_up_final_rating": 0.0,
         },
     }
+    record["model"] = _sanitize_model_payload(record.get("model", {}))
+    return record
 
 
 def persist_experience_record(record: Dict[str, Any]) -> str:
@@ -485,7 +500,7 @@ def list_experience_summaries(
     keyword: str = "",
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
-    return list_experiences(
+    records = list_experiences(
         loop_type=loop_type,
         model_type=model_type,
         passed=passed,
@@ -493,6 +508,9 @@ def list_experience_summaries(
         keyword=keyword,
         limit=limit,
     )
+    for record in records:
+        record["model"] = _sanitize_model_payload(record.get("model", {}))
+    return records
 
 
 def get_experience_center_stats() -> Dict[str, Any]:
@@ -500,7 +518,14 @@ def get_experience_center_stats() -> Dict[str, Any]:
 
 
 def get_experience_record(experience_id: str) -> Dict[str, Any] | None:
-    return get_experience_detail(experience_id)
+    record = get_experience_detail(experience_id)
+    if record:
+        record["model"] = _sanitize_model_payload(record.get("model", {}))
+        guidance_used = record.get("experience_guidance_used") or {}
+        matches = guidance_used.get("matches") or []
+        for match in matches:
+            match["model"] = _sanitize_model_payload(match.get("model", {}))
+    return record
 
 
 def clear_experience_center() -> Dict[str, Any]:

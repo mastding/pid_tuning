@@ -342,7 +342,6 @@ def fit_sopdt_model(mv: np.ndarray, pv: np.ndarray, dt: float = 1.0) -> Dict:
         pv_mean=float(np.mean(pv)),
         primary_params={
             "K": float(K_real),
-            "T": max(T1_opt, T2_opt),
             "L": L_opt,
             "T1": T1_opt,
             "T2": T2_opt,

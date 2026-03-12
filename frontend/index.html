@@ -240,12 +240,32 @@
             class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
         </div>
 
-                <div>
+        <div>
           <label class="block text-sm font-semibold text-slate-700 mb-2">数据来源</label>
-          <select v-model="dataSource" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
-            <option value="upload">上传CSV</option>
-            <option value="history">获取历史数据</option>
-          </select>
+          <div class="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              @click="dataSource = 'upload'"
+              class="rounded-xl border px-4 py-3 text-left transition-all"
+              :class="dataSource === 'upload'
+                ? 'border-blue-500 bg-blue-50 shadow-sm'
+                : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'"
+            >
+              <div class="text-sm font-semibold" :class="dataSource === 'upload' ? 'text-blue-700' : 'text-slate-700'">上传 CSV</div>
+              <div class="mt-1 text-xs" :class="dataSource === 'upload' ? 'text-blue-600' : 'text-slate-500'">使用本地文件直接发起整定</div>
+            </button>
+            <button
+              type="button"
+              @click="dataSource = 'history'"
+              class="rounded-xl border px-4 py-3 text-left transition-all"
+              :class="dataSource === 'history'
+                ? 'border-blue-500 bg-blue-50 shadow-sm'
+                : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'"
+            >
+              <div class="text-sm font-semibold" :class="dataSource === 'history' ? 'text-blue-700' : 'text-slate-700'">获取历史数据</div>
+              <div class="mt-1 text-xs" :class="dataSource === 'history' ? 'text-blue-600' : 'text-slate-500'">按回路参数从历史系统取数</div>
+            </button>
+          </div>
         </div>
 
         <div v-if="dataSource === 'history'" class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -911,17 +931,13 @@
                     </div>
                   </div>
                   <div class="grid grid-cols-2 gap-3 text-sm">
-                    <div class="bg-blue-50 rounded-lg p-3">
-                      <div class="text-slate-600 text-xs mb-1">增益 K</div>
-                      <div class="font-mono font-bold text-blue-700 text-lg">{{ msg.data.model.K.toFixed(3) }}</div>
-                    </div>
-                    <div class="bg-blue-50 rounded-lg p-3">
-                      <div class="text-slate-600 text-xs mb-1">时间常数 T</div>
-                      <div class="font-mono font-bold text-blue-700 text-lg">{{ msg.data.model.T.toFixed(2) }}s</div>
-                    </div>
-                    <div class="bg-blue-50 rounded-lg p-3">
-                      <div class="text-slate-600 text-xs mb-1">死区时间 L</div>
-                      <div class="font-mono font-bold text-blue-700 text-lg">{{ msg.data.model.L.toFixed(2) }}s</div>
+                    <div
+                      v-for="metric in getModelPrimaryMetrics(msg.data.model)"
+                      :key="metric.label"
+                      class="bg-blue-50 rounded-lg p-3"
+                    >
+                      <div class="text-slate-600 text-xs mb-1">{{ metric.label }}</div>
+                      <div class="font-mono font-bold text-blue-700 text-lg">{{ metric.value }}{{ metric.suffix || '' }}</div>
                     </div>
                     <div class="bg-blue-50 rounded-lg p-3">
                       <div class="text-slate-600 text-xs mb-1">置信度</div>
@@ -2065,7 +2081,14 @@ end_time: ${this.endTime || '1772553600000'}
           }
 
           const entries = [];
-          ['K', 'T', 'L', 'T1', 'T2', 'Ki_proc'].forEach(key => {
+          const modelType = String(model.model_type || model.modelType || '').toUpperCase();
+          const orderedKeys =
+            modelType === 'SOPDT'
+              ? ['K', 'T1', 'T2', 'L']
+              : modelType === 'IPDT'
+                ? ['K', 'Ki_proc', 'L']
+                : ['K', 'T', 'L', 'T1', 'T2', 'Ki_proc'];
+          orderedKeys.forEach(key => {
             const value = Number(model[key]);
             if (Number.isFinite(value)) {
               entries.push(`${key}=${value.toFixed(3)}`);
@@ -2073,6 +2096,45 @@ end_time: ${this.endTime || '1772553600000'}
           });
 
           return entries.length ? entries.join(', ') : '-';
+        },
+
+        getModelPrimaryMetrics(model) {
+          if (!model || typeof model !== 'object') {
+            return [];
+          }
+
+          const modelType = String(model.modelType || model.model_type || '').toUpperCase();
+          const params = model.selectedModelParams || model.selected_model_params || model;
+
+          if (modelType === 'SOPDT') {
+            return [
+              { label: '增益 K', value: this.formatNumber(params?.K, 3) },
+              { label: '时间常数 T1', value: this.formatNumber(params?.T1, 2), suffix: 's' },
+              { label: '时间常数 T2', value: this.formatNumber(params?.T2, 2), suffix: 's' },
+              { label: '死区时间 L', value: this.formatNumber(params?.L, 2), suffix: 's' },
+            ];
+          }
+
+          if (modelType === 'IPDT') {
+            return [
+              { label: '过程增益 K', value: this.formatNumber(params?.K, 3) },
+              { label: '积分增益 Ki_proc', value: this.formatNumber(params?.Ki_proc, 3) },
+              { label: '死区时间 L', value: this.formatNumber(params?.L, 2), suffix: 's' },
+            ];
+          }
+
+          if (modelType === 'FO') {
+            return [
+              { label: '增益 K', value: this.formatNumber(params?.K, 3) },
+              { label: '时间常数 T', value: this.formatNumber(params?.T, 2), suffix: 's' },
+            ];
+          }
+
+          return [
+            { label: '增益 K', value: this.formatNumber(params?.K ?? model.K, 3) },
+            { label: '时间常数 T', value: this.formatNumber(params?.T ?? model.T, 2), suffix: 's' },
+            { label: '死区时间 L', value: this.formatNumber(params?.L ?? model.L, 2), suffix: 's' },
+          ];
         },
 
         modelParamsDiffer(rawModel, workingModel) {

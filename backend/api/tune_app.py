@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import tempfile
@@ -19,6 +20,20 @@ from memory.experience_service import (
 )
 
 RunCollaborationFn = Callable[..., AsyncGenerator[Dict[str, Any], None]]
+
+
+def _coerce_model_params(value: str) -> Dict[str, Any]:
+    text = (value or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        try:
+            parsed = ast.literal_eval(text)
+        except Exception:
+            return {}
+    return dict(parsed) if isinstance(parsed, dict) else {}
 
 
 def create_app(
@@ -121,11 +136,27 @@ def create_app(
     async def experience_search(
         loop_type: str = Form("flow"),
         model_type: str = Form("FOPDT"),
-        K: float = Form(...),
-        T: float = Form(...),
-        L: float = Form(...),
+        K: float = Form(0.0),
+        T: float = Form(0.0),
+        L: float = Form(0.0),
+        selected_model_params: str = Form(""),
         limit: int = Form(3),
     ) -> JSONResponse:
+        model_params = _coerce_model_params(selected_model_params)
+        normalized_model_type = (model_type or "FOPDT").strip().upper()
+        if model_params:
+            K = float(model_params.get("K", K))
+            if normalized_model_type == "SOPDT":
+                T = float(model_params.get("T1", 0.0)) + float(model_params.get("T2", 0.0))
+                L = float(model_params.get("L", L))
+            elif normalized_model_type == "IPDT":
+                L = float(model_params.get("L", L))
+                T = max(float(T), L)
+            elif normalized_model_type == "FO":
+                T = float(model_params.get("T", T))
+            else:
+                T = float(model_params.get("T", T))
+                L = float(model_params.get("L", L))
         return JSONResponse(
             retrieve_experience_guidance(
                 loop_type=loop_type,
@@ -133,6 +164,7 @@ def create_app(
                 K=K,
                 T=T,
                 L=L,
+                selected_model_params=model_params,
                 limit=limit,
                 candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
             )

@@ -41,9 +41,12 @@ def _ensure_index_schema() -> None:
                 data_source TEXT,
                 model_k REAL,
                 model_t REAL,
+                model_t1 REAL,
+                model_t2 REAL,
                 model_l REAL,
                 normalized_rmse REAL,
                 r2_score REAL,
+                selected_model_params_json TEXT,
                 final_strategy TEXT,
                 final_rating REAL,
                 performance_score REAL,
@@ -56,6 +59,12 @@ def _ensure_index_schema() -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(experiences)").fetchall()}
         if "model_type" not in columns:
             conn.execute("ALTER TABLE experiences ADD COLUMN model_type TEXT")
+        if "model_t1" not in columns:
+            conn.execute("ALTER TABLE experiences ADD COLUMN model_t1 REAL")
+        if "model_t2" not in columns:
+            conn.execute("ALTER TABLE experiences ADD COLUMN model_t2 REAL")
+        if "selected_model_params_json" not in columns:
+            conn.execute("ALTER TABLE experiences ADD COLUMN selected_model_params_json TEXT")
         if "hit_count" not in columns:
             conn.execute("ALTER TABLE experiences ADD COLUMN hit_count INTEGER DEFAULT 0")
         if "follow_up_success_count" not in columns:
@@ -84,9 +93,9 @@ def append_experience_record(record: Dict[str, Any]) -> str:
             """
             INSERT OR REPLACE INTO experiences (
                 experience_id, created_at, loop_name, loop_type, model_type, loop_uri, data_source,
-                model_k, model_t, model_l, normalized_rmse, r2_score,
-                final_strategy, final_rating, performance_score, passed, tags_json, record_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                model_k, model_t, model_t1, model_t2, model_l, normalized_rmse, r2_score,
+                selected_model_params_json, final_strategy, final_rating, performance_score, passed, tags_json, record_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 experience_id,
@@ -98,9 +107,12 @@ def append_experience_record(record: Dict[str, Any]) -> str:
                 str(record.get("data_source", "")),
                 float(model.get("K", 0.0) or 0.0),
                 float(model.get("T", 0.0) or 0.0),
+                float((model.get("selected_model_params") or {}).get("T1", 0.0) or 0.0),
+                float((model.get("selected_model_params") or {}).get("T2", 0.0) or 0.0),
                 float(model.get("L", 0.0) or 0.0),
                 float(model.get("normalized_rmse", 0.0) or 0.0),
                 float(model.get("r2_score", 0.0) or 0.0),
+                json.dumps(model.get("selected_model_params") or {}, ensure_ascii=False),
                 str(strategy.get("final", "")),
                 float(evaluation.get("final_rating", 0.0) or 0.0),
                 float(evaluation.get("performance_score", 0.0) or 0.0),
@@ -227,12 +239,32 @@ def get_experience_stats() -> Dict[str, Any]:
             ORDER BY cnt DESC, model_type ASC
             """
         ).fetchall()
+        reused_rows = conn.execute(
+            """
+            SELECT
+                experience_id,
+                loop_name,
+                model_type,
+                final_strategy,
+                hit_count,
+                follow_up_success_count,
+                last_hit_at,
+                final_rating
+            FROM experiences
+            WHERE COALESCE(hit_count, 0) > 0
+            ORDER BY hit_count DESC, follow_up_success_count DESC, final_rating DESC, created_at DESC
+            LIMIT 5
+            """
+        ).fetchall()
+    total_hits = int(summary["total_hits"] or 0)
+    total_follow_up_success = int(summary["total_follow_up_success"] or 0)
     return {
         "total_count": int(summary["total_count"] or 0),
         "passed_count": int(summary["passed_count"] or 0),
         "avg_final_rating": float(summary["avg_final_rating"] or 0.0),
-        "total_hits": int(summary["total_hits"] or 0),
-        "total_follow_up_success": int(summary["total_follow_up_success"] or 0),
+        "total_hits": total_hits,
+        "total_follow_up_success": total_follow_up_success,
+        "follow_up_success_rate": float(total_follow_up_success / total_hits) if total_hits > 0 else 0.0,
         "top_strategies": [
             {"strategy": str(row["final_strategy"] or "-"), "count": int(row["cnt"] or 0)}
             for row in strategy_rows
@@ -244,6 +276,20 @@ def get_experience_stats() -> Dict[str, Any]:
         "model_type_distribution": [
             {"model_type": str(row["model_type"] or "FOPDT"), "count": int(row["cnt"] or 0)}
             for row in model_rows
+        ],
+        "top_reused_experiences": [
+            {
+                "experience_id": str(row["experience_id"] or ""),
+                "loop_name": str(row["loop_name"] or ""),
+                "model_type": str(row["model_type"] or "FOPDT"),
+                "strategy": str(row["final_strategy"] or ""),
+                "hit_count": int(row["hit_count"] or 0),
+                "follow_up_success_count": int(row["follow_up_success_count"] or 0),
+                "success_rate": float((row["follow_up_success_count"] or 0) / max(int(row["hit_count"] or 0), 1)),
+                "last_hit_at": str(row["last_hit_at"] or ""),
+                "final_rating": float(row["final_rating"] or 0.0),
+            }
+            for row in reused_rows
         ],
     }
 
@@ -279,7 +325,7 @@ def list_experiences(
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     query = f"""
         SELECT experience_id, created_at, loop_name, loop_type, model_type, loop_uri, final_strategy,
-               model_k, model_t, model_l, normalized_rmse, r2_score,
+               model_k, model_t, model_t1, model_t2, model_l, normalized_rmse, r2_score, selected_model_params_json,
                hit_count, follow_up_success_count, last_hit_at,
                final_rating, performance_score, passed, tags_json
         FROM experiences
@@ -303,9 +349,12 @@ def list_experiences(
                 "model_type": str(row["model_type"] or "FOPDT"),
                 "K": float(row["model_k"] or 0.0),
                 "T": float(row["model_t"] or 0.0),
+                "T1": float(row["model_t1"] or 0.0),
+                "T2": float(row["model_t2"] or 0.0),
                 "L": float(row["model_l"] or 0.0),
                 "normalized_rmse": float(row["normalized_rmse"] or 0.0),
                 "r2_score": float(row["r2_score"] or 0.0),
+                "selected_model_params": json.loads(row["selected_model_params_json"] or "{}"),
             },
             "evaluation": {
                 "final_rating": float(row["final_rating"] or 0.0),
@@ -316,6 +365,9 @@ def list_experiences(
                 "hit_count": int(row["hit_count"] or 0),
                 "follow_up_success_count": int(row["follow_up_success_count"] or 0),
                 "last_hit_at": str(row["last_hit_at"] or ""),
+                "success_rate": float((row["follow_up_success_count"] or 0) / max(int(row["hit_count"] or 0), 1))
+                if int(row["hit_count"] or 0) > 0
+                else 0.0,
             },
             "tags": json.loads(row["tags_json"] or "[]"),
         }

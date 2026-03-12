@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import json
 from typing import Any, Callable, Dict, Mapping
 
 from memory.experience_service import retrieve_experience_guidance
@@ -10,6 +12,24 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _coerce_model_params(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            try:
+                parsed = ast.literal_eval(text)
+            except Exception:
+                return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
 
 
 def fetch_history_data_tool(
@@ -169,17 +189,18 @@ def fit_fopdt_tool(
         "attempts": attempts,
         "fit_preview": fit_preview,
         "window_benchmark": (best_benchmark or {}).get("best", {}),
-        "tuning_model": tuning_model,
     }
 
 
 def tune_pid_tool(
     *,
     session_store: Mapping[str, Any] | dict[str, Any],
-    K: float,
-    T: float,
-    L: float,
     loop_type: str,
+    model_type: str = "AUTO",
+    selected_model_params: Any = None,
+    K: float | None = None,
+    T: float | None = None,
+    L: float | None = None,
     select_best_pid_strategy_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     confidence_score = _safe_float((session_store.get("model_confidence") or {}).get("confidence"), 1.0)
@@ -187,23 +208,48 @@ def tune_pid_tool(
         "normalized_rmse": _safe_float(session_store.get("normalized_rmse"), _safe_float(session_store.get("residue"))),
         "r2_score": _safe_float(session_store.get("r2_score")),
     }
+    session_model_type = str(session_store.get("model_type", "FOPDT"))
+    incoming_model_type = str(model_type or "").upper()
+    model_type = session_model_type if incoming_model_type in {"", "AUTO"} else incoming_model_type
+    selected_model_params = _coerce_model_params(selected_model_params) or dict(session_store.get("selected_model_params") or {})
+    tuning_model = dict(session_store.get("tuning_model") or {})
+    normalized_model_type = str(model_type).upper()
+    if normalized_model_type == "SOPDT":
+        active_K = _safe_float(selected_model_params.get("K"), _safe_float(K))
+        active_T = _safe_float(selected_model_params.get("T1"), 0.0) + _safe_float(selected_model_params.get("T2"), 0.0)
+        if active_T <= 0:
+            active_T = _safe_float(tuning_model.get("T"), _safe_float(T, 1.0))
+        active_L = _safe_float(selected_model_params.get("L"), _safe_float(L))
+    elif normalized_model_type == "IPDT":
+        active_K = _safe_float(selected_model_params.get("K"), _safe_float(K))
+        active_L = _safe_float(selected_model_params.get("L"), _safe_float(L, 1.0))
+        active_T = max(_safe_float(T, 1.0), active_L)
+    elif normalized_model_type == "FO":
+        active_K = _safe_float(selected_model_params.get("K"), _safe_float(K))
+        active_T = _safe_float(selected_model_params.get("T"), _safe_float(T, 1.0))
+        active_L = 0.0
+    else:
+        active_K = _safe_float(selected_model_params.get("K"), _safe_float(tuning_model.get("K"), _safe_float(K)))
+        active_T = _safe_float(selected_model_params.get("T"), _safe_float(tuning_model.get("T"), _safe_float(T, 1.0)))
+        active_L = _safe_float(selected_model_params.get("L"), _safe_float(tuning_model.get("L"), _safe_float(L)))
+
     experience_guidance = retrieve_experience_guidance(
         loop_type=loop_type,
-        model_type=str(session_store.get("model_type", "FOPDT")),
-        K=float(K),
-        T=float(T),
-        L=float(L),
-        selected_model_params=dict(session_store.get("selected_model_params") or {}),
+        model_type=model_type,
+        K=active_K,
+        T=active_T,
+        L=active_L,
+        selected_model_params=selected_model_params,
         limit=3,
         candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
     )
     selection = select_best_pid_strategy_fn(
-        K=float(K),
-        T=float(T),
-        L=float(L),
+        K=active_K,
+        T=active_T,
+        L=active_L,
         loop_type=loop_type,
-        model_type=str(session_store.get("model_type", "FOPDT")),
-        selected_model_params=dict(session_store.get("selected_model_params") or {}),
+        model_type=model_type,
+        selected_model_params=selected_model_params,
         confidence_score=confidence_score,
         normalized_rmse=selected_model["normalized_rmse"],
         r2_score=selected_model["r2_score"],
@@ -245,6 +291,7 @@ def tune_pid_tool(
         "selection_reason": session_store["selection_reason"],
         "selection_inputs": session_store["selection_inputs"],
         "experience_guidance": session_store.get("experience_guidance", {}),
+        "selected_model_params": selected_model_params,
         "candidate_strategies": public_candidate_results,
         "description": str(pid_params["description"]),
     }
@@ -253,12 +300,14 @@ def tune_pid_tool(
 def evaluate_pid_tool(
     *,
     session_store: Mapping[str, Any] | dict[str, Any],
-    K: float,
-    T: float,
-    L: float,
-    Kp: float,
-    Ki: float,
-    Kd: float,
+    model_type: str = "AUTO",
+    selected_model_params: Any = None,
+    K: float = 0.0,
+    T: float = 0.0,
+    L: float = 0.0,
+    Kp: float = 0.0,
+    Ki: float = 0.0,
+    Kd: float = 0.0,
     method: str,
     display_agent_names: Dict[str, str],
     evaluate_pid_model_fn: Callable[..., Dict[str, Any]],
@@ -271,6 +320,10 @@ def evaluate_pid_tool(
 ) -> Dict[str, Any]:
     model_confidence = session_store.get("model_confidence", {})
     method_confidence = float(model_confidence.get("confidence", 0.6))
+    session_model_type = str(session_store.get("model_type", "FOPDT"))
+    incoming_model_type = str(model_type or "").upper()
+    active_model_type = session_model_type if incoming_model_type in {"", "AUTO"} else incoming_model_type
+    selected_model_params = _coerce_model_params(selected_model_params) or dict(session_store.get("selected_model_params") or {})
     selected_pid_params = session_store.get("selected_pid_params") or {}
     selected_pid_evaluation = session_store.get("selected_pid_evaluation")
     auto_refine_result = None
@@ -284,10 +337,27 @@ def evaluate_pid_tool(
     if selected_pid_evaluation:
         eval_result = selected_pid_evaluation
     else:
+        if active_model_type == "SOPDT":
+            active_K = float(selected_model_params.get("K", K))
+            active_T = float(selected_model_params.get("T1", T)) + float(selected_model_params.get("T2", T))
+            active_L = float(selected_model_params.get("L", L))
+        elif active_model_type == "IPDT":
+            active_K = float(selected_model_params.get("K", K))
+            active_L = float(selected_model_params.get("L", L))
+            active_T = max(float(T or 0.0), active_L, 1e-3)
+        elif active_model_type == "FO":
+            active_K = float(selected_model_params.get("K", K))
+            active_T = float(selected_model_params.get("T", T))
+            active_L = 0.0
+        else:
+            active_K = float(selected_model_params.get("K", K))
+            active_T = float(selected_model_params.get("T", T))
+            active_L = float(selected_model_params.get("L", L))
+
         eval_result = evaluate_pid_model_fn(
-            K=float(K),
-            T=float(T),
-            L=float(L),
+            K=active_K,
+            T=active_T,
+            L=active_L,
             Kp=float(Kp),
             Ki=float(Ki),
             Kd=float(Kd),
@@ -295,8 +365,8 @@ def evaluate_pid_tool(
             method_confidence=method_confidence,
             model_confidence=model_confidence,
             dt=float(session_store.get("dt", 1.0)),
-            model_type=str(session_store.get("model_type", "FOPDT")),
-            selected_model_params=dict(session_store.get("selected_model_params") or {}),
+            model_type=active_model_type,
+            selected_model_params=selected_model_params,
         )
 
     base_eval_result = eval_result
@@ -322,9 +392,7 @@ def evaluate_pid_tool(
     session_store["initial_assessment"] = initial_assessment
 
     if not passed and diagnosis.get("feedback_target") == "pid_expert":
-        model_type = str(session_store.get("model_type", "FOPDT")).upper()
-        selected_model_params = dict(session_store.get("selected_model_params") or {})
-        if model_type == "SOPDT":
+        if active_model_type == "SOPDT":
             refine_model_params = {
                 "model_type": "SOPDT",
                 "K": float(selected_model_params.get("K", K)),
@@ -332,13 +400,13 @@ def evaluate_pid_tool(
                 "T2": float(selected_model_params.get("T2", T)),
                 "L": float(selected_model_params.get("L", L)),
             }
-        elif model_type == "IPDT":
+        elif active_model_type == "IPDT":
             refine_model_params = {
                 "model_type": "IPDT",
                 "K": float(selected_model_params.get("K", K)),
                 "L": max(float(selected_model_params.get("L", L)), 1e-3),
             }
-        elif model_type == "FO":
+        elif active_model_type == "FO":
             refine_model_params = {
                 "model_type": "FO",
                 "K": float(selected_model_params.get("K", K)),
@@ -481,6 +549,8 @@ def evaluate_pid_tool(
     session_store["simulation"] = eval_result["simulation"]
 
     return {
+        "model_type": active_model_type,
+        "selected_model_params": selected_model_params,
         "performance_score": float(eval_result["performance_score"]),
         "method_confidence": float(eval_result["method_confidence"]),
         "final_rating": float(eval_result["final_rating"]),

@@ -22,7 +22,8 @@ from backend.services.identification_service import (
 )
 from backend.services.pid_evaluation_service import build_initial_assessment, diagnose_evaluation_failure, evaluate_pid_model
 from backend.services.pid_tuning_service import benchmark_pid_strategies, refine_pid_for_performance, select_best_pid_strategy
-from backend.skills.pid_tuning_skills import apply_tuning_rules
+from backend.services.tool_adapter_service import tune_pid_tool
+from backend.skills.pid_tuning_skills import apply_tuning_rules, select_tuning_strategy
 from backend.memory import experience_store
 from backend.memory.experience_service import build_experience_record, retrieve_experience_guidance
 from backend.orchestration.workflow_runner import run_multi_agent_collaboration
@@ -78,9 +79,8 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
             loop_type="flow",
         )
         self.assertIn(result["selected_model_type"], {"FO", "FOPDT", "IPDT"})
-        self.assertIn("K", result["tuning_model"])
-        self.assertIn("T", result["tuning_model"])
-        self.assertIn("L", result["tuning_model"])
+        self.assertIn("K", result["model_params"])
+        self.assertIn("normalized_rmse", result["model_params"])
 
     def test_temperature_loop_can_try_sopdt(self) -> None:
         df = pd.DataFrame(
@@ -272,7 +272,7 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
                     "dataAnalysis": {"windowPoints": 180, "stepEvents": 3},
                 },
             )
-            self.assertIn("tuning_model", record["model"])
+            self.assertIn("selected_model_params", record["model"])
             experience_store.append_experience_record(record)
             guidance = retrieve_experience_guidance(
                 loop_type="flow",
@@ -581,6 +581,161 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
         self.assertTrue(any(item.get("history_seeded") for item in result["public_candidate_results"]))
         self.assertEqual(result["selection_inputs"]["experience_top_match_id"], "exp_seed")
 
+    def test_sopdt_selection_inputs_prioritize_raw_model_params(self) -> None:
+        result = select_best_pid_strategy(
+            K=1.02,
+            T=30.0,
+            L=4.2,
+            loop_type="temperature",
+            model_type="SOPDT",
+            selected_model_params={"model_type": "SOPDT", "K": 1.02, "T1": 11.0, "T2": 19.0, "L": 4.2},
+            confidence_score=0.82,
+            normalized_rmse=0.05,
+            r2_score=0.98,
+            dt=1.0,
+            experience_guidance={},
+        )
+        inputs = result["selection_inputs"]
+        self.assertEqual(inputs["model_type"], "SOPDT")
+        self.assertEqual(inputs["selected_model_params"]["T1"], 11.0)
+        self.assertEqual(inputs["selected_model_params"]["T2"], 19.0)
+        self.assertIn("derived_tuning_features", inputs)
+        self.assertIn("shape_index", inputs["derived_tuning_features"])
+        self.assertIn("apparent_order", inputs["derived_tuning_features"])
+        self.assertIn("aggregate_tau", inputs["derived_tuning_features"])
+        self.assertIn("tested_candidates", inputs)
+        self.assertNotIn("K", inputs)
+        self.assertNotIn("T", inputs)
+        self.assertNotIn("L", inputs)
+        self.assertNotIn("compatibility_ktl", inputs)
+
+    def test_sopdt_strategy_selection_uses_raw_time_constants(self) -> None:
+        decision = select_tuning_strategy(
+            loop_type="flow",
+            K=1.0,
+            T=99.0,
+            L=99.0,
+            model_type="SOPDT",
+            model_params={"model_type": "SOPDT", "K": 1.0, "T1": 10.0, "T2": 1.0, "L": 0.0},
+            model_confidence=0.9,
+            r2_score=0.99,
+            normalized_rmse=0.03,
+        )
+        self.assertEqual(decision["model_type"], "SOPDT")
+        self.assertEqual(decision["strategy"], "IMC")
+
+    def test_tune_pid_tool_prefers_session_model_context_over_tool_args(self) -> None:
+        session_store = {
+            "model_type": "SOPDT",
+            "selected_model_params": {"model_type": "SOPDT", "K": 1.2, "T1": 10.0, "T2": 20.0, "L": 4.0},
+            "tuning_model": {"K": 1.2, "T": 30.0, "L": 4.0},
+            "model_confidence": {"confidence": 0.84},
+            "normalized_rmse": 0.05,
+            "r2_score": 0.98,
+            "dt": 1.0,
+        }
+        captured = {}
+        def fake_select(**kwargs):
+            captured.update(kwargs)
+            return {
+                "best_candidate": {"strategy": "LAMBDA", "evaluation_result": {"performance_score": 8.0}},
+                "pid_params": {"Kp": 1.0, "Ki": 0.1, "Kd": 0.0, "Ti": 10.0, "Td": 0.0, "strategy": "LAMBDA", "description": "demo"},
+                "public_candidate_results": [],
+                "selection_reason": "ok",
+                "selection_inputs": {"model_type": "SOPDT"},
+                "experience_guidance": {},
+            }
+        result = tune_pid_tool(
+            session_store=session_store,
+            K=0.1,
+            T=1.0,
+            L=0.0,
+            loop_type="temperature",
+            select_best_pid_strategy_fn=fake_select,
+        )
+        self.assertEqual(captured["model_type"], "SOPDT")
+        self.assertEqual(captured["selected_model_params"]["T1"], 10.0)
+        self.assertAlmostEqual(captured["K"], 1.2)
+        self.assertAlmostEqual(captured["T"], 30.0)
+        self.assertAlmostEqual(captured["L"], 4.0)
+        self.assertEqual(result["strategy_used"], "LAMBDA")
+
+    def test_tune_pid_tool_prefers_explicit_selected_model_params_over_compatibility_triplet(self) -> None:
+        session_store = {
+            "model_type": "SOPDT",
+            "selected_model_params": {"model_type": "SOPDT", "K": 0.2, "T1": 1.0, "T2": 1.0, "L": 0.0},
+            "tuning_model": {"K": 0.2, "T": 2.0, "L": 0.0},
+            "model_confidence": {"confidence": 0.84},
+            "normalized_rmse": 0.05,
+            "r2_score": 0.98,
+            "dt": 1.0,
+        }
+        captured = {}
+
+        def fake_select(**kwargs):
+            captured.update(kwargs)
+            return {
+                "best_candidate": {"strategy": "LAMBDA", "evaluation_result": {"performance_score": 8.0}},
+                "pid_params": {"Kp": 1.0, "Ki": 0.1, "Kd": 0.0, "Ti": 10.0, "Td": 0.0, "strategy": "LAMBDA", "description": "demo"},
+                "public_candidate_results": [],
+                "selection_reason": "ok",
+                "selection_inputs": {"model_type": "SOPDT", "selected_model_params": kwargs["selected_model_params"]},
+                "experience_guidance": {},
+            }
+
+        result = tune_pid_tool(
+            session_store=session_store,
+            K=99.0,
+            T=88.0,
+            L=77.0,
+            loop_type="temperature",
+            model_type="SOPDT",
+            selected_model_params={"model_type": "SOPDT", "K": 0.9, "T1": 10.0, "T2": 4.0, "L": 1.5},
+            select_best_pid_strategy_fn=fake_select,
+        )
+        self.assertEqual(captured["model_type"], "SOPDT")
+        self.assertEqual(captured["selected_model_params"]["T1"], 10.0)
+        self.assertAlmostEqual(captured["K"], 0.9)
+        self.assertAlmostEqual(captured["T"], 14.0)
+        self.assertAlmostEqual(captured["L"], 1.5, places=6)
+        self.assertEqual(result["selected_model_params"]["T2"], 4.0)
+
+    def test_tune_pid_tool_accepts_json_string_selected_model_params(self) -> None:
+        session_store = {
+            "model_type": "SOPDT",
+            "selected_model_params": {"model_type": "SOPDT", "K": 0.2, "T1": 1.0, "T2": 1.0, "L": 0.0},
+            "tuning_model": {"K": 0.2, "T": 2.0, "L": 0.0},
+            "model_confidence": {"confidence": 0.84},
+            "normalized_rmse": 0.05,
+            "r2_score": 0.98,
+            "dt": 1.0,
+        }
+        captured = {}
+
+        def fake_select(**kwargs):
+            captured.update(kwargs)
+            return {
+                "best_candidate": {"strategy": "LAMBDA", "evaluation_result": {"performance_score": 8.0}},
+                "pid_params": {"Kp": 1.0, "Ki": 0.1, "Kd": 0.0, "Ti": 10.0, "Td": 0.0, "strategy": "LAMBDA", "description": "demo"},
+                "public_candidate_results": [],
+                "selection_reason": "ok",
+                "selection_inputs": {"model_type": "SOPDT", "selected_model_params": kwargs["selected_model_params"]},
+                "experience_guidance": {},
+            }
+
+        result = tune_pid_tool(
+            session_store=session_store,
+            K=99.0,
+            T=88.0,
+            L=77.0,
+            loop_type="temperature",
+            model_type="SOPDT",
+            selected_model_params='{"model_type":"SOPDT","K":0.9,"T1":10.0,"T2":4.0,"L":1.5}',
+            select_best_pid_strategy_fn=fake_select,
+        )
+        self.assertEqual(captured["selected_model_params"]["T1"], 10.0)
+        self.assertEqual(result["selected_model_params"]["T2"], 4.0)
+
     def test_sopdt_native_tuning_rule_preserves_second_order_shape_fields(self) -> None:
         params = apply_tuning_rules(
             K=1.1,
@@ -598,6 +753,136 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
         self.assertGreater(params["T_work"], params["T_dominant"])
         self.assertGreaterEqual(params["L_work"], 4.0)
         self.assertGreaterEqual(params["Td"], 0.0)
+
+    def test_sopdt_strategy_selection_uses_shape_features(self) -> None:
+        lambda_choice = select_tuning_strategy(
+            loop_type="temperature",
+            K=0.8,
+            T=18.0,
+            L=2.5,
+            model_type="SOPDT",
+            model_params={"K": 0.8, "T1": 20.0, "T2": 18.0, "L": 2.5},
+            model_confidence=0.9,
+            r2_score=0.99,
+            normalized_rmse=0.03,
+        )
+        self.assertEqual(lambda_choice["strategy"], "LAMBDA")
+
+        imc_choice = select_tuning_strategy(
+            loop_type="flow",
+            K=0.6,
+            T=12.0,
+            L=1.8,
+            model_type="SOPDT",
+            model_params={"K": 0.6, "T1": 14.0, "T2": 3.0, "L": 1.8},
+            model_confidence=0.92,
+            r2_score=0.985,
+            normalized_rmse=0.04,
+        )
+        self.assertEqual(imc_choice["strategy"], "IMC")
+
+    def test_experience_stats_include_reuse_quality_metrics(self) -> None:
+        old_root = experience_store.MEMORY_ROOT
+        old_file = experience_store.EXPERIENCE_FILE
+        old_index = experience_store.INDEX_FILE
+        tmpdir = tempfile.mkdtemp()
+        try:
+            tmp_path = Path(tmpdir)
+            experience_store.MEMORY_ROOT = tmp_path
+            experience_store.EXPERIENCE_FILE = tmp_path / "pid_experiences.jsonl"
+            experience_store.INDEX_FILE = tmp_path / "pid_experiences.db"
+
+            record = build_experience_record(
+                loop_name="FIC_REUSE",
+                loop_type="flow",
+                loop_uri="/pid/reuse",
+                data_source="history",
+                start_time="1",
+                end_time="2",
+                shared_data={"experience_guidance": {}},
+                final_result={
+                    "model": {"modelType": "FOPDT", "selectedModelParams": {"model_type": "FOPDT", "K": 0.4, "T": 2.0, "L": 0.2}, "K": 0.4, "T": 2.0, "L": 0.2},
+                    "pidParams": {"strategyRequested": "AUTO", "strategyUsed": "LAMBDA", "Kp": 1.5, "Ki": 0.5, "Kd": 0.0},
+                    "evaluation": {
+                        "performance_score": 8.0,
+                        "method_confidence": 0.82,
+                        "final_rating": 8.1,
+                        "passed": True,
+                        "initial_assessment": {"evaluated_pid": {"Kp": 2.0, "Ki": 1.0, "Kd": 0.0}},
+                        "auto_refine_result": {"applied": True},
+                    },
+                    "dataAnalysis": {"windowPoints": 160, "stepEvents": 2},
+                },
+            )
+            experience_store.append_experience_record(record)
+            experience_store.register_experience_references(
+                [record["experience_id"]],
+                hit_time="2026-03-12T12:00:00+08:00",
+                follow_up_passed=True,
+                follow_up_final_rating=8.6,
+            )
+
+            stats = experience_store.get_experience_stats()
+            self.assertEqual(stats["total_hits"], 1)
+            self.assertEqual(stats["total_follow_up_success"], 1)
+            self.assertAlmostEqual(stats["follow_up_success_rate"], 1.0, places=4)
+            self.assertEqual(stats["top_reused_experiences"][0]["experience_id"], record["experience_id"])
+        finally:
+            experience_store.MEMORY_ROOT = old_root
+            experience_store.EXPERIENCE_FILE = old_file
+            experience_store.INDEX_FILE = old_index
+            gc.collect()
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_experience_index_preserves_sopdt_selected_model_params(self) -> None:
+        old_root = experience_store.MEMORY_ROOT
+        old_file = experience_store.EXPERIENCE_FILE
+        old_index = experience_store.INDEX_FILE
+        tmpdir = tempfile.mkdtemp()
+        try:
+            tmp_path = Path(tmpdir)
+            experience_store.MEMORY_ROOT = tmp_path
+            experience_store.EXPERIENCE_FILE = tmp_path / "pid_experiences.jsonl"
+            experience_store.INDEX_FILE = tmp_path / "pid_experiences.db"
+
+            record = build_experience_record(
+                loop_name="TIC_SOPDT",
+                loop_type="temperature",
+                loop_uri="/pid/sopdt",
+                data_source="history",
+                start_time="1",
+                end_time="2",
+                shared_data={"experience_guidance": {}},
+                final_result={
+                    "model": {
+                        "modelType": "SOPDT",
+                        "selectedModelParams": {"model_type": "SOPDT", "K": 0.7, "T1": 12.0, "T2": 5.0, "L": 1.5},
+                        "K": 0.7,
+                        "T": 17.0,
+                        "L": 1.5,
+                    },
+                    "pidParams": {"strategyRequested": "AUTO", "strategyUsed": "LAMBDA", "Kp": 1.2, "Ki": 0.2, "Kd": 0.0},
+                    "evaluation": {
+                        "performance_score": 8.6,
+                        "method_confidence": 0.91,
+                        "final_rating": 8.8,
+                        "passed": True,
+                        "initial_assessment": {"evaluated_pid": {"Kp": 1.5, "Ki": 0.3, "Kd": 0.0}},
+                        "auto_refine_result": {"applied": True},
+                    },
+                    "dataAnalysis": {"windowPoints": 220, "stepEvents": 1},
+                },
+            )
+            experience_store.append_experience_record(record)
+            listed = experience_store.list_experiences(model_type="SOPDT", limit=10)
+            self.assertEqual(listed[0]["model"]["selected_model_params"]["T1"], 12.0)
+            self.assertEqual(listed[0]["model"]["selected_model_params"]["T2"], 5.0)
+        finally:
+            experience_store.MEMORY_ROOT = old_root
+            experience_store.EXPERIENCE_FILE = old_file
+            experience_store.INDEX_FILE = old_index
+            gc.collect()
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 if __name__ == "__main__":

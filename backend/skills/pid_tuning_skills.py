@@ -24,20 +24,41 @@ def select_tuning_strategy(
     T: float,
     L: float,
     model_type: str = "FOPDT",
+    model_params: Dict | None = None,
     model_confidence: float,
     r2_score: float,
     normalized_rmse: float,
 ) -> Dict[str, str]:
     loop_name = (loop_type or "flow").strip().lower()
     normalized_model_type = (model_type or "FOPDT").strip().upper()
+    model_params = model_params or {}
+
     tau_ratio = max(float(L), 0.0) / max(float(T), 1e-6)
     fast_process = float(T) <= 5.0
     high_quality_model = model_confidence >= 0.88 and normalized_rmse <= 0.05 and r2_score >= 0.97
 
+    shape_index = 0.0
+    apparent_order = 1.0
+    if normalized_model_type == "SOPDT":
+        t1 = max(float(model_params.get("T1", model_params.get("T", T))), 1e-6)
+        t2 = max(float(model_params.get("T2", model_params.get("T", T))), 1e-6)
+        dominant_tau = max(t1, t2)
+        secondary_tau = min(t1, t2)
+        shape_index = min(max(secondary_tau / max(dominant_tau, 1e-6), 0.0), 1.0)
+        apparent_order = 1.0 + shape_index
+        aggregate_tau = dominant_tau + secondary_tau
+        raw_l = max(float(model_params.get("L", L)), 0.0)
+        tau_ratio = raw_l / max(aggregate_tau, 1e-6)
+        fast_process = aggregate_tau <= 5.0
+    elif normalized_model_type == "IPDT":
+        lag_value = max(float(model_params.get("L", L)), 1e-6)
+        tau_ratio = lag_value / max(float(T), 1e-6)
+        fast_process = lag_value <= 5.0
+
     if model_confidence < 0.35:
         return {
             "strategy": "IMC",
-            "reason": "模型可信度很低，优先采用最保守的 IMC 整定。",
+            "reason": "Model confidence is very low, so the controller falls back to the most conservative IMC tuning.",
             "loop_type": loop_name,
             "model_type": normalized_model_type,
         }
@@ -45,59 +66,79 @@ def select_tuning_strategy(
     if model_confidence < 0.55 or normalized_rmse > 0.1 or r2_score < 0.75:
         return {
             "strategy": "LAMBDA",
-            "reason": "模型质量一般，优先采用更稳健的 Lambda 整定。",
+            "reason": "Model quality is only moderate, so the controller prefers robust Lambda tuning.",
             "loop_type": loop_name,
             "model_type": normalized_model_type,
         }
 
     if normalized_model_type == "FO":
         if loop_name in {"flow", "pressure"} and high_quality_model and not fast_process:
-            strategy = "IMC"
-            reason = "一阶对象且模型质量较高，采用 FO-IMC 整定。"
-        else:
-            strategy = "LAMBDA"
-            reason = "一阶对象优先采用保守的 Lambda/IMC 类整定。"
-        return {"strategy": strategy, "reason": reason, "loop_type": loop_name, "model_type": normalized_model_type}
+            return {
+                "strategy": "IMC",
+                "reason": "The process looks first-order and the model quality is high, so FO-IMC tuning is preferred.",
+                "loop_type": loop_name,
+                "model_type": normalized_model_type,
+            }
+        return {
+            "strategy": "LAMBDA",
+            "reason": "For first-order processes the controller prefers conservative Lambda/IMC style tuning.",
+            "loop_type": loop_name,
+            "model_type": normalized_model_type,
+        }
 
     if normalized_model_type == "IPDT":
         return {
             "strategy": "LAMBDA",
-            "reason": "积分过程优先采用积分过程专用的保守 Lambda 整定。",
+            "reason": "Integrating processes default to conservative integrating-process Lambda tuning.",
             "loop_type": loop_name,
             "model_type": normalized_model_type,
         }
 
     if normalized_model_type == "SOPDT":
-        strategy = "LAMBDA" if loop_name in {"temperature", "level"} else "IMC"
+        if shape_index >= 0.72 or apparent_order >= 1.72:
+            strategy = "LAMBDA"
+            reason = "The second-order shape is widely distributed, so Lambda is preferred to suppress overshoot and oscillation."
+        elif loop_name in {"temperature", "level"}:
+            strategy = "LAMBDA"
+            reason = "Temperature and level loops with SOPDT dynamics prefer robust native Lambda tuning."
+        elif high_quality_model and 0.05 <= tau_ratio <= 0.30 and not fast_process and shape_index <= 0.45:
+            strategy = "IMC"
+            reason = "The dominant and secondary time constants are clearly separated under a strong SOPDT fit, so native IMC is preferred."
+        elif fast_process or tau_ratio < 0.05:
+            strategy = "IMC"
+            reason = "The raw SOPDT parameters indicate a fast process or very small physical delay, so IMC is used to keep the loop well damped."
+        else:
+            strategy = "LAMBDA"
+            reason = "The raw SOPDT parameters indicate a moderately distributed second-order process, so Lambda is chosen as the safer default."
         return {
             "strategy": strategy,
-            "reason": "SOPDT 模型优先采用保守的 Lambda/IMC，并保留主导与次级时间常数信息。",
+            "reason": reason,
             "loop_type": loop_name,
             "model_type": normalized_model_type,
         }
 
     if loop_name == "temperature":
         strategy = "IMC"
-        reason = "温度回路惯性较大，优先抑制超调。"
+        reason = "Temperature loops are usually inertial, so IMC is preferred to suppress overshoot."
     elif loop_name == "level":
         strategy = "LAMBDA"
-        reason = "液位回路更关注稳定性与鲁棒性。"
+        reason = "Level loops prioritize robustness and smoothness, so Lambda is preferred."
     elif loop_name == "pressure":
         strategy = "IMC" if tau_ratio >= 0.3 else "LAMBDA"
-        reason = "压力回路偏快，优先选择稳健策略控制波动。"
+        reason = "Pressure loops are often fast, so the controller prefers conservative strategies to control oscillation."
     elif loop_name == "flow":
         if high_quality_model and tau_ratio >= 0.08 and not fast_process:
             strategy = "ZN"
-            reason = "流量回路模型质量很高且存在一定时滞，可尝试更积极的 ZN 整定。"
+            reason = "The flow-loop model is very strong and has enough apparent delay, so moderated ZN can be attempted."
         elif fast_process or tau_ratio < 0.08:
             strategy = "IMC"
-            reason = "流量回路对象较快或时滞很小，优先使用更稳健的 IMC 抑制振荡。"
+            reason = "The flow process is fast or has very small delay, so IMC is preferred to suppress oscillation."
         else:
             strategy = "LAMBDA"
-            reason = "流量回路模型可用但未达到激进整定条件，优先采用平衡的 Lambda 整定。"
+            reason = "The flow-loop model is usable but not ideal for aggressive tuning, so Lambda is chosen."
     else:
         strategy = "IMC"
-        reason = "未识别回路类型，使用默认稳健策略 IMC。"
+        reason = "The loop type is unknown, so the default robust IMC strategy is used."
 
     return {"strategy": strategy, "reason": reason, "loop_type": loop_name, "model_type": normalized_model_type}
 
@@ -185,9 +226,6 @@ def tune_sopdt(K: float, T1: float, T2: float, L: float, strategy: str) -> Dict:
     dominant_tau = max(T1, T2)
     secondary_tau = min(T1, T2)
     tau_ratio = secondary_tau / max(dominant_tau, 1e-6)
-
-    # Use the native second-order shape rather than collapsing directly to T1+T2.
-    # shape_index reflects how distributed the two time constants are.
     shape_index = min(max(tau_ratio, 0.0), 1.0)
     apparent_order = 1.0 + shape_index
     distributed_lag = L + secondary_tau * (0.35 + 0.20 * shape_index)

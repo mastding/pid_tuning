@@ -176,7 +176,6 @@
 - `modelType`
 - `selectedModelParams`
 - `modelSelectionReason`
-- `tuningModel`
 
 ## 6. 按模型类型整定
 

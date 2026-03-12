@@ -23,17 +23,21 @@ def create_pid_agents(
 ) -> List[AssistantAgent]:
     if csv_path:
         data_analyst_tools = [tool_load_data]
-        data_analyst_prompt = f"""你是数据分析专家。本次任务已经上传本地 CSV，路径是 "{csv_path}"。
-当轮到你发言时，只允许调用 tool_load_data(csv_path="{csv_path}")，不要调用 tool_fetch_history_data。
-读取工具返回的数据摘要后，用一句话总结数据质量、采样时间和选中的辨识窗口，并以“完成”结束。"""
+        data_analyst_prompt = f"""You are the data analysis agent.
+The user already provided a local CSV file: "{csv_path}".
+Call tool_load_data(csv_path="{csv_path}") directly. Do not call tool_fetch_history_data.
+After the tool succeeds, summarize the data size, sampling time, candidate step count, and selected identification window in one concise Chinese sentence."""
     else:
         data_analyst_tools = [tool_fetch_history_data, tool_load_data]
-        data_analyst_prompt = f"""你是数据分析专家。本次任务未上传本地 CSV。你必须先调用：
+        data_analyst_prompt = f"""You are the data analysis agent.
+No CSV file was uploaded, so you must fetch historical data first.
+Call:
 tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_time="{end_time}", data_type="{data_type}")
-从工具结果中读取 csv_path 后，再调用 tool_load_data(csv_path=该路径)。
-不要跳过这两个步骤，也不要混用其他数据来源。最后用一句话总结获取的数据量、采样时间、检测到的阶跃事件和选中的辨识窗口，并以“完成”结束。"""
+Then call tool_load_data(csv_path=...) with the returned csv_path.
+After both steps succeed, summarize the data size, sampling time, candidate step count, and selected identification window in one concise Chinese sentence."""
 
     data_analyst = AssistantAgent(
+
         name="data_analyst",
         model_client=model_client,
         system_message=data_analyst_prompt,
@@ -45,9 +49,17 @@ tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_ti
     system_id_expert = AssistantAgent(
         name="system_id_expert",
         model_client=model_client,
-        system_message="""你是系统辨识专家。当轮到你发言时，立即调用 tool_fit_fopdt(dt=1.0)。
-请读取工具返回的 model_type、K、T、L、normalized_rmse、r2_score、confidence 和 model_selection_reason，
-用一句话总结本次选中的过程模型及其质量，并以“完成”结束。""",
+        system_message="""You are the system identification agent.
+Call tool_fit_fopdt(dt=1.0) to identify the best process model.
+Focus on:
+- model_type
+- selected_model_params
+- working K/T/L parameters
+- normalized_rmse
+- r2_score
+- confidence
+- model_selection_reason
+Reply with one concise Chinese sentence that distinguishes the raw model parameters from the current working model parameters.""",
         tools=[tool_fit_fopdt],
         model_client_stream=False,
     )
@@ -55,10 +67,18 @@ tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_ti
     pid_expert = AssistantAgent(
         name="pid_expert",
         model_client=model_client,
-        system_message=f"""你是 PID 整定专家。请按以下步骤工作：
-1. 从系统辨识结果读取用于整定的 K、T、L。
-2. 调用 tool_tune_pid(K=..., T=..., L=..., loop_type="{loop_type}")。
-3. 用一句话总结选中的整定策略和 PID 参数，并以“完成”结束。""",
+        system_message=f"""You are the PID tuning expert.
+Read model_type and selected_model_params first. Treat the compatibility K/T/L values as display fields only.
+Call:
+tool_tune_pid(loop_type="{loop_type}", model_type="...", selected_model_params={{...}})
+Pass model_type and selected_model_params as the primary tuning inputs.
+Do not pass compatibility K/T/L when selected_model_params is available.
+Only use compatibility K/T/L for FO/FOPDT legacy fallback if the raw model parameters are unavailable.
+Pass the raw model parameters in selected_model_params:
+- SOPDT: K/T1/T2/L
+- IPDT: integrating-process parameters and L
+- FO/FOPDT: the corresponding raw parameters
+After the tool succeeds, summarize the model type, selected strategy, PID parameters, and experience guidance in one concise Chinese sentence.""",
         tools=[tool_tune_pid],
         model_client_stream=False,
         max_tool_iterations=2,
@@ -67,11 +87,15 @@ tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_ti
     evaluation_expert = AssistantAgent(
         name="evaluation_expert",
         model_client=model_client,
-        system_message="""你是整定评估专家。请按以下步骤工作：
-1. 读取当前 K、T、L、Kp、Ki、Kd。
-2. 调用 tool_evaluate_pid(K=..., T=..., L=..., Kp=..., Ki=..., Kd=..., method="auto")。
-3. 若 passed=true，明确说明通过并输出 APPROVE。
-4. 若 passed=false，明确说明未通过主因、建议回流的智能体和后续动作，但不要输出 APPROVE。""",
+        system_message="""You are the evaluation agent.
+Evaluate the tuned PID parameters against the selected process model.
+Call:
+tool_evaluate_pid(model_type="...", selected_model_params={...}, Kp=..., Ki=..., Kd=..., method="auto")
+Pass model_type and selected_model_params as the primary evaluation inputs.
+Do not pass compatibility K/T/L when selected_model_params is available.
+Only use compatibility K/T/L as a fallback if the raw model parameters are unavailable.
+If passed=true, end your final reply with APPROVE.
+If passed=false, explain the primary reason, the recommended feedback target, and the next action in concise Chinese. Do not output APPROVE in that case.""",
         tools=[tool_evaluate_pid],
         model_client_stream=False,
     )

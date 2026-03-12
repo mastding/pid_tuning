@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import ast
 import asyncio
@@ -41,7 +41,7 @@ def _build_task_message(
         f"回路类型: {loop_type}\n\n"
         "请按以下顺序协作完成：\n"
         "1. 数据分析智能体：加载和分析数据\n"
-        "2. 系统辨识智能体：拟合 FOPDT 模型\n"
+        "2. 系统辨识智能体：辨识过程模型\n"
         "3. PID专家智能体：计算 PID 参数\n"
         "4. 评估智能体：评估整定质量\n\n"
         "每个智能体完成任务后，请明确交接给下一位智能体。"
@@ -78,7 +78,7 @@ def _build_display_result(result_data: Dict[str, Any], *, current_tool_name: str
     display_result: Dict[str, Any] = {}
     for key, value in result_data.items():
         if key in {"mv", "pv"} and isinstance(value, list):
-            display_result[key] = f"[数组长度: {len(value)}]"
+            display_result[key] = f"[鏁扮粍闀垮害: {len(value)}]"
         else:
             display_result[key] = value
     return display_result
@@ -230,7 +230,7 @@ async def run_multi_agent_collaboration(
             if content and "ThoughtEvent" not in str(content):
                 yield {
                     "type": "thought",
-                    "agent": current_agent or "系统",
+                    "agent": current_agent or "绯荤粺",
                     "content": f"[{event_type}] {str(content)[:200]}",
                 }
                 await asyncio.sleep(0.1)
@@ -260,7 +260,6 @@ async def run_multi_agent_collaboration(
                 "modelType": shared_data.get("model_type", "FOPDT"),
                 "selectedModelParams": shared_data.get("selected_model_params", {}),
                 "modelSelectionReason": shared_data.get("model_selection_reason", ""),
-                "tuningModel": shared_data.get("tuning_model", {}),
                 "K": shared_data.get("K", 0.0),
                 "T": shared_data.get("T", 0.0),
                 "L": shared_data.get("L", 0.0),
@@ -347,4 +346,9 @@ async def run_multi_agent_collaboration(
     except Exception as exc:
         import traceback
 
-        yield {"type": "error", "message": f"多智能体协作失败: {exc}\n{traceback.format_exc()}"}
+        error_text = str(exc)
+        if "APIConnectionError" in error_text or "Connection error" in error_text:
+            message = "多智能体协作失败：上游模型网关连接异常。请稍后重试，或检查模型网关服务是否可达。"
+        else:
+            message = f"多智能体协作失败: {error_text}"
+        yield {"type": "error", "message": f"{message}\n{traceback.format_exc()}"}

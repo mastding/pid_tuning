@@ -40,6 +40,7 @@ from services.tool_adapter_service import (
     tune_pid_tool as service_tune_pid_tool,
 )
 from orchestration.event_mapper import (
+    build_agent_response as orchestration_build_agent_response,
     build_feedback_turns as orchestration_build_feedback_turns,
     finalize_agent_turn as orchestration_finalize_agent_turn,
 )
@@ -57,14 +58,15 @@ def create_model_client(*, model_api_key: str, model_api_url: str, model: str) -
         api_key=model_api_key,
         base_url=model_api_url,
         http_client=httpx.AsyncClient(
-            timeout=60.0,
+            timeout=httpx.Timeout(connect=20.0, read=120.0, write=60.0, pool=30.0),
             trust_env=False,
             http2=False,
             headers={
                 "Connection": "close",
                 "Accept-Encoding": "identity",
             },
-            transport=httpx.AsyncHTTPTransport(retries=0),
+            limits=httpx.Limits(max_keepalive_connections=0, max_connections=20),
+            transport=httpx.AsyncHTTPTransport(retries=3),
         ),
         model=model,
         temperature=0.3,
@@ -155,6 +157,7 @@ def _build_window_overview(
 def _finalize_agent_turn(current_turn_data: Dict[str, Any] | None) -> Dict[str, Any] | None:
     return orchestration_finalize_agent_turn(
         current_turn_data,
+        build_agent_response=orchestration_build_agent_response,
         display_agent_names=DISPLAY_AGENT_NAMES,
     )
 
@@ -211,8 +214,15 @@ async def tool_fit_fopdt(dt: float = 1.0) -> Dict[str, Any]:
     return _to_jsonable(result)
 
 
-async def tool_tune_pid(K: float, T: float, L: float, loop_type: str) -> Dict[str, Any]:
-    """Apply and benchmark PID tuning rules, then keep the best candidate."""
+async def tool_tune_pid(
+    loop_type: str,
+    model_type: str = "AUTO",
+    selected_model_params: Any = None,
+    K: float | None = None,
+    T: float | None = None,
+    L: float | None = None,
+) -> Dict[str, Any]:
+    """Apply and benchmark PID tuning rules for the identified process model."""
     result = await asyncio.to_thread(
         service_tune_pid_tool,
         session_store=_shared_data_store,
@@ -220,15 +230,19 @@ async def tool_tune_pid(K: float, T: float, L: float, loop_type: str) -> Dict[st
         T=T,
         L=L,
         loop_type=loop_type,
+        model_type=model_type,
+        selected_model_params=selected_model_params,
         select_best_pid_strategy_fn=select_best_pid_strategy,
     )
     return _to_jsonable(result)
 
 
 async def tool_evaluate_pid(
-    K: float,
-    T: float,
-    L: float,
+    model_type: str = "AUTO",
+    selected_model_params: Any = None,
+    K: float = 0.0,
+    T: float = 0.0,
+    L: float = 0.0,
     Kp: float = 0.0,
     Ki: float = 0.0,
     Kd: float = 0.0,
@@ -238,6 +252,8 @@ async def tool_evaluate_pid(
     result = await asyncio.to_thread(
         service_evaluate_pid_tool,
         session_store=_shared_data_store,
+        model_type=model_type,
+        selected_model_params=selected_model_params,
         K=K,
         T=T,
         L=L,
