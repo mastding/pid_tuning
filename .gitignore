@@ -16,6 +16,8 @@ ENV/
 *.log
 *.log.*
 backend/memory/records/
+artifacts/
+test-results/
 
 # Backup
 backup/
@@ -29,3 +31,9 @@ backup/
 
 # OS
 .DS_Store
+
+# Local UI / recording tooling
+node_modules/
+package.json
+package-lock.json
+scripts/
