@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import os
 import tempfile
-from typing import Any, AsyncGenerator, Awaitable, Callable, Dict
+import uuid
+from typing import Any, AsyncGenerator, Callable, Dict
 
-from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, File, Form, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
+
+from case_library import (
+    get_case_library_detail,
+    get_case_library_stats,
+    list_case_library_items,
+    list_similar_case_library_items,
+)
 from memory.experience_service import (
     clear_experience_center,
     get_experience_center_stats,
@@ -18,8 +27,33 @@ from memory.experience_service import (
     rebuild_experience_center_index,
     retrieve_experience_guidance,
 )
+from state.workflow_task_store import WorkflowTaskStore
 
 RunCollaborationFn = Callable[..., AsyncGenerator[Dict[str, Any], None]]
+
+LOOP_TYPE_ALIASES = {
+    "flow": "flow",
+    "流量": "flow",
+    "temperature": "temperature",
+    "温度": "temperature",
+    "pressure": "pressure",
+    "压力": "pressure",
+    "level": "level",
+    "液位": "level",
+}
+
+
+class WorkflowRunRequest(BaseModel):
+    start_time: str = Field(..., description="开始时间")
+    end_time: str = Field(..., description="结束时间")
+    loop_type: str = Field(..., description="回路类型")
+    loop_uri: str = Field(..., description="回路URI")
+    response_mode: str = Field("async", description="async、blocking 或 streaming")
+
+
+def _normalize_loop_type(loop_type: str) -> str:
+    normalized = (loop_type or "").strip()
+    return LOOP_TYPE_ALIASES.get(normalized, normalized or "flow")
 
 
 def _coerce_model_params(value: str) -> Dict[str, Any]:
@@ -36,6 +70,87 @@ def _coerce_model_params(value: str) -> Dict[str, Any]:
     return dict(parsed) if isinstance(parsed, dict) else {}
 
 
+def _event_progress(event: Dict[str, Any]) -> tuple[str, str, int] | None:
+    event_type = str(event.get("type") or "")
+    if event_type == "accepted":
+        return ("accepted", "已受理", 5)
+    if event_type == "user":
+        return ("accepted", "任务启动", 10)
+    if event_type == "agent_turn":
+        agent = str(event.get("agent") or "")
+        mapping = {
+            "数据分析智能体": ("data_analysis", "数据分析", 25),
+            "系统辨识智能体": ("model_identification", "系统辨识", 50),
+            "PID专家智能体": ("pid_tuning", "PID整定", 75),
+            "评估智能体": ("evaluation", "整定评估", 90),
+        }
+        return mapping.get(agent)
+    if event_type == "result":
+        return ("completed", "结果生成", 95)
+    if event_type == "done":
+        return ("completed", "任务完成", 100)
+    if event_type == "error":
+        return ("failed", "任务失败", 100)
+    return None
+
+
+def _build_external_result(
+    *,
+    task_id: str,
+    loop_type: str,
+    loop_uri: str,
+    final_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    model = final_result.get("model") or {}
+    pid = final_result.get("pidParams") or {}
+    evaluation = final_result.get("evaluation") or {}
+    memory = final_result.get("memory") or {}
+    guidance = memory.get("experienceGuidance") or {}
+    tuning_advice = final_result.get("tuningAdvice") or {}
+
+    return {
+        "task_id": task_id,
+        "loop_type": loop_type,
+        "loop_uri": loop_uri,
+        "model": {
+            "model_type": model.get("modelType", "FOPDT"),
+            "selected_model_params": model.get("selectedModelParams", {}),
+            "confidence": model.get("confidence", 0.0),
+            "normalized_rmse": model.get("normalizedRmse", 0.0),
+            "r2_score": model.get("r2Score", 0.0),
+        },
+        "pid": {
+            "strategy_used": pid.get("strategyUsed") or pid.get("strategy") or "",
+            "Kp": pid.get("Kp", 0.0),
+            "Ki": pid.get("Ki", 0.0),
+            "Kd": pid.get("Kd", 0.0),
+        },
+        "evaluation": {
+            "performance_score": evaluation.get("performance_score", 0.0),
+            "method_confidence": evaluation.get("method_confidence", 0.0),
+            "final_rating": evaluation.get("final_rating", 0.0),
+            "passed": evaluation.get("passed", False),
+            "failure_reason": evaluation.get("failure_reason", ""),
+            "feedback_target": evaluation.get("feedback_target", ""),
+            "feedback_action": evaluation.get("feedback_action", ""),
+        },
+        "experience": {
+            "experience_id": memory.get("experienceId"),
+            "match_count": guidance.get("match_count", 0),
+            "preferred_strategy": guidance.get("preferred_strategy", ""),
+            "preferred_model_type": guidance.get("preferred_model_type", ""),
+        },
+        "tuning_advice": {
+            "summary": tuning_advice.get("summary", ""),
+            "recommendation_level": tuning_advice.get("recommendation_level", ""),
+            "actions": tuning_advice.get("actions", []),
+            "risks": tuning_advice.get("risks", []),
+            "rollback_advice": tuning_advice.get("rollback_advice", ""),
+            "operator_note": tuning_advice.get("operator_note", ""),
+        },
+    }
+
+
 def create_app(
     *,
     run_multi_agent_collaboration: RunCollaborationFn,
@@ -45,6 +160,9 @@ def create_app(
     default_history_end_time: str,
 ) -> FastAPI:
     app = FastAPI()
+    task_store = WorkflowTaskStore()
+    background_jobs: set[asyncio.Task[Any]] = set()
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -52,6 +170,77 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    async def _workflow_event_generator(
+        *,
+        csv_path: str,
+        loop_name: str,
+        loop_type: str,
+        loop_uri: str,
+        start_time: str,
+        end_time: str,
+        data_type: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        async for event in run_multi_agent_collaboration(
+            csv_path=csv_path,
+            loop_name=loop_name,
+            loop_type=loop_type,
+            loop_uri=loop_uri,
+            start_time=start_time,
+            end_time=end_time,
+            data_type=data_type,
+            llm_config=llm_config,
+        ):
+            yield event
+
+    async def _run_background_workflow(
+        *,
+        task_id: str,
+        loop_name: str,
+        loop_type: str,
+        loop_uri: str,
+        start_time: str,
+        end_time: str,
+    ) -> None:
+        task_store.start_task(task_id)
+        final_result: Dict[str, Any] | None = None
+        try:
+            async for event in _workflow_event_generator(
+                csv_path="",
+                loop_name=loop_name,
+                loop_type=loop_type,
+                loop_uri=loop_uri,
+                start_time=start_time,
+                end_time=end_time,
+                data_type="interpolated",
+            ):
+                progress = _event_progress(event)
+                if progress is not None:
+                    stage, stage_display, percent = progress
+                    task_store.update_progress(
+                        task_id,
+                        stage=stage,
+                        stage_display=stage_display,
+                        percent=percent,
+                    )
+                if event.get("type") == "result":
+                    final_result = event.get("data") or {}
+
+            if final_result is None:
+                task_store.fail_task(task_id, "workflow finished without result")
+                return
+
+            task_store.complete_task(
+                task_id,
+                _build_external_result(
+                    task_id=task_id,
+                    loop_type=loop_type,
+                    loop_uri=loop_uri,
+                    final_result=final_result,
+                ),
+            )
+        except Exception as exc:
+            task_store.fail_task(task_id, str(exc))
 
     @app.post("/api/tune_stream")
     async def tune_stream(
@@ -72,7 +261,7 @@ def create_app(
 
         async def event_generator() -> AsyncGenerator[str, None]:
             try:
-                async for event in run_multi_agent_collaboration(
+                async for event in _workflow_event_generator(
                     csv_path=csv_path,
                     loop_name=loop_name,
                     loop_type=loop_type,
@@ -80,7 +269,6 @@ def create_app(
                     start_time=start_time,
                     end_time=end_time,
                     data_type=data_type,
-                    llm_config=llm_config,
                 ):
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             except Exception as exc:
@@ -99,6 +287,212 @@ def create_app(
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
             },
+        )
+
+    @app.post("/api/agent/workflow/run", response_model=None)
+    async def workflow_run(
+        payload: WorkflowRunRequest,
+        authorization: str | None = Header(default=None, alias="Authorization"),
+    ) -> Any:
+        del authorization
+        task_id = str(uuid.uuid4())
+        normalized_loop_type = _normalize_loop_type(payload.loop_type)
+        loop_name = payload.loop_uri.rstrip("/").split("/")[-1] or "external_workflow"
+        response_mode = (payload.response_mode or "async").strip().lower()
+
+        task_store.create_task(
+            task_id,
+            {
+                "start_time": payload.start_time,
+                "end_time": payload.end_time,
+                "loop_type": normalized_loop_type,
+                "loop_uri": payload.loop_uri,
+                "response_mode": response_mode,
+            },
+        )
+
+        if response_mode == "streaming":
+            async def stream_events() -> AsyncGenerator[str, None]:
+                accepted = {"type": "accepted", "task_id": task_id}
+                yield f"data: {json.dumps(accepted, ensure_ascii=False)}\n\n"
+                try:
+                    async for event in _workflow_event_generator(
+                        csv_path="",
+                        loop_name=loop_name,
+                        loop_type=normalized_loop_type,
+                        loop_uri=payload.loop_uri,
+                        start_time=payload.start_time,
+                        end_time=payload.end_time,
+                        data_type="interpolated",
+                    ):
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                except Exception as exc:
+                    import traceback
+
+                    error_msg = {
+                        "type": "error",
+                        "task_id": task_id,
+                        "message": f"{exc}\n{traceback.format_exc()}",
+                    }
+                    yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
+
+            return StreamingResponse(
+                stream_events(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                },
+            )
+
+        if response_mode == "async":
+            job = asyncio.create_task(
+                _run_background_workflow(
+                    task_id=task_id,
+                    loop_name=loop_name,
+                    loop_type=normalized_loop_type,
+                    loop_uri=payload.loop_uri,
+                    start_time=payload.start_time,
+                    end_time=payload.end_time,
+                )
+            )
+            background_jobs.add(job)
+            job.add_done_callback(background_jobs.discard)
+            return JSONResponse(
+                {
+                    "code": 0,
+                    "message": "accepted",
+                    "task_id": task_id,
+                }
+            )
+
+        final_result: Dict[str, Any] | None = None
+        try:
+            task_store.start_task(task_id)
+            async for event in _workflow_event_generator(
+                csv_path="",
+                loop_name=loop_name,
+                loop_type=normalized_loop_type,
+                loop_uri=payload.loop_uri,
+                start_time=payload.start_time,
+                end_time=payload.end_time,
+                data_type="interpolated",
+            ):
+                progress = _event_progress(event)
+                if progress is not None:
+                    stage, stage_display, percent = progress
+                    task_store.update_progress(
+                        task_id,
+                        stage=stage,
+                        stage_display=stage_display,
+                        percent=percent,
+                    )
+                if event.get("type") == "result":
+                    final_result = event.get("data")
+        except Exception as exc:
+            task_store.fail_task(task_id, str(exc))
+            return JSONResponse(
+                {
+                    "code": 1,
+                    "message": f"workflow failed: {exc}",
+                    "task_id": task_id,
+                },
+                status_code=500,
+            )
+
+        external_result = _build_external_result(
+            task_id=task_id,
+            loop_type=normalized_loop_type,
+            loop_uri=payload.loop_uri,
+            final_result=final_result or {},
+        )
+        task_store.complete_task(task_id, external_result)
+        return JSONResponse(
+            {
+                "code": 0,
+                "message": "success",
+                "task_id": task_id,
+                "result": external_result,
+            }
+        )
+
+    @app.get("/api/agent/workflow/status/{task_id}")
+    async def workflow_status(task_id: str) -> Any:
+        task = task_store.get_task(task_id)
+        if task is None:
+            return JSONResponse(
+                {
+                    "code": 1,
+                    "message": "task not found",
+                    "task_id": task_id,
+                },
+                status_code=404,
+            )
+        return JSONResponse(
+            {
+                "code": 0,
+                "message": "success",
+                "task_id": task_id,
+                "status": task.get("status"),
+                "created_at": task.get("created_at"),
+                "started_at": task.get("started_at"),
+                "finished_at": task.get("finished_at"),
+                "progress": task.get("progress"),
+                "error_message": task.get("error_message"),
+            }
+        )
+
+    @app.get("/api/agent/workflow/result/{task_id}")
+    async def workflow_result(task_id: str) -> Any:
+        task = task_store.get_task(task_id)
+        if task is None:
+            return JSONResponse(
+                {
+                    "code": 1,
+                    "message": "task not found",
+                    "task_id": task_id,
+                },
+                status_code=404,
+            )
+
+        status = task.get("status")
+        if status in {"pending", "running"}:
+            return JSONResponse(
+                {
+                    "code": 0,
+                    "message": "task not finished",
+                    "task_id": task_id,
+                    "status": status,
+                    "finished_at": task.get("finished_at"),
+                    "result": None,
+                    "error_message": task.get("error_message"),
+                }
+            )
+
+        if status == "failed":
+            return JSONResponse(
+                {
+                    "code": 1,
+                    "message": "workflow failed",
+                    "task_id": task_id,
+                    "status": status,
+                    "finished_at": task.get("finished_at"),
+                    "result": None,
+                    "error_message": task.get("error_message"),
+                },
+                status_code=500,
+            )
+
+        return JSONResponse(
+            {
+                "code": 0,
+                "message": "success",
+                "task_id": task_id,
+                "status": status,
+                "finished_at": task.get("finished_at"),
+                "result": task.get("result"),
+                "error_message": task.get("error_message"),
+            }
         )
 
     @app.get("/api/experiences/stats")
@@ -177,5 +571,41 @@ def create_app(
     @app.post("/api/experiences/actions/reindex")
     async def experience_reindex() -> JSONResponse:
         return JSONResponse(rebuild_experience_center_index())
+
+    @app.get("/api/case-library/stats")
+    async def case_library_stats() -> JSONResponse:
+        return JSONResponse(get_case_library_stats())
+
+    @app.get("/api/case-library")
+    async def case_library_list(
+        provider: str = "",
+        loop_type: str = "",
+        model_type: str = "",
+        track: str = "",
+        failure_mode: str = "",
+        keyword: str = "",
+        limit: int = 100,
+    ) -> JSONResponse:
+        return JSONResponse(
+            {
+                "items": list_case_library_items(
+                    provider=provider,
+                    loop_type=loop_type,
+                    model_type=model_type,
+                    track=track,
+                    failure_mode=failure_mode,
+                    keyword=keyword,
+                    limit=limit,
+                )
+            }
+        )
+
+    @app.get("/api/case-library/{case_id}")
+    async def case_library_detail(case_id: str) -> JSONResponse:
+        return JSONResponse({"item": get_case_library_detail(case_id)})
+
+    @app.get("/api/case-library/{case_id}/similar")
+    async def case_library_similar(case_id: str, limit: int = 5) -> JSONResponse:
+        return JSONResponse({"items": list_similar_case_library_items(case_id, limit=limit)})
 
     return app

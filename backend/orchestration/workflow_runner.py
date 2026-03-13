@@ -84,6 +84,57 @@ def _build_display_result(result_data: Dict[str, Any], *, current_tool_name: str
     return display_result
 
 
+def _build_tuning_advice(final_result: Dict[str, Any]) -> Dict[str, Any]:
+    evaluation = final_result.get("evaluation") or {}
+    pid_params = final_result.get("pidParams") or {}
+    model = final_result.get("model") or {}
+
+    passed = bool(evaluation.get("passed", False))
+    final_rating = float(evaluation.get("final_rating", 0.0) or 0.0)
+    performance_score = float(evaluation.get("performance_score", 0.0) or 0.0)
+    method_confidence = float(evaluation.get("method_confidence", 0.0) or 0.0)
+    model_type = str(model.get("modelType", "FOPDT") or "FOPDT")
+    strategy_used = str(pid_params.get("strategyUsed") or pid_params.get("strategy") or "")
+    failure_reason = str(evaluation.get("failure_reason", "") or "")
+    feedback_action = str(evaluation.get("feedback_action", "") or "")
+
+    if passed and final_rating >= 8.5:
+        level = "recommended"
+        summary = "建议采用当前整定参数，可直接作为优先投用方案。"
+        actions = [
+            "优先在低风险工况下试投用。",
+            "投用后观察 1 至 2 个完整调节周期，确认超调和振荡可接受。",
+            "若现场噪声偏大，可适度减小 Kp。", 
+        ]
+        risks = [f"当前采用 {model_type} 模型与 {strategy_used or '自动选择策略'} 进行整定，建议继续观察现场工况变化。"]
+    elif passed:
+        level = "cautious"
+        summary = "建议谨慎采用当前整定参数，先在受控工况下试运行。"
+        actions = [
+            "先在风险较低工况下投用。",
+            "重点关注振荡次数、稳态误差与阀位变化。",
+            "如现场波动超出预期，可回退到原参数。", 
+        ]
+        risks = [
+            f"综合评分 {final_rating:.2f}，闭环表现可用但仍需现场确认。",
+            f"方法置信度 {method_confidence:.2f}，建议结合现场经验复核。",
+        ]
+    else:
+        level = "not_recommended"
+        summary = "当前整定参数不建议直接投用，应先根据评估建议继续优化。"
+        actions = [feedback_action] if feedback_action else ["建议先继续优化 PID 参数后再重新评估。"]
+        risks = [failure_reason] if failure_reason else ["当前综合评分未达标，直接投用风险较高。"]
+
+    return {
+        "summary": summary,
+        "recommendation_level": level,
+        "actions": actions,
+        "risks": risks,
+        "rollback_advice": "如投用后振荡、超调或稳态误差明显恶化，建议回退到原 PID 参数。",
+        "operator_note": f"当前性能评分 {performance_score:.2f}，综合评分 {final_rating:.2f}，建议结合现场工况审慎应用。",
+    }
+
+
 async def run_multi_agent_collaboration(
     *,
     csv_path: str,
@@ -313,6 +364,8 @@ async def run_multi_agent_collaboration(
                 "performance_details": shared_data.get("performance_details", {}),
                 "final_details": shared_data.get("final_details", {}),
             }
+
+        final_result["tuningAdvice"] = _build_tuning_advice(final_result)
 
         experience_record = build_experience_record(
             loop_name=loop_name,

@@ -197,7 +197,7 @@
 
       <!-- 进度指示器 -->
       <div class="px-6 py-4 border-b border-slate-200 bg-white">
-        <div class="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+        <div class="grid grid-cols-3 gap-2 rounded-xl bg-slate-100 p-1">
           <button
             @click="switchPage('tuning')"
             class="rounded-lg px-4 py-2 text-sm font-semibold transition-all"
@@ -211,6 +211,13 @@
             :class="currentPage === 'experience' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
           >
             经验中心
+          </button>
+          <button
+            @click="switchPage('case-library')"
+            class="rounded-lg px-4 py-2 text-sm font-semibold transition-all"
+            :class="currentPage === 'case-library' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+          >
+            案例库
           </button>
         </div>
       </div>
@@ -268,7 +275,7 @@
           </div>
         </div>
 
-        <div v-if="dataSource === 'history'" class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div v-if="false && dataSource === 'history'" class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p class="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
             未上传CSV时，将按下方历史参数获取数据；若参数留空，则使用默认值。
           </p>
@@ -290,7 +297,43 @@
           </div>
         </div>
 
-        <div v-if="dataSource === 'upload'">
+        <div v-if="false && dataSource === 'history'" class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="space-y-2">
+              <div class="text-sm font-semibold text-slate-700">历史数据参数</div>
+              <p class="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
+                未上传 CSV 时，将按下方历史参数获取数据；若参数留空，则使用默认值。
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="historyPanelCollapsed = !historyPanelCollapsed"
+              class="shrink-0 inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 transition-all"
+            >
+              <span>{{ historyPanelCollapsed ? '展开参数' : '折叠参数' }}</span>
+              <span>{{ historyPanelCollapsed ? '▼' : '▲' }}</span>
+            </button>
+          </div>
+          <div v-if="!historyPanelCollapsed" class="space-y-4">
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-2">Loop URI</label>
+              <input v-model="loopUri" type="text"
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-2">开始时间</label>
+              <input v-model="startTime" type="text" placeholder="1772467200000"
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-2">结束时间</label>
+              <input v-model="endTime" type="text" placeholder="1772553600000"
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+            </div>
+          </div>
+        </div>
+
+        <div v-if="false && dataSource === 'upload'">
           <label class="block text-sm font-semibold text-slate-700 mb-2">上传CSV数据文件</label>
           <input ref="fileInput" type="file" accept=".csv" @change="handleFileUpload" class="hidden">
           <button @click="$refs.fileInput.click()"
@@ -299,6 +342,67 @@
           </button>
           <p v-if="uploadedFile" class="text-xs text-slate-600 mt-2 truncate bg-green-50 px-3 py-2 rounded border border-green-200">
             ✅ {{ uploadedFile.name }}
+          </p>
+        </div>
+
+        <div v-if="dataSource === 'history'" class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="space-y-2">
+              <div class="text-sm font-semibold text-slate-700">历史数据参数</div>
+              <p class="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
+                未上传 CSV 时，将按下方历史参数获取数据；若参数留空，则使用默认值。
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="historyPanelCollapsed = !historyPanelCollapsed"
+              class="shrink-0 inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 transition-all"
+            >
+              <span>{{ historyPanelCollapsed ? '展开参数' : '折叠参数' }}</span>
+              <span>{{ historyPanelCollapsed ? '▼' : '▲' }}</span>
+            </button>
+          </div>
+          <div v-if="!historyPanelCollapsed" class="space-y-4">
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-2">Loop URI</label>
+              <input
+                v-model="loopUri"
+                type="text"
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              >
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-2">开始时间</label>
+              <input
+                v-model="startTime"
+                type="text"
+                placeholder="1772467200000"
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              >
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-2">结束时间</label>
+              <input
+                v-model="endTime"
+                type="text"
+                placeholder="1772553600000"
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              >
+            </div>
+          </div>
+        </div>
+
+        <div v-if="dataSource === 'upload'">
+          <label class="block text-sm font-semibold text-slate-700 mb-2">上传 CSV 数据文件</label>
+          <input ref="fileInput" type="file" accept=".csv" @change="handleFileUpload" class="hidden">
+          <button
+            @click="$refs.fileInput.click()"
+            class="w-full px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded-lg hover:from-blue-100 hover:to-indigo-100 border border-blue-200 transition-all font-medium"
+          >
+            <span class="text-xl mr-2">📎</span> 选择 CSV 文件
+          </button>
+          <p v-if="uploadedFile" class="text-xs text-slate-600 mt-2 truncate bg-green-50 px-3 py-2 rounded border border-green-200">
+            已选择：{{ uploadedFile.name }}
           </p>
         </div>
 
@@ -733,6 +837,193 @@
                   <ul class="space-y-2 text-sm text-slate-700">
                     <li v-for="lesson in selectedExperience.lessons" :key="lesson">- {{ lesson }}</li>
                   </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="currentPage === 'case-library'" class="space-y-6">
+          <div class="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 p-6 shadow-sm">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h2 class="text-2xl font-bold text-slate-800">案例库</h2>
+                <p class="mt-2 text-sm text-slate-600">查看从 pid-tuning 项目导入的标准案例、外部案例和 benchmark 资产。</p>
+              </div>
+              <button
+                @click="loadCaseLibraryCenter"
+                class="rounded-lg border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 transition-all"
+              >
+                刷新数据
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div class="text-xs font-semibold text-slate-500">案例总数</div>
+              <div class="mt-2 text-2xl font-bold text-slate-900">{{ caseLibraryStats.total_count ?? 0 }}</div>
+            </div>
+            <div class="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
+              <div class="text-xs font-semibold text-slate-500">主要来源</div>
+              <div class="mt-2 text-2xl font-bold text-emerald-700">{{ caseLibraryStats.provider_distribution?.[0]?.provider || '-' }}</div>
+            </div>
+            <div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm">
+              <div class="text-xs font-semibold text-slate-500">主要回路类型</div>
+              <div class="mt-2 text-2xl font-bold text-blue-700">{{ caseLibraryStats.loop_type_distribution?.[0]?.loop_type || '-' }}</div>
+            </div>
+            <div class="rounded-xl border border-purple-200 bg-white p-4 shadow-sm">
+              <div class="text-xs font-semibold text-slate-500">主要模型类型</div>
+              <div class="mt-2 text-2xl font-bold text-purple-700">{{ caseLibraryStats.model_type_distribution?.[0]?.model_type || '-' }}</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-5 gap-6">
+            <div class="xl:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">筛选条件</h3>
+                <p class="text-xs text-slate-500 mt-1">按 provider、回路类型、模型类型和失效模式筛选案例。</p>
+              </div>
+              <div class="p-5 space-y-4">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-2">关键词</label>
+                  <input v-model="caseFilters.keyword" type="text" placeholder="case_id / provider / dataset_id" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-2">Provider</label>
+                  <input v-model="caseFilters.provider" type="text" placeholder="例如 plant / tclab / zenodo" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-2">回路类型</label>
+                  <select v-model="caseFilters.loop_type" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+                    <option value="">全部</option>
+                    <option value="flow">流量</option>
+                    <option value="temperature">温度</option>
+                    <option value="pressure">压力</option>
+                    <option value="level">液位</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-2">模型类型</label>
+                  <select v-model="caseFilters.model_type" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+                    <option value="">全部</option>
+                    <option value="FO">FO</option>
+                    <option value="FOPDT">FOPDT</option>
+                    <option value="SOPDT">SOPDT</option>
+                    <option value="IPDT">IPDT</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-2">Track</label>
+                  <input v-model="caseFilters.track" type="text" placeholder="例如 servo / regulatory" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-2">Failure Mode</label>
+                  <input v-model="caseFilters.failure_mode" type="text" placeholder="例如 oscillation / saturation" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+                </div>
+                <div class="grid grid-cols-2 gap-2 pt-4 border-t border-slate-200">
+                  <button @click="loadCaseLibraryCenter" class="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-all">
+                    应用筛选
+                  </button>
+                  <button @click="resetCaseFilters" class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all">
+                    重置
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="xl:col-span-3 space-y-6">
+              <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+                  <div>
+                    <h3 class="text-lg font-bold text-slate-800">案例列表</h3>
+                    <p class="text-xs text-slate-500 mt-1">浏览标准案例和外部案例资产。</p>
+                  </div>
+                  <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                    {{ caseLibraryItems.length }} 条
+                  </span>
+                </div>
+                <div v-if="caseLibraryLoading" class="px-5 py-8 text-sm text-slate-500">正在加载案例数据...</div>
+                <div v-else-if="!caseLibraryItems.length" class="px-5 py-8 text-sm text-slate-500">当前没有匹配的案例。</div>
+                <div v-else class="divide-y divide-slate-100">
+                  <button
+                    v-for="item in caseLibraryItems"
+                    :key="item.case_id"
+                    @click="openCaseLibraryDetail(item.case_id)"
+                    class="w-full px-5 py-4 text-left hover:bg-slate-50 transition-colors"
+                  >
+                    <div class="flex items-start justify-between gap-4">
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="font-semibold text-slate-900">{{ item.case_id }}</span>
+                          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{{ item.provider || '-' }}</span>
+                          <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">{{ item.loop_type || '-' }}</span>
+                          <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">{{ item.model_type || '-' }}</span>
+                        </div>
+                        <div class="mt-2 text-sm text-slate-600">
+                          Track {{ item.track || '-' }} · Objective {{ item.objective || '-' }}
+                        </div>
+                        <div class="mt-1 text-xs text-slate-400">
+                          Failure Modes: {{ (item.failure_modes && item.failure_modes.length) ? item.failure_modes.join(', ') : '-' }}
+                        </div>
+                      </div>
+                      <span class="text-xs font-mono text-slate-400">{{ item.source_dataset_id || '-' }}</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-200">
+                  <h3 class="text-lg font-bold text-slate-800">案例详情</h3>
+                  <p class="text-xs text-slate-500 mt-1">查看案例元信息、模型、标签和 benchmark 摘要。</p>
+                </div>
+                <div v-if="caseLibraryDetailLoading" class="px-5 py-8 text-sm text-slate-500">正在加载案例详情...</div>
+                <div v-else-if="!selectedCase" class="px-5 py-8 text-sm text-slate-500">尚未选择案例。</div>
+                <div v-else class="p-5 space-y-4">
+                  <div class="grid grid-cols-2 gap-3 text-sm">
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">Case ID</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ selectedCase.case_id || '-' }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">Provider</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ selectedCase.provider || '-' }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">回路类型</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ selectedCase.loop_type || '-' }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">模型类型</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ selectedCase.model_type || '-' }}</div>
+                    </div>
+                  </div>
+                  <div class="rounded-lg border border-blue-100 bg-blue-50 p-4">
+                    <div class="text-sm font-semibold text-slate-800 mb-2">已辨识模型</div>
+                    <div class="font-mono text-sm text-slate-800 break-all">{{ summarizeModelParams(selectedCase.identified_model?.params || selectedCase.identified_model) }}</div>
+                    <div class="mt-3 grid grid-cols-3 gap-2 text-sm">
+                      <div><span class="text-slate-500">RMSE</span><div class="font-mono text-slate-800">{{ formatNumber(selectedCase.fit_metrics?.rmse ?? selectedCase.identified_model?.fit_metrics?.rmse, 4) }}</div></div>
+                      <div><span class="text-slate-500">R²</span><div class="font-mono text-slate-800">{{ formatNumber(selectedCase.fit_metrics?.r2 ?? selectedCase.identified_model?.fit_metrics?.r2, 4) }}</div></div>
+                      <div><span class="text-slate-500">采样周期</span><div class="font-mono text-slate-800">{{ formatNumber(selectedCase.sample_time_s, 3) }}</div></div>
+                    </div>
+                  </div>
+                  <div class="rounded-lg border border-purple-100 bg-purple-50 p-4">
+                    <div class="text-sm font-semibold text-slate-800 mb-2">案例标签</div>
+                    <div class="space-y-2 text-sm text-slate-700">
+                      <div>Track：<span class="font-semibold">{{ selectedCase.track || '-' }}</span></div>
+                      <div>Failure Modes：<span class="font-semibold">{{ (selectedCase.failure_modes && selectedCase.failure_modes.length) ? selectedCase.failure_modes.join(', ') : '-' }}</span></div>
+                      <div>Quality Flags：<span class="font-semibold">{{ (selectedCase.quality_flags && selectedCase.quality_flags.length) ? selectedCase.quality_flags.join(', ') : '-' }}</span></div>
+                    </div>
+                  </div>
+                  <div class="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+                    <div class="text-sm font-semibold text-slate-800 mb-2">时序摘要</div>
+                    <div class="grid grid-cols-3 gap-2 text-sm">
+                      <div><span class="text-slate-500">样本数</span><div class="font-mono text-slate-800">{{ selectedCase.raw_timeseries_summary?.sample_count ?? 0 }}</div></div>
+                      <div><span class="text-slate-500">起始时间</span><div class="font-mono text-slate-800 break-all">{{ selectedCase.raw_timeseries_summary?.time_start || '-' }}</div></div>
+                      <div><span class="text-slate-500">结束时间</span><div class="font-mono text-slate-800 break-all">{{ selectedCase.raw_timeseries_summary?.time_end || '-' }}</div></div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1428,6 +1719,7 @@
           loopUri: '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b',
           startTime: '1772467200000',
           endTime: '1772553600000',
+          historyPanelCollapsed: false,
           loopType: 'flow',
           experienceLoading: false,
           experienceDetailLoading: false,
@@ -1451,6 +1743,19 @@
           helpCenterActiveSection: '',
           helpCenterExpandedSections: {},
           helpCenterShortcuts: [],
+          caseLibraryLoading: false,
+          caseLibraryDetailLoading: false,
+          caseLibraryStats: {},
+          caseLibraryItems: [],
+          selectedCase: null,
+          caseFilters: {
+            provider: '',
+            loop_type: '',
+            model_type: '',
+            track: '',
+            failure_mode: '',
+            keyword: ''
+          },
           experienceFilters: {
             loop_type: '',
             model_type: '',
@@ -1498,6 +1803,9 @@
           this.currentPage = page;
           if (page === 'experience') {
             await this.loadExperienceCenter();
+          }
+          if (page === 'case-library') {
+            await this.loadCaseLibraryCenter();
           }
         },
 
@@ -1652,6 +1960,91 @@
             this.loadExperienceStats(),
             this.loadExperienceItems()
           ]);
+        },
+
+        async loadCaseLibraryCenter() {
+          await Promise.all([
+            this.loadCaseLibraryStats(),
+            this.loadCaseLibraryItems()
+          ]);
+        },
+
+        async loadCaseLibraryStats() {
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/case-library/stats`);
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            this.caseLibraryStats = await response.json();
+          } catch (error) {
+            console.error('Failed to load case library stats:', error);
+            this.caseLibraryStats = {};
+          }
+        },
+
+        async loadCaseLibraryItems() {
+          this.caseLibraryLoading = true;
+          try {
+            const params = new URLSearchParams();
+            if (this.caseFilters.provider) params.set('provider', this.caseFilters.provider);
+            if (this.caseFilters.loop_type) params.set('loop_type', this.caseFilters.loop_type);
+            if (this.caseFilters.model_type) params.set('model_type', this.caseFilters.model_type);
+            if (this.caseFilters.track) params.set('track', this.caseFilters.track);
+            if (this.caseFilters.failure_mode) params.set('failure_mode', this.caseFilters.failure_mode);
+            if (this.caseFilters.keyword) params.set('keyword', this.caseFilters.keyword);
+            params.set('limit', '100');
+
+            const response = await fetch(`${resolveApiBase()}/api/case-library?${params.toString()}`);
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const payload = await response.json();
+            this.caseLibraryItems = Array.isArray(payload.items) ? payload.items : [];
+            if (this.selectedCase) {
+              const stillExists = this.caseLibraryItems.some(item => item.case_id === this.selectedCase.case_id);
+              if (!stillExists) {
+                this.selectedCase = null;
+              }
+            }
+            if (!this.selectedCase && this.caseLibraryItems.length) {
+              await this.openCaseLibraryDetail(this.caseLibraryItems[0].case_id);
+            }
+          } catch (error) {
+            console.error('Failed to load case library items:', error);
+            this.caseLibraryItems = [];
+          } finally {
+            this.caseLibraryLoading = false;
+          }
+        },
+
+        async openCaseLibraryDetail(caseId) {
+          if (!caseId) return;
+          this.caseLibraryDetailLoading = true;
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/case-library/${encodeURIComponent(caseId)}`);
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const payload = await response.json();
+            this.selectedCase = payload.item || null;
+          } catch (error) {
+            console.error('Failed to load case detail:', error);
+            this.selectedCase = null;
+          } finally {
+            this.caseLibraryDetailLoading = false;
+          }
+        },
+
+        async resetCaseFilters() {
+          this.caseFilters = {
+            provider: '',
+            loop_type: '',
+            model_type: '',
+            track: '',
+            failure_mode: '',
+            keyword: ''
+          };
+          await this.loadCaseLibraryItems();
         },
 
         async clearExperienceCenter() {
@@ -2294,10 +2687,123 @@ end_time: ${this.endTime || '1772553600000'}
           this.messages = [];
           this.messageIdCounter = 0;
           localStorage.removeItem(this.messageStorageKey());
+        },
+        /* fixTuningSidebarCopy() {
+          const root = document.querySelector('#app');
+          if (!root) return;
+          const tuningPanel = root.querySelector('[v-if="currentPage === \\'tuning\\'"]') || root.querySelector('.p-6.space-y-4.flex-1');
+          if (!tuningPanel) return;
+
+          const labels = tuningPanel.querySelectorAll('label.block.text-sm.font-semibold.text-slate-700.mb-2');
+          if (labels[1]) labels[1].textContent = '数据来源';
+          if (labels[3]) labels[3].textContent = '上传 CSV 数据文件';
+          if (labels[4]) labels[4].textContent = '回路类型';
+
+          const historyPanel = tuningPanel.querySelector('.rounded-xl.border.border-slate-200.bg-slate-50.p-4.space-y-4');
+          if (historyPanel) {
+            const headerTitle = historyPanel.querySelector('.text-sm.font-semibold.text-slate-700');
+            if (headerTitle) headerTitle.textContent = '历史数据参数';
+
+            const note = historyPanel.querySelector('p.text-xs.text-amber-700');
+            if (note) note.textContent = '未上传 CSV 时，将按下方历史参数获取数据；若参数留空，则使用默认值。';
+
+            const historyLabels = historyPanel.querySelectorAll('label.block.text-sm.font-semibold.text-slate-700.mb-2');
+            if (historyLabels[1]) historyLabels[1].textContent = '开始时间';
+            if (historyLabels[2]) historyLabels[2].textContent = '结束时间';
+
+            const collapseButton = historyPanel.querySelector('button[type="button"]');
+            if (collapseButton) {
+              const spans = collapseButton.querySelectorAll('span');
+              if (spans[0]) spans[0].textContent = this.historyPanelCollapsed ? '展开参数' : '折叠参数';
+              if (spans[1]) spans[1].textContent = this.historyPanelCollapsed ? '▼' : '▲';
+            }
+          }
+
+          const sourceButtons = tuningPanel.querySelectorAll('.grid.grid-cols-2.gap-3 > button');
+          if (sourceButtons[0]) {
+            const texts = sourceButtons[0].querySelectorAll('div');
+            if (texts[0]) texts[0].textContent = '上传 CSV';
+            if (texts[1]) texts[1].textContent = '使用本地文件直接发起整定';
+          }
+          if (sourceButtons[1]) {
+            const texts = sourceButtons[1].querySelectorAll('div');
+            if (texts[0]) texts[0].textContent = '获取历史数据';
+            if (texts[1]) texts[1].textContent = '按回路参数从历史系统取数';
+          }
+
+          const uploadBlock = tuningPanel.querySelector('input[type="file"][accept=".csv"]')?.parentElement;
+          if (uploadBlock) {
+            const uploadButton = uploadBlock.querySelector('button');
+            if (uploadButton) uploadButton.innerHTML = '<span class="text-xl mr-2">📄</span> 选择 CSV 文件';
+            const uploadedText = uploadBlock.querySelector('p.text-xs.text-slate-600');
+            if (uploadedText && this.uploadedFile) uploadedText.textContent = `已选择：${this.uploadedFile.name}`;
+          }
+        } */
+        fixTuningSidebarCopy() {
+          const root = document.querySelector('#app');
+          if (!root) return;
+          const tuningPanel = root.querySelector('.p-6.space-y-4.flex-1');
+          if (!tuningPanel) return;
+
+          const labels = tuningPanel.querySelectorAll('label.block.text-sm.font-semibold.text-slate-700.mb-2');
+          if (labels[1]) labels[1].textContent = '\u6570\u636e\u6765\u6e90';
+          if (labels[3]) labels[3].textContent = '\u4e0a\u4f20 CSV \u6570\u636e\u6587\u4ef6';
+          if (labels[4]) labels[4].textContent = '\u56de\u8def\u7c7b\u578b';
+
+          const sourceButtons = tuningPanel.querySelectorAll('.grid.grid-cols-2.gap-3 > button');
+          if (sourceButtons[0]) {
+            const texts = sourceButtons[0].querySelectorAll('div');
+            if (texts[0]) texts[0].textContent = '\u4e0a\u4f20 CSV';
+            if (texts[1]) texts[1].textContent = '\u4f7f\u7528\u672c\u5730\u6587\u4ef6\u76f4\u63a5\u53d1\u8d77\u6574\u5b9a';
+          }
+          if (sourceButtons[1]) {
+            const texts = sourceButtons[1].querySelectorAll('div');
+            if (texts[0]) texts[0].textContent = '\u83b7\u53d6\u5386\u53f2\u6570\u636e';
+            if (texts[1]) texts[1].textContent = '\u6309\u56de\u8def\u53c2\u6570\u4ece\u5386\u53f2\u7cfb\u7edf\u53d6\u6570';
+          }
+
+          const historyPanel = tuningPanel.querySelector('.rounded-xl.border.border-slate-200.bg-slate-50.p-4.space-y-4');
+          if (historyPanel) {
+            const headerTitle = historyPanel.querySelector('.text-sm.font-semibold.text-slate-700');
+            if (headerTitle) headerTitle.textContent = '\u5386\u53f2\u6570\u636e\u53c2\u6570';
+
+            const note = historyPanel.querySelector('p.text-xs.text-amber-700');
+            if (note) {
+              note.textContent = '\u672a\u4e0a\u4f20CSV\u65f6\uff0c\u5c06\u6309\u4e0b\u65b9\u5386\u53f2\u53c2\u6570\u83b7\u53d6\u6570\u636e\uff1b\u82e5\u53c2\u6570\u7559\u7a7a\uff0c\u5219\u4f7f\u7528\u9ed8\u8ba4\u503c\u3002';
+            }
+
+            const historyLabels = historyPanel.querySelectorAll('label.block.text-sm.font-semibold.text-slate-700.mb-2');
+            if (historyLabels[0]) historyLabels[0].textContent = 'Loop URI';
+            if (historyLabels[1]) historyLabels[1].textContent = '\u5f00\u59cb\u65f6\u95f4';
+            if (historyLabels[2]) historyLabels[2].textContent = '\u7ed3\u675f\u65f6\u95f4';
+
+            const collapseButton = historyPanel.querySelector('button[type="button"]');
+            if (collapseButton) {
+              const spans = collapseButton.querySelectorAll('span');
+              if (spans[0]) spans[0].textContent = this.historyPanelCollapsed ? '\u5c55\u5f00\u53c2\u6570' : '\u6298\u53e0\u53c2\u6570';
+              if (spans[1]) spans[1].textContent = this.historyPanelCollapsed ? '\u25bc' : '\u25b2';
+            }
+          }
+
+          const uploadBlock = tuningPanel.querySelector('input[type="file"][accept=".csv"]')?.parentElement;
+          if (uploadBlock) {
+            const uploadButton = uploadBlock.querySelector('button');
+            if (uploadButton) uploadButton.innerHTML = '<span class="text-xl mr-2">📎</span> \u9009\u62e9 CSV \u6587\u4ef6';
+            const uploadedText = uploadBlock.querySelector('p.text-xs.text-slate-600');
+            if (uploadedText && this.uploadedFile) uploadedText.textContent = `\u5df2\u9009\u62e9\uff1a${this.uploadedFile.name}`;
+          }
         }
       },
       mounted() {
         this.loadMessages();
+        this.$nextTick(() => this.fixTuningSidebarCopy());
+        this._copyFixTimer = window.setInterval(() => this.fixTuningSidebarCopy(), 800);
+      },
+      beforeUnmount() {
+        if (this._copyFixTimer) {
+          clearInterval(this._copyFixTimer);
+          this._copyFixTimer = null;
+        }
       }
     }).mount('#app');
   </script>
