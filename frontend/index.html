@@ -1207,18 +1207,10 @@
                       <div class="text-slate-600 text-xs mb-1">原始模型参数</div>
                       <div class="font-mono font-semibold text-indigo-700 break-all">{{ summarizeModelParams(msg.data.model.selectedModelParams) }}</div>
                     </div>
-                    <div v-if="modelParamsDiffer(msg.data.model.selectedModelParams, msg.data.model.tuningModel || { K: msg.data.model.K, T: msg.data.model.T, L: msg.data.model.L })" class="bg-slate-50 rounded-lg p-3 border border-slate-200 md:col-span-2">
-                      <div class="text-slate-600 text-xs mb-1">当前工作模型参数</div>
-                      <div class="font-mono font-semibold text-slate-700 break-all">{{ summarizeModelParams(msg.data.model.tuningModel || { K: msg.data.model.K, T: msg.data.model.T, L: msg.data.model.L }) }}</div>
-                    </div>
                   </div>
-                  <div v-if="msg.data.model.modelSelectionReason || modelParamsDiffer(msg.data.model.selectedModelParams, msg.data.model.tuningModel || { K: msg.data.model.K, T: msg.data.model.T, L: msg.data.model.L })" class="mb-3 space-y-2 text-sm">
+                  <div v-if="msg.data.model.modelSelectionReason" class="mb-3 space-y-2 text-sm">
                     <div v-if="msg.data.model.modelSelectionReason" class="bg-indigo-50 rounded-lg p-3 border border-indigo-100 text-slate-700">
                       <span class="font-semibold text-slate-800">选模依据：</span>{{ msg.data.model.modelSelectionReason }}
-                    </div>
-                    <div v-if="modelParamsDiffer(msg.data.model.selectedModelParams, msg.data.model.tuningModel || { K: msg.data.model.K, T: msg.data.model.T, L: msg.data.model.L })" class="bg-slate-50 rounded-lg p-3 border border-slate-200 text-slate-700">
-                      <div class="font-semibold text-slate-800 mb-1">用于整定的等效模型</div>
-                      <div class="font-mono break-all">{{ summarizeModelParams(msg.data.model.tuningModel) }}</div>
                     </div>
                   </div>
                   <div class="grid grid-cols-2 gap-3 text-sm">

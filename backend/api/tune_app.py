@@ -43,6 +43,46 @@ LOOP_TYPE_ALIASES = {
 }
 
 
+def _map_workflow_error(exc: Exception | str) -> Dict[str, Any]:
+    error_text = str(exc or "").strip()
+    lowered = error_text.lower()
+
+    if "arrearage" in lowered or "overdue-payment" in lowered or "access denied" in lowered:
+        return {
+            "error_code": 10021,
+            "error_type": "upstream_model_arrearage",
+            "message": "上游模型服务不可用，请检查模型账户余额或服务状态。",
+            "detail": error_text,
+        }
+    if "apiconnectionerror" in lowered or "connection error" in lowered:
+        return {
+            "error_code": 10022,
+            "error_type": "upstream_model_connection",
+            "message": "上游模型网关连接异常，请稍后重试或检查模型服务网络状态。",
+            "detail": error_text,
+        }
+    if "readerror" in lowered or "read error" in lowered:
+        return {
+            "error_code": 10023,
+            "error_type": "upstream_model_read_error",
+            "message": "上游模型服务读取异常，请稍后重试。",
+            "detail": error_text,
+        }
+    if "timeout" in lowered or "timed out" in lowered:
+        return {
+            "error_code": 10024,
+            "error_type": "upstream_model_timeout",
+            "message": "上游模型服务响应超时，请稍后重试。",
+            "detail": error_text,
+        }
+    return {
+        "error_code": 10020,
+        "error_type": "workflow_execution_error",
+        "message": "智能整定任务执行失败，请检查后端日志或稍后重试。",
+        "detail": error_text,
+    }
+
+
 class WorkflowRunRequest(BaseModel):
     start_time: str = Field(..., description="开始时间")
     end_time: str = Field(..., description="结束时间")
@@ -240,7 +280,13 @@ def create_app(
                 ),
             )
         except Exception as exc:
-            task_store.fail_task(task_id, str(exc))
+            mapped_error = _map_workflow_error(exc)
+            task_store.fail_task(
+                task_id,
+                mapped_error["message"],
+                error_code=mapped_error["error_code"],
+                error_type=mapped_error["error_type"],
+            )
 
     @app.post("/api/tune_stream")
     async def tune_stream(
@@ -274,7 +320,15 @@ def create_app(
             except Exception as exc:
                 import traceback
 
-                error_msg = {"type": "error", "message": f"{exc}\n{traceback.format_exc()}"}
+                mapped_error = _map_workflow_error(exc)
+                error_msg = {
+                    "type": "error",
+                    "message": mapped_error["message"],
+                    "error_code": mapped_error["error_code"],
+                    "error_type": mapped_error["error_type"],
+                    "error_detail": mapped_error["detail"],
+                    "traceback": traceback.format_exc(),
+                }
                 yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
             finally:
                 if csv_path and os.path.exists(csv_path):
@@ -329,10 +383,15 @@ def create_app(
                 except Exception as exc:
                     import traceback
 
+                    mapped_error = _map_workflow_error(exc)
                     error_msg = {
                         "type": "error",
                         "task_id": task_id,
-                        "message": f"{exc}\n{traceback.format_exc()}",
+                        "message": mapped_error["message"],
+                        "error_code": mapped_error["error_code"],
+                        "error_type": mapped_error["error_type"],
+                        "error_detail": mapped_error["detail"],
+                        "traceback": traceback.format_exc(),
                     }
                     yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
 
@@ -390,12 +449,21 @@ def create_app(
                 if event.get("type") == "result":
                     final_result = event.get("data")
         except Exception as exc:
-            task_store.fail_task(task_id, str(exc))
+            mapped_error = _map_workflow_error(exc)
+            task_store.fail_task(
+                task_id,
+                mapped_error["message"],
+                error_code=mapped_error["error_code"],
+                error_type=mapped_error["error_type"],
+            )
             return JSONResponse(
                 {
-                    "code": 1,
-                    "message": f"workflow failed: {exc}",
+                    "code": mapped_error["error_code"],
+                    "message": mapped_error["message"],
                     "task_id": task_id,
+                    "error_type": mapped_error["error_type"],
+                    "error_message": mapped_error["message"],
+                    "error_detail": mapped_error["detail"],
                 },
                 status_code=500,
             )
@@ -439,6 +507,8 @@ def create_app(
                 "finished_at": task.get("finished_at"),
                 "progress": task.get("progress"),
                 "error_message": task.get("error_message"),
+                "error_code": task.get("error_code"),
+                "error_type": task.get("error_type"),
             }
         )
 
@@ -466,19 +536,23 @@ def create_app(
                     "finished_at": task.get("finished_at"),
                     "result": None,
                     "error_message": task.get("error_message"),
+                    "error_code": task.get("error_code"),
+                    "error_type": task.get("error_type"),
                 }
             )
 
         if status == "failed":
             return JSONResponse(
                 {
-                    "code": 1,
-                    "message": "workflow failed",
+                    "code": task.get("error_code") or 10020,
+                    "message": task.get("error_message") or "智能整定任务执行失败，请稍后重试。",
                     "task_id": task_id,
                     "status": status,
                     "finished_at": task.get("finished_at"),
                     "result": None,
                     "error_message": task.get("error_message"),
+                    "error_code": task.get("error_code"),
+                    "error_type": task.get("error_type"),
                 },
                 status_code=500,
             )
@@ -492,6 +566,8 @@ def create_app(
                 "finished_at": task.get("finished_at"),
                 "result": task.get("result"),
                 "error_message": task.get("error_message"),
+                "error_code": task.get("error_code"),
+                "error_type": task.get("error_type"),
             }
         )
 

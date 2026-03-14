@@ -31,6 +31,8 @@ class WorkflowTaskStore:
             },
             "result": None,
             "error_message": None,
+            "error_code": None,
+            "error_type": None,
         }
         with self._lock:
             self._tasks[task_id] = task
@@ -75,8 +77,17 @@ class WorkflowTaskStore:
             }
             task["result"] = result
             task["error_message"] = None
+            task["error_code"] = None
+            task["error_type"] = None
 
-    def fail_task(self, task_id: str, error_message: str) -> None:
+    def fail_task(
+        self,
+        task_id: str,
+        error_message: str,
+        *,
+        error_code: int | None = None,
+        error_type: str | None = None,
+    ) -> None:
         with self._lock:
             task = self._tasks[task_id]
             task["status"] = "failed"
@@ -87,6 +98,8 @@ class WorkflowTaskStore:
                 "percent": 100,
             }
             task["error_message"] = error_message
+            task["error_code"] = error_code
+            task["error_type"] = error_type
             task["result"] = None
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
