@@ -347,18 +347,12 @@
 
         <div v-if="dataSource === 'history'" class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
           <div class="flex items-start justify-between gap-3">
-            <div class="space-y-2">
-              <div class="text-sm font-semibold text-slate-700">历史数据参数</div>
-              <p class="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
-                未上传 CSV 时，将按下方历史参数获取数据；若参数留空，则使用默认值。
-              </p>
-            </div>
+            <div class="text-sm font-semibold text-slate-700">历史数据参数</div>
             <button
               type="button"
               @click="historyPanelCollapsed = !historyPanelCollapsed"
-              class="shrink-0 inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 transition-all"
+              class="shrink-0 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 transition-all"
             >
-              <span>{{ historyPanelCollapsed ? '展开参数' : '折叠参数' }}</span>
               <span>{{ historyPanelCollapsed ? '▼' : '▲' }}</span>
             </button>
           </div>
@@ -2697,7 +2691,7 @@ end_time: ${this.endTime || '1772553600000'}
             if (headerTitle) headerTitle.textContent = '历史数据参数';
 
             const note = historyPanel.querySelector('p.text-xs.text-amber-700');
-            if (note) note.textContent = '未上传 CSV 时，将按下方历史参数获取数据；若参数留空，则使用默认值。';
+            if (note) note.remove();
 
             const historyLabels = historyPanel.querySelectorAll('label.block.text-sm.font-semibold.text-slate-700.mb-2');
             if (historyLabels[1]) historyLabels[1].textContent = '开始时间';
@@ -2706,8 +2700,8 @@ end_time: ${this.endTime || '1772553600000'}
             const collapseButton = historyPanel.querySelector('button[type="button"]');
             if (collapseButton) {
               const spans = collapseButton.querySelectorAll('span');
-              if (spans[0]) spans[0].textContent = this.historyPanelCollapsed ? '展开参数' : '折叠参数';
-              if (spans[1]) spans[1].textContent = this.historyPanelCollapsed ? '▼' : '▲';
+              if (spans[0]) spans[0].textContent = this.historyPanelCollapsed ? '▼' : '▲';
+              if (spans[1]) spans[1].remove();
             }
           }
 
