@@ -38,8 +38,11 @@ def _inject_experience_tool(
         return tools
 
     selection_inputs = tune_result.get("selection_inputs") or {}
-    selected_model_params = tune_result.get("selected_model_params") or selection_inputs.get("selected_model_params") or {}
-    normalized_model_type = str(selection_inputs.get("model_type") or tune_result.get("model_type") or "").upper()
+    selected_model_params = (
+        tune_result.get("selected_model_params")
+        or selection_inputs.get("selected_model_params")
+        or {}
+    )
     experience_args = {
         "loop_type": selection_inputs.get("loop_type"),
         "model_type": selection_inputs.get("model_type"),
@@ -69,47 +72,25 @@ def _summarize_raw_model(model_type: str, model_params: Dict[str, Any]) -> str:
     normalized = (model_type or "FOPDT").upper()
     if normalized == "SOPDT":
         return (
-            f"\u539f\u59cb\u6a21\u578b\u53c2\u6570 K={_format_float(model_params.get('K'))}, "
+            f"原始模型参数 K={_format_float(model_params.get('K'))}, "
             f"T1={_format_float(model_params.get('T1'))}, "
             f"T2={_format_float(model_params.get('T2'))}, "
-            f"L={_format_float(model_params.get('L'))}\u3002"
+            f"L={_format_float(model_params.get('L'))}。"
         )
     if normalized == "FO":
         return (
-            f"\u539f\u59cb\u6a21\u578b\u53c2\u6570 K={_format_float(model_params.get('K'))}, "
-            f"T={_format_float(model_params.get('T'))}\u3002"
+            f"原始模型参数 K={_format_float(model_params.get('K'))}, "
+            f"T={_format_float(model_params.get('T'))}。"
         )
     if normalized == "IPDT":
         return (
-            f"\u539f\u59cb\u6a21\u578b\u53c2\u6570 K={_format_float(model_params.get('K'))}, "
-            f"L={_format_float(model_params.get('L'))}\u3002"
+            f"原始模型参数 K={_format_float(model_params.get('K'))}, "
+            f"L={_format_float(model_params.get('L'))}。"
         )
     return (
-        f"\u539f\u59cb\u6a21\u578b\u53c2\u6570 K={_format_float(model_params.get('K'))}, "
+        f"原始模型参数 K={_format_float(model_params.get('K'))}, "
         f"T={_format_float(model_params.get('T'))}, "
-        f"L={_format_float(model_params.get('L'))}\u3002"
-    )
-
-
-def _summarize_tuning_model(model_type: str, latest_result: Dict[str, Any]) -> str:
-    if model_type == "SOPDT":
-        return (
-            f"\u5f53\u524d\u6574\u5b9a\u9636\u6bb5\u91c7\u7528\u7684\u5de5\u4f5c\u6a21\u578b\u53c2\u6570\u4e3a K={_format_float(latest_result.get('K'))}, "
-            f"T={_format_float(latest_result.get('T'))}, L={_format_float(latest_result.get('L'))}\u3002"
-        )
-    if model_type == "IPDT":
-        return (
-            f"\u5f53\u524d\u6574\u5b9a\u9636\u6bb5\u91c7\u7528\u79ef\u5206\u8fc7\u7a0b\u5de5\u4f5c\u53c2\u6570 K={_format_float(latest_result.get('K'))}, "
-            f"L={_format_float(latest_result.get('L'))}\u3002"
-        )
-    if model_type == "FO":
-        return (
-            f"\u5f53\u524d\u6574\u5b9a\u9636\u6bb5\u91c7\u7528\u4e00\u9636\u5de5\u4f5c\u6a21\u578b\u53c2\u6570 K={_format_float(latest_result.get('K'))}, "
-            f"T={_format_float(latest_result.get('T'))}\u3002"
-        )
-    return (
-        f"\u5f53\u524d\u6574\u5b9a\u9636\u6bb5\u91c7\u7528\u5de5\u4f5c\u6a21\u578b\u53c2\u6570 K={_format_float(latest_result.get('K'))}, "
-        f"T={_format_float(latest_result.get('T'))}, L={_format_float(latest_result.get('L'))}\u3002"
+        f"L={_format_float(model_params.get('L'))}。"
     )
 
 
@@ -139,9 +120,9 @@ def build_agent_response(
         sampling_time = latest_result.get("sampling_time", 1.0)
         step_events = latest_result.get("step_events", [])
         return (
-            f"\u5df2\u5b8c\u6210\u6570\u636e\u52a0\u8f7d\u4e0e\u9884\u5904\u7406\uff0c\u5171\u83b7\u5f97 {points} \u4e2a\u6570\u636e\u70b9\uff0c"
-            f"\u5f53\u524d\u7528\u4e8e\u8fa8\u8bc6\u7684\u7a97\u53e3\u4e3a {window_points} \u70b9\uff0c\u91c7\u6837\u5468\u671f\u7ea6 {float(sampling_time):.2f} s\uff0c"
-            f"\u68c0\u6d4b\u5230 {len(step_events)} \u4e2a\u5019\u9009\u9636\u8dc3\u4e8b\u4ef6\u3002"
+            f"已完成数据加载与预处理，共获得 {points} 个数据点，"
+            f"当前用于辨识的窗口为 {window_points} 点，采样周期约 {float(sampling_time):.2f} s，"
+            f"检测到 {len(step_events)} 个候选阶跃事件。"
         )
 
     if agent_name == display_agent_names["system_id_expert"]:
@@ -149,56 +130,94 @@ def build_agent_response(
         selected_model_params = latest_result.get("selected_model_params", {}) or {}
         raw_model_summary = _summarize_raw_model(model_type, selected_model_params)
         quality_summary = (
-            f"\u6807\u51c6\u5316RMSE {_format_float(latest_result.get('normalized_rmse'), 3)}\uff0c"
-            f"R\u00b2 {_format_float(latest_result.get('r2_score'), 3)}\uff0c"
-            f"\u6a21\u578b\u7f6e\u4fe1\u5ea6 {_format_float(latest_result.get('confidence'), 2)}\u3002"
+            f"标准化RMSE {_format_float(latest_result.get('normalized_rmse'), 3)}，"
+            f"R² {_format_float(latest_result.get('r2_score'), 3)}，"
+            f"模型置信度 {_format_float(latest_result.get('confidence'), 2)}。"
         )
         selection_reason = latest_result.get("model_selection_reason") or latest_result.get("selection_reason") or ""
-        suffix = f" \u9009\u6a21\u4f9d\u636e\uff1a{selection_reason}\u3002" if selection_reason else ""
-        return f"{model_type} \u8fc7\u7a0b\u6a21\u578b\u8fa8\u8bc6\u5b8c\u6210\uff0c{raw_model_summary} {quality_summary}{suffix}"
+        suffix = f" 选模依据：{selection_reason}。" if selection_reason else ""
+        return f"{model_type} 过程模型辨识完成，{raw_model_summary} {quality_summary}{suffix}"
+
+    if agent_name == display_agent_names["knowledge_expert"]:
+        if latest_tool_name == "tool_query_expert_knowledge":
+            match_count = int(latest_result.get("matched_count") or 0)
+            preferred_strategy = latest_result.get("preferred_strategy") or "未形成明确偏好"
+            summary = latest_result.get("summary") or ""
+            risk_hints = latest_result.get("risk_hints") or []
+            matched_rules = latest_result.get("matched_rules") or []
+            constraints = latest_result.get("constraints") or []
+            message = f"已检索到 {match_count} 条专家规则，推荐优先策略为 {preferred_strategy}。"
+            if matched_rules:
+                message += f" 命中规则：{matched_rules[0].get('title', '')}"
+                if matched_rules[0].get("summary"):
+                    message += f"，{matched_rules[0].get('summary', '')}"
+            elif summary:
+                message += f" 规则摘要：{summary}"
+            if constraints:
+                message += f" 主要约束：{constraints[0].get('title', '')}"
+            if risk_hints:
+                message += f" 关注要点：{risk_hints[0]}"
+            return message
+        return "已完成专家规则知识检索。"
 
     if agent_name == display_agent_names["pid_expert"]:
         if latest_tool_name == "tool_search_experience":
             match_count = len(latest_result.get("matches") or [])
-            preferred_strategy = latest_result.get("preferred_strategy") or "\u672a\u5f62\u6210\u660e\u786e\u504f\u597d"
+            preferred_strategy = latest_result.get("preferred_strategy") or "未形成明确偏好"
             guidance_text = latest_result.get("guidance") or ""
-            message = f"\u5df2\u68c0\u7d22\u5230 {match_count} \u6761\u76f8\u4f3c\u56de\u8def\u7ecf\u9a8c\uff0c\u5386\u53f2\u504f\u597d\u7b56\u7565\u4e3a {preferred_strategy}\u3002"
+            message = f"已检索到 {match_count} 条相似回路经验，历史偏好策略为 {preferred_strategy}。"
             if guidance_text:
-                message += f" \u5386\u53f2\u7ecf\u9a8c\u53c2\u8003\uff1a{guidance_text}"
+                message += f" 历史经验参考：{guidance_text}"
             return message
         if latest_tool_name == "tool_tune_pid":
             strategy_used = latest_result.get("strategy_used", latest_result.get("strategy", ""))
             guidance = latest_result.get("experience_guidance") or {}
+            knowledge = latest_result.get("expert_knowledge_guidance") or {}
             guidance_text = guidance.get("guidance", "") if isinstance(guidance, dict) else ""
+            knowledge_text = knowledge.get("summary", "") if isinstance(knowledge, dict) else ""
+            knowledge_strategy = knowledge.get("preferred_strategy", "") if isinstance(knowledge, dict) else ""
+            knowledge_rules = knowledge.get("matched_rules", []) if isinstance(knowledge, dict) else []
+            knowledge_constraints = knowledge.get("constraints", []) if isinstance(knowledge, dict) else []
             response = (
-                f"\u5df2\u6309 {strategy_used} \u7b56\u7565\u5b8c\u6210\u6574\u5b9a\uff0c"
-                f"Kp={_format_float(latest_result.get('Kp'), 4)}\uff0c"
-                f"Ki={_format_float(latest_result.get('Ki'), 4)}\uff0c"
-                f"Kd={_format_float(latest_result.get('Kd'), 4)}\u3002"
-                f"\u7b56\u7565\u9009\u62e9\u4f9d\u636e\uff1a{latest_result.get('selection_reason', '')}\u3002"
+                f"已按 {strategy_used} 策略完成整定，"
+                f"Kp={_format_float(latest_result.get('Kp'), 4)}，"
+                f"Ki={_format_float(latest_result.get('Ki'), 4)}，"
+                f"Kd={_format_float(latest_result.get('Kd'), 4)}。"
+                f"策略选择依据：{latest_result.get('selection_reason', '')}。"
             )
+            if knowledge_rules:
+                top_rule = knowledge_rules[0]
+                response += f" 本体知识参考：{top_rule.get('title', '')}"
+                if top_rule.get("summary"):
+                    response += f"，{top_rule.get('summary', '')}"
+            elif knowledge_text:
+                response += f" 专家规则参考：{knowledge_text}"
+            if knowledge_strategy:
+                response += f" 专家偏好策略：{knowledge_strategy}。"
+            if knowledge_constraints:
+                response += f" 主要约束：{knowledge_constraints[0].get('title', '')}。"
             if guidance_text:
-                response += f" \u5386\u53f2\u7ecf\u9a8c\u53c2\u8003\uff1a{guidance_text}"
+                response += f" 历史经验参考：{guidance_text}"
             return response
-        return "PID \u53c2\u6570\u6574\u5b9a\u5b8c\u6210\u3002"
+        return "PID 参数整定完成。"
 
     if agent_name == display_agent_names["evaluation_expert"]:
         if latest_result.get("passed") is True:
             model_type = str(latest_result.get("model_type") or latest_result.get("evaluated_model_type") or "").upper()
-            model_hint = f"\uff0c\u8bc4\u4f30\u6a21\u578b\u7c7b\u578b {model_type}" if model_type else ""
+            model_hint = f"，评估模型类型 {model_type}" if model_type else ""
             return (
-                f"\u6027\u80fd\u8bc4\u5206 {_format_float(latest_result.get('performance_score'), 2)}\uff0c"
-                f"\u65b9\u6cd5\u7f6e\u4fe1\u5ea6 {_format_float(latest_result.get('method_confidence'), 3)}\uff0c"
-                f"\u6700\u7ec8\u8bc4\u5206 {_format_float(latest_result.get('final_rating'), 2)}{model_hint}\uff0cAPPROVE\u3002"
+                f"性能评分 {_format_float(latest_result.get('performance_score'), 2)}，"
+                f"方法置信度 {_format_float(latest_result.get('method_confidence'), 3)}，"
+                f"最终评分 {_format_float(latest_result.get('final_rating'), 2)}{model_hint}，APPROVE。"
             )
-        target_display = latest_result.get("feedback_target_display") or latest_result.get("feedback_target") or "\u540e\u7eed\u667a\u80fd\u4f53"
+        target_display = latest_result.get("feedback_target_display") or latest_result.get("feedback_target") or "后续智能体"
         model_type = str(latest_result.get("model_type") or latest_result.get("evaluated_model_type") or "").upper()
-        model_hint = f" \u5f53\u524d\u6309 {model_type} \u6a21\u578b\u5b8c\u6210\u95ed\u73af\u8bc4\u4f30\u3002" if model_type else ""
-        failure_reason = latest_result.get("failure_reason") or "\u672a\u77e5\u539f\u56e0"
+        model_hint = f" 当前按 {model_type} 模型完成闭环评估。" if model_type else ""
+        failure_reason = latest_result.get("failure_reason") or "未知原因"
         feedback_action = latest_result.get("feedback_action", "")
         return (
-            f"\u9996\u6b21\u8bc4\u4f30\u672a\u901a\u8fc7\uff0c\u4e3b\u56e0\uff1a{failure_reason}\u3002"
-            f"\u5efa\u8bae\u4e0b\u4e00\u6b65\u56de\u6d41\u7ed9 {target_display}\uff0c{feedback_action}\u3002{model_hint}"
+            f"首次评估未通过，主因：{failure_reason}。"
+            f"建议下一步回流给 {target_display}，{feedback_action}。{model_hint}"
         )
 
     return ""
@@ -241,7 +260,7 @@ def finalize_agent_turn(
         current_turn_data["response"] = generated or existing_response
         return current_turn_data
 
-    if not existing_response or existing_response in {"\u5b8c\u6210", "APPROVE"}:
+    if not existing_response or existing_response in {"完成", "APPROVE"}:
         current_turn_data["response"] = generated or existing_response
     elif generated and len(existing_response) < 12:
         current_turn_data["response"] = f"{existing_response}\n{generated}"
@@ -297,9 +316,9 @@ def build_feedback_turns(
                     }
                 ],
                 "response": (
-                    "\u6839\u636e\u9996\u6b21\u8bc4\u4f30\u53cd\u9988\uff0c\u5df2\u81ea\u52a8\u56de\u6d41 PID \u4e13\u5bb6\u7ee7\u7eed\u7ec6\u8c03\u53c2\u6570\u3002\n"
-                    f"\u5c06 final_rating \u4ece {float(auto_refine_result.get('base_final_rating', 0.0)):.2f} "
-                    f"\u63d0\u5347\u5230 {float(auto_refine_result.get('refined_final_rating', 0.0)):.2f}\u3002"
+                    "根据首次评估反馈，已自动回流 PID 专家继续细调参数。\n"
+                    f"将 final_rating 从 {float(auto_refine_result.get('base_final_rating', 0.0)):.2f} "
+                    f"提升到 {float(auto_refine_result.get('refined_final_rating', 0.0)):.2f}。"
                 ),
             }
         )
@@ -318,8 +337,8 @@ def build_feedback_turns(
                     }
                 ],
                 "response": (
-                    "\u57fa\u4e8e\u8bc4\u4f30\u53cd\u9988\uff0c\u7cfb\u7edf\u5df2\u81ea\u52a8\u5207\u6362\u5230\u5176\u4ed6\u5019\u9009\u8fa8\u8bc6\u7a97\u53e3\u5e76\u91cd\u65b0\u8fa8\u8bc6\u6a21\u578b\u3002\n"
-                    f"\u5f53\u524d\u91c7\u7528\u7a97\u53e3\u6765\u6e90\uff1a{model_retry_result.get('selected_window_source', '')}\u3002"
+                    "基于评估反馈，系统已自动切换到其他候选辨识窗口并重新辨识模型。\n"
+                    f"当前采用窗口来源：{model_retry_result.get('selected_window_source', '')}。"
                 ),
             }
         )

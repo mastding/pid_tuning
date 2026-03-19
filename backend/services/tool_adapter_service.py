@@ -5,6 +5,14 @@ import json
 from typing import Any, Callable, Dict, Mapping
 
 from memory.experience_service import retrieve_experience_guidance
+from services.identification_service import sanitize_selected_model_params
+from services.knowledge_graph_service import (
+    build_knowledge_context,
+    compact_knowledge_guidance,
+    merge_knowledge_guidance,
+    query_knowledge_graph_api,
+    search_distillation_rules,
+)
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -30,6 +38,13 @@ def _coerce_model_params(value: Any) -> Dict[str, Any]:
                 return {}
         return dict(parsed) if isinstance(parsed, dict) else {}
     return {}
+
+
+def _sanitize_selected_model_params(model_type: str, value: Any) -> Dict[str, Any]:
+    params = _coerce_model_params(value)
+    if not params:
+        return {}
+    return sanitize_selected_model_params(model_type or str(params.get("model_type", "")), params)
 
 
 def fetch_history_data_tool(
@@ -125,7 +140,10 @@ def fit_fopdt_tool(
     fit_preview = identification["fit_preview"]
     selected_window_payload = identification["selected_window"]
     selected_model_type = identification.get("selected_model_type", "FOPDT")
-    selected_model_params = identification.get("selected_model_params", best_model_params)
+    selected_model_params = sanitize_selected_model_params(
+        identification.get("selected_model_type", "FOPDT"),
+        identification.get("selected_model_params", best_model_params),
+    )
     tuning_model = identification.get("tuning_model", best_model_params)
     selection_reason = identification.get("selection_reason", "")
 
@@ -211,7 +229,10 @@ def tune_pid_tool(
     session_model_type = str(session_store.get("model_type", "FOPDT"))
     incoming_model_type = str(model_type or "").upper()
     model_type = session_model_type if incoming_model_type in {"", "AUTO"} else incoming_model_type
-    selected_model_params = _coerce_model_params(selected_model_params) or dict(session_store.get("selected_model_params") or {})
+    selected_model_params = _sanitize_selected_model_params(model_type, selected_model_params) or _sanitize_selected_model_params(
+        session_store.get("model_type", model_type),
+        session_store.get("selected_model_params") or {},
+    )
     tuning_model = dict(session_store.get("tuning_model") or {})
     normalized_model_type = str(model_type).upper()
     if normalized_model_type == "SOPDT":
@@ -233,6 +254,12 @@ def tune_pid_tool(
         active_T = _safe_float(selected_model_params.get("T"), _safe_float(tuning_model.get("T"), _safe_float(T, 1.0)))
         active_L = _safe_float(selected_model_params.get("L"), _safe_float(tuning_model.get("L"), _safe_float(L)))
 
+    knowledge_guidance_full = dict(session_store.get("expert_knowledge_guidance_full") or session_store.get("expert_knowledge_guidance") or {})
+    knowledge_guidance = compact_knowledge_guidance(knowledge_guidance_full)
+    knowledge_preferred_strategy = str(knowledge_guidance.get("preferred_strategy") or "").upper()
+    knowledge_summary = str(knowledge_guidance.get("summary") or "").strip()
+    knowledge_rule_count = int(knowledge_guidance.get("matched_count") or 0)
+
     experience_guidance = retrieve_experience_guidance(
         loop_type=loop_type,
         model_type=model_type,
@@ -243,6 +270,24 @@ def tune_pid_tool(
         limit=3,
         candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
     )
+    if knowledge_preferred_strategy:
+        experience_guidance = {
+            **experience_guidance,
+            "preferred_strategy": knowledge_preferred_strategy,
+            "guidance": "；".join(
+                part
+                for part in [
+                    str(experience_guidance.get("guidance") or "").strip(),
+                    knowledge_summary,
+                ]
+                if part
+            ),
+            "summary": {
+                **dict(experience_guidance.get("summary") or {}),
+                "preferred_strategy": knowledge_preferred_strategy,
+                "preferred_model_type": model_type,
+            },
+        }
     selection = select_best_pid_strategy_fn(
         K=active_K,
         T=active_T,
@@ -255,6 +300,7 @@ def tune_pid_tool(
         r2_score=selected_model["r2_score"],
         dt=float(session_store.get("dt", 1.0)),
         experience_guidance=experience_guidance,
+        knowledge_guidance=knowledge_guidance_full,
     )
     best_candidate = selection["best_candidate"]
     pid_params = selection["pid_params"]
@@ -266,6 +312,15 @@ def tune_pid_tool(
     session_store["selection_reason"] = selection["selection_reason"]
     session_store["selection_inputs"] = selection["selection_inputs"]
     session_store["experience_guidance"] = selection.get("experience_guidance", experience_guidance)
+    session_store["expert_knowledge_guidance_full"] = knowledge_guidance_full
+    session_store["expert_knowledge_guidance"] = knowledge_guidance
+    selection_inputs = session_store["selection_inputs"]
+    if isinstance(selection_inputs, dict):
+        selection_inputs["knowledge_preferred_strategy"] = knowledge_preferred_strategy
+        selection_inputs["knowledge_rule_count"] = knowledge_rule_count
+        selection_inputs["knowledge_summary"] = knowledge_summary
+        selection_inputs["knowledge_risk_hints"] = list(knowledge_guidance.get("risk_hints") or [])
+        selection_inputs["knowledge_constraints"] = list(knowledge_guidance.get("constraints") or [])
     session_store["selected_pid_params"] = {
         "Kp": float(pid_params["Kp"]),
         "Ki": float(pid_params["Ki"]),
@@ -291,10 +346,76 @@ def tune_pid_tool(
         "selection_reason": session_store["selection_reason"],
         "selection_inputs": session_store["selection_inputs"],
         "experience_guidance": session_store.get("experience_guidance", {}),
+        "expert_knowledge_guidance": knowledge_guidance,
         "selected_model_params": selected_model_params,
         "candidate_strategies": public_candidate_results,
         "description": str(pid_params["description"]),
     }
+
+
+def query_expert_knowledge_tool(
+    *,
+    session_store: Mapping[str, Any] | dict[str, Any],
+    loop_type: str,
+    loop_name: str = "",
+    plant_type: str = "",
+    scenario: str = "",
+    control_object: str = "",
+    tower_section: str = "",
+    control_target: str = "",
+    graph_id: str = "",
+    graph_api_url: str = "",
+    query_mode: str = "local",
+    response_type: str = "要点式，尽量精炼",
+    include_context: bool = True,
+) -> Dict[str, Any]:
+    selected_model_params = _sanitize_selected_model_params(
+        session_store.get("model_type", "FOPDT"),
+        session_store.get("selected_model_params") or {},
+    )
+    context = build_knowledge_context(
+        {
+            "plant_type": plant_type or session_store.get("plant_type", "distillation_column"),
+            "scenario": scenario or session_store.get("scenario", ""),
+            "loop_type": loop_type or session_store.get("loop_type", "unknown"),
+            "loop_name": loop_name or session_store.get("loop_name", ""),
+            "control_object": control_object or session_store.get("control_object", ""),
+            "tower_section": tower_section,
+            "control_target": control_target,
+            "model_type": session_store.get("model_type", ""),
+            "selected_model_params": selected_model_params,
+            "window_readiness": session_store.get("window_readiness", ""),
+            "identification_reliability": session_store.get("identification_reliability", ""),
+            "cross_window_consistency": session_store.get("cross_window_consistency", ""),
+            "risk_tags": session_store.get("risk_tags") or [],
+        }
+    )
+    local_guidance = search_distillation_rules(context)
+
+    graph_guidance: Dict[str, Any] = {"answers": [], "graph_hints": [], "graph_summary": ""}
+    if graph_api_url and graph_id:
+        try:
+            graph_guidance = query_knowledge_graph_api(
+                base_url=graph_api_url,
+                graph_id=graph_id,
+                context=context,
+                query_mode=query_mode,
+                response_type=response_type,
+                include_context=include_context,
+            )
+        except Exception as exc:
+            graph_guidance = {
+                "answers": [],
+                "graph_hints": [],
+                "graph_summary": f"知识图谱调用失败：{exc}",
+            }
+
+    merged = merge_knowledge_guidance(local_guidance=local_guidance, graph_guidance=graph_guidance)
+    compact = compact_knowledge_guidance(merged)
+    session_store["expert_knowledge_guidance_full"] = merged
+    session_store["expert_knowledge_guidance"] = compact
+    session_store["knowledge_questions"] = compact.get("questions", [])
+    return compact
 
 
 def evaluate_pid_tool(
@@ -323,7 +444,10 @@ def evaluate_pid_tool(
     session_model_type = str(session_store.get("model_type", "FOPDT"))
     incoming_model_type = str(model_type or "").upper()
     active_model_type = session_model_type if incoming_model_type in {"", "AUTO"} else incoming_model_type
-    selected_model_params = _coerce_model_params(selected_model_params) or dict(session_store.get("selected_model_params") or {})
+    selected_model_params = _sanitize_selected_model_params(model_type, selected_model_params) or _sanitize_selected_model_params(
+        session_store.get("model_type", model_type),
+        session_store.get("selected_model_params") or {},
+    )
     selected_pid_params = session_store.get("selected_pid_params") or {}
     selected_pid_evaluation = session_store.get("selected_pid_evaluation")
     auto_refine_result = None

@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import requests
+from requests import RequestException
 from scipy import signal
 from scipy.interpolate import interp1d
 
@@ -97,8 +98,24 @@ def fetch_history_data_csv(
         "data_type": normalized_data_type,
     }
 
-    response = requests.get(HISTORY_DATA_EXPORT_URL, params=params, timeout=timeout)
-    response.raise_for_status()
+    try:
+        response = requests.get(HISTORY_DATA_EXPORT_URL, params=params, timeout=timeout)
+        response.raise_for_status()
+    except RequestException as exc:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", "")
+        preview = ""
+        if response is not None:
+            try:
+                preview = (response.text or "")[:300]
+            except Exception:
+                preview = ""
+        detail = f"上游历史数据接口调用失败"
+        if status_code:
+            detail += f"（HTTP {status_code}）"
+        if preview:
+            detail += f"；响应摘要：{preview}"
+        raise ValueError(detail) from exc
 
     content_type = response.headers.get("Content-Type", "")
     if "text/csv" not in content_type and "application/octet-stream" not in content_type:

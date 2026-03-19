@@ -19,17 +19,51 @@ from backend.services.identification_service import (
     derive_model_reason_codes,
     derive_next_actions,
     fit_best_fopdt_window,
+    sanitize_selected_model_params,
 )
 from backend.services.pid_evaluation_service import build_initial_assessment, diagnose_evaluation_failure, evaluate_pid_model
 from backend.services.pid_tuning_service import benchmark_pid_strategies, refine_pid_for_performance, select_best_pid_strategy
-from backend.services.tool_adapter_service import tune_pid_tool
+from backend.services.knowledge_graph_service import (
+    build_knowledge_questions,
+    merge_knowledge_guidance,
+    search_distillation_rules,
+)
+from backend.services.tool_adapter_service import query_expert_knowledge_tool, tune_pid_tool
 from backend.skills.pid_tuning_skills import apply_tuning_rules, select_tuning_strategy
 from backend.memory import experience_store
 from backend.memory.experience_service import build_experience_record, retrieve_experience_guidance
+from backend.orchestration.event_mapper import build_agent_response
 from backend.orchestration.workflow_runner import run_multi_agent_collaboration
 
 
 class ServiceRefactorSmokeTests(unittest.TestCase):
+    def test_sanitize_selected_model_params_keeps_only_raw_sopdt_fields(self) -> None:
+        sanitized = sanitize_selected_model_params(
+            "SOPDT",
+            {
+                "model_type": "SOPDT",
+                "K": 0.4443555707572579,
+                "T1": 1.0,
+                "T2": 1.0,
+                "L": 0.0,
+                "success": True,
+                "message": "CONVERGENCE",
+                "normalized_rmse": 0.06,
+                "raw_rmse": 0.07,
+                "r2_score": 0.99,
+            },
+        )
+        self.assertEqual(
+            sanitized,
+            {
+                "model_type": "SOPDT",
+                "K": 0.4443555707572579,
+                "T1": 1.0,
+                "T2": 1.0,
+                "L": 0.0,
+            },
+        )
+
     def test_build_window_overview_marks_selected_region(self) -> None:
         df = pd.DataFrame(
             {
@@ -196,7 +230,7 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
                         "Td": 0.0,
                         "strategy": "IMC",
                         "description": "test",
-                    }
+                    },
                 }
 
                 async def fake_iter():
@@ -205,6 +239,9 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
                         csv_path="demo.csv",
                         loop_name="FIC_101A",
                         loop_type="flow",
+                        plant_type="distillation_column",
+                        scenario="steady_operation",
+                        control_object="reflux_flow",
                         loop_uri="/pid/demo",
                         start_time="1",
                         end_time="2",
@@ -236,6 +273,8 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
         self.assertEqual(events[-2]["type"], "result")
         self.assertEqual(events[-1]["type"], "done")
         self.assertEqual(events[-2]["data"]["memory"]["experienceId"], "exp_test")
+        self.assertIn("knowledge", events[-2]["data"])
+        self.assertIn("guidance", events[-2]["data"]["knowledge"])
 
     def test_experience_guidance_prefers_successful_similar_strategy(self) -> None:
         old_root = experience_store.MEMORY_ROOT
@@ -426,6 +465,37 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
             experience_store.INDEX_FILE = old_index
             gc.collect()
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_merge_knowledge_guidance_filters_unhelpful_graph_summary(self) -> None:
+        merged = merge_knowledge_guidance(
+            local_guidance={
+                "matched_rules": [
+                    {
+                        "rule_id": "RULE-1",
+                        "knowledge_type": "rule",
+                        "title": "塔顶温度回路应优先保守整定",
+                        "summary": "塔顶温度回路宜优先采用保守参数，避免强积分。",
+                        "preferred_strategy": ["LAMBDA"],
+                        "discouraged_strategy": [],
+                        "suggested_actions": ["reduce_ki"],
+                        "recommendation_level": "cautious",
+                    }
+                ],
+                "preferred_strategy": "LAMBDA",
+                "risk_hints": ["避免强积分"],
+                "summary": "塔顶温度回路宜优先采用保守参数，避免强积分。",
+                "questions": ["精馏塔塔顶温度在稳态生产和SOPDT模型下的整定策略有哪些？"],
+                "knowledge_context": {},
+            },
+            graph_guidance={
+                "graph_summary": "根据提供的数据，关于精馏塔流量回路在特定工况和SOPDT模型下的整定策略，没有直接可用的信息。",
+                "graph_hints": [
+                    "根据提供的数据，关于精馏塔流量回路在特定工况和SOPDT模型下的整定策略，没有直接可用的信息。"
+                ],
+                "answers": [],
+            },
+        )
+        self.assertEqual(merged["summary"], "塔顶温度回路宜优先采用保守参数，避免强积分。")
 
     def test_clear_experience_store_removes_records(self) -> None:
         old_root = experience_store.MEMORY_ROOT
@@ -883,6 +953,193 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
             experience_store.INDEX_FILE = old_index
             gc.collect()
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class _KnowledgeGraphServiceSmokeTestsOld:
+    def test_build_knowledge_questions_uses_loop_model_and_risk_context(self) -> None:
+        questions = build_knowledge_questions(
+            {
+                "loop_type": "temperature",
+                "model_type": "SOPDT",
+                "tower_section": "top",
+                "risk_tags": ["high_noise_risk", "window_not_ready"],
+            }
+        )
+        self.assertGreaterEqual(len(questions), 3)
+        self.assertTrue(any("精馏塔的温度回路" in item for item in questions))
+        self.assertTrue(any("SOPDT" in item for item in questions))
+        self.assertTrue(any("噪声偏高" in item or "窗口可整定性不足" in item for item in questions))
+
+    def test_search_distillation_rules_matches_temperature_sopdt_context(self) -> None:
+        result = search_distillation_rules(
+            {
+                "loop_type": "temperature",
+                "model_type": "SOPDT",
+                "control_target": "top_temperature",
+                "risk_tags": ["high_noise_risk"],
+            }
+        )
+        self.assertTrue(result["matched"])
+        self.assertGreaterEqual(result["matched_count"], 1)
+        self.assertIn("questions", result)
+        self.assertTrue(result["summary"])
+        top_titles = [item["title"] for item in result["matched_rules"][:3]]
+        self.assertTrue(any("温度" in title or "SOPDT" in title for title in top_titles))
+
+
+class KnowledgeGraphServiceSmokeTests(unittest.TestCase):
+    def test_build_knowledge_questions_uses_loop_model_and_risk_context(self) -> None:
+        questions = build_knowledge_questions(
+            {
+                "loop_type": "temperature",
+                "model_type": "SOPDT",
+                "tower_section": "top",
+                "risk_tags": ["high_noise_risk", "window_not_ready"],
+            }
+        )
+        self.assertGreaterEqual(len(questions), 3)
+        self.assertTrue(any("精馏塔的温度回路" in item for item in questions))
+        self.assertTrue(any("SOPDT" in item for item in questions))
+        self.assertTrue(any("噪声偏高" in item or "窗口可整定性不足" in item for item in questions))
+
+    def test_search_distillation_rules_matches_temperature_sopdt_context(self) -> None:
+        result = search_distillation_rules(
+            {
+                "loop_type": "temperature",
+                "model_type": "SOPDT",
+                "control_target": "top_temperature",
+                "risk_tags": ["high_noise_risk"],
+            }
+        )
+        self.assertTrue(result["matched"])
+        self.assertGreaterEqual(result["matched_count"], 1)
+        self.assertIn("questions", result)
+        self.assertTrue(result["summary"])
+        top_titles = [item["title"] for item in result["matched_rules"][:3]]
+        self.assertTrue(any("温度" in title or "SOPDT" in title for title in top_titles))
+
+    def test_build_knowledge_questions_prefers_specific_flow_objects(self) -> None:
+        questions = build_knowledge_questions(
+            {
+                "plant_type": "vacuum_column",
+                "scenario": "load_change",
+                "control_object": "steam_flow",
+                "loop_type": "flow",
+                "model_type": "FOPDT",
+            }
+        )
+        self.assertGreaterEqual(len(questions), 2)
+        self.assertIn("减压塔的蒸汽流量在变负荷和FOPDT模型下的整定策略有哪些？", questions)
+        self.assertIn("减压塔的蒸汽流量在变负荷下的PID整定有哪些规则？", questions)
+
+    def test_query_expert_knowledge_tool_returns_constraints_and_tuning_bias(self) -> None:
+        session_store = {
+            "loop_name": "FIC101",
+            "loop_type": "flow",
+            "model_type": "FOPDT",
+            "selected_model_params": {"model_type": "FOPDT", "K": 1.0, "T": 5.0, "L": 1.0},
+            "plant_type": "distillation_column",
+            "scenario": "load_change",
+            "control_object": "steam_flow",
+        }
+        result = query_expert_knowledge_tool(
+            session_store=session_store,
+            loop_type="flow",
+            loop_name="FIC101",
+            plant_type="distillation_column",
+            scenario="load_change",
+            control_object="steam_flow",
+        )
+        self.assertTrue(result["matched"])
+        self.assertTrue(result["constraints"])
+        self.assertIn("tuning_bias", result)
+        self.assertIn("preferred_strategy", result["tuning_bias"])
+        self.assertIn("kp_scale_max", result["tuning_bias"])
+        self.assertIn("kd_scale_max", result["tuning_bias"])
+
+    def test_query_expert_knowledge_tool_stores_guidance_in_session(self) -> None:
+        session_store = {
+            "loop_name": "TIC101",
+            "loop_type": "temperature",
+            "model_type": "SOPDT",
+            "selected_model_params": {"model_type": "SOPDT", "K": 0.8, "T1": 12.0, "T2": 18.0, "L": 2.0},
+            "window_readiness": "review",
+            "risk_tags": ["high_noise_risk"],
+        }
+        result = query_expert_knowledge_tool(
+            session_store=session_store,
+            loop_type="temperature",
+            loop_name="TIC101",
+            tower_section="top",
+            control_target="top_temperature",
+        )
+        self.assertTrue(result["matched"])
+        self.assertIn("expert_knowledge_guidance", session_store)
+        self.assertTrue(result["questions"])
+        self.assertTrue(result["summary"])
+
+    def test_select_best_pid_strategy_applies_knowledge_bias_to_strategy_and_pid(self) -> None:
+        base_kwargs = {
+            "K": 1.0,
+            "T": 5.0,
+            "L": 1.0,
+            "loop_type": "flow",
+            "model_type": "FOPDT",
+            "selected_model_params": {"model_type": "FOPDT", "K": 1.0, "T": 5.0, "L": 1.0},
+            "confidence_score": 0.95,
+            "normalized_rmse": 0.03,
+            "r2_score": 0.99,
+            "dt": 1.0,
+            "experience_guidance": {},
+        }
+        plain = select_best_pid_strategy(**base_kwargs)
+        guided = select_best_pid_strategy(
+            **base_kwargs,
+            knowledge_guidance={
+                "summary": "命中约束规则，建议采用保守策略。",
+                "risk_hints": ["优先保守整定"],
+                "constraints": [{"rule_id": "C-1", "title": "不要激进", "summary": "保守整定"}],
+                "tuning_bias": {
+                    "preferred_strategy": "LAMBDA",
+                    "avoid_aggressive_strategies": True,
+                    "conservative_mode": True,
+                    "kp_scale_max": 0.8,
+                    "ki_scale_max": 0.85,
+                    "kd_scale_max": 0.25,
+                    "discourage_derivative": True,
+                },
+            },
+        )
+        self.assertEqual(guided["best_candidate"]["strategy"], "LAMBDA")
+        self.assertLess(guided["pid_params"]["Kp"], plain["pid_params"]["Kp"])
+        self.assertLess(guided["pid_params"]["Ki"], plain["pid_params"]["Ki"])
+        self.assertEqual(guided["pid_params"]["Kd"], 0.0)
+        self.assertTrue(guided["knowledge_constraints_applied"])
+
+    def test_knowledge_expert_response_can_summarize_expert_knowledge_tool(self) -> None:
+        response = build_agent_response(
+            "本体知识智能体",
+            [
+                {
+                    "tool_name": "tool_query_expert_knowledge",
+                    "result": {
+                        "matched_count": 2,
+                        "preferred_strategy": "LAMBDA",
+                        "summary": "命中 2 条精馏塔专家规则。",
+                        "risk_hints": ["塔顶温度回路应避免过强积分。"],
+                    },
+                }
+            ],
+            display_agent_names={
+                "data_analyst": "数据分析智能体",
+                "system_id_expert": "系统辨识智能体",
+                "knowledge_expert": "本体知识智能体",
+                "pid_expert": "PID专家智能体",
+                "evaluation_expert": "评估智能体",
+            },
+        )
+        self.assertIn("专家规则", response)
+        self.assertIn("LAMBDA", response)
 
 
 if __name__ == "__main__":

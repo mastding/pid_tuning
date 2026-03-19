@@ -21,6 +21,7 @@
 
     .agent-border-blue { border-left: 4px solid #3b82f6; }
     .agent-border-green { border-left: 4px solid #10b981; }
+    .agent-border-cyan { border-left: 4px solid #06b6d4; }
     .agent-border-purple { border-left: 4px solid #8b5cf6; }
     .agent-border-orange { border-left: 4px solid #f59e0b; }
 
@@ -176,6 +177,216 @@
                 class="help-doc prose prose-slate max-w-none prose-headings:text-slate-900 prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-slate-900 prose-code:text-indigo-700"
                 v-html="helpCenterHtml"
               ></article>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="dataAnalysisExplainOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 md:p-6">
+      <div class="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900">辨识窗口说明</h2>
+            <p class="mt-1 text-sm text-slate-500">展示当前用于辨识的窗口范围，以及本次检测到的候选阶跃事件，便于解释为什么选择这段数据进入后续辨识。</p>
+          </div>
+          <button
+            @click="closeDataAnalysisExplain"
+            class="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div class="overflow-y-auto p-6 custom-scrollbar">
+          <div v-if="selectedDataAnalysisExplain" class="space-y-5">
+            <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-blue-800">
+                <span>🔎</span><span>当前辨识窗口</span>
+              </div>
+              <div class="grid gap-3 md:grid-cols-2">
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-blue-100">
+                  <div class="text-xs font-semibold text-slate-500">窗口时间范围</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedDataAnalysisExplain.windowTimeRange }}</div>
+                </div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-blue-100">
+                  <div class="text-xs font-semibold text-slate-500">辨识窗口索引范围</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedDataAnalysisExplain.windowIndexRange }}</div>
+                </div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-blue-100">
+                  <div class="text-xs font-semibold text-slate-500">窗口点数</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedDataAnalysisExplain.windowRows }}</div>
+                </div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-blue-100">
+                  <div class="text-xs font-semibold text-slate-500">触发事件</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedDataAnalysisExplain.triggerEventLabel }}</div>
+                </div>
+              </div>
+              <div class="mt-3 rounded-xl border border-blue-100 bg-white px-4 py-3">
+                <div class="text-xs font-semibold text-slate-500">选中原因</div>
+                <div class="mt-1 text-sm leading-relaxed text-slate-700">{{ selectedDataAnalysisExplain.selectionReason }}</div>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <span>📊</span><span>候选阶跃事件（{{ selectedDataAnalysisExplain.stepEvents.length }}）</span>
+                </div>
+                  <div class="text-xs text-slate-500">这些事件是系统先检测到的候选阶跃；系统会再围绕事件向前、向后扩展，形成最终用于辨识的窗口。</div>
+              </div>
+
+              <div v-if="selectedDataAnalysisExplain.stepEvents.length" class="space-y-3">
+                <div
+                  v-for="event in selectedDataAnalysisExplain.stepEvents"
+                  :key="event.order"
+                  class="rounded-xl border px-4 py-3 shadow-sm"
+                  :class="event.isSelected ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white'"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-bold text-slate-800">候选事件 #{{ event.order }}</span>
+                      <span class="rounded-full px-2.5 py-1 text-xs font-semibold"
+                        :class="event.isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'">
+                        {{ event.isSelected ? '当前选中' : event.typeLabel }}
+                      </span>
+                    </div>
+                    <div class="text-xs text-slate-500">{{ event.timeRange }}</div>
+                  </div>
+                  <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">事件类型</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ event.typeLabel }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">候选事件索引范围</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ event.indexRange }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">阶跃幅值</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ event.amplitude }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">SV变化</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ event.svChange }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-else class="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-5 text-sm text-slate-500">
+                当前结果里没有可展示的候选阶跃事件明细。
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="identificationExplainOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 md:p-6">
+      <div class="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900">辨识过程详情</h2>
+            <p class="mt-1 text-sm text-slate-500">展示本次系统辨识尝试过的模型、选模依据，以及当前参数是如何从候选拟合结果中确定下来的。</p>
+          </div>
+          <button
+            @click="closeIdentificationExplain"
+            class="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div class="overflow-y-auto p-6 custom-scrollbar">
+          <div v-if="selectedIdentificationExplain" class="space-y-5">
+            <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-800">
+                <span>🧠</span><span>当前选中的辨识结果</span>
+              </div>
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-emerald-100">
+                  <div class="text-xs font-semibold text-slate-500">选中模型类型</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedIdentificationExplain.modelType }}</div>
+                </div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-emerald-100">
+                  <div class="text-xs font-semibold text-slate-500">原始模型参数</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedIdentificationExplain.modelParamsSummary }}</div>
+                </div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-emerald-100">
+                  <div class="text-xs font-semibold text-slate-500">窗口来源</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedIdentificationExplain.windowSource }}</div>
+                </div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-emerald-100">
+                  <div class="text-xs font-semibold text-slate-500">模型置信度</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedIdentificationExplain.confidence }}</div>
+                </div>
+              </div>
+              <div class="mt-3 rounded-xl border border-emerald-100 bg-white px-4 py-3">
+                <div class="text-xs font-semibold text-slate-500">选模依据</div>
+                <div class="mt-1 text-sm leading-relaxed text-slate-700">{{ selectedIdentificationExplain.selectionReason }}</div>
+              </div>
+              <div class="mt-3 rounded-xl border border-emerald-100 bg-white px-4 py-3">
+                <div class="text-xs font-semibold text-slate-500">如何确定这些参数</div>
+                <div class="mt-1 text-sm leading-relaxed text-slate-700">{{ selectedIdentificationExplain.parameterExplanation }}</div>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <span>📚</span><span>候选模型比较（{{ selectedIdentificationExplain.attempts.length }}）</span>
+                </div>
+                <div class="text-xs text-slate-500">系统会在候选窗口上依次拟合多种模型，并综合性能评分和置信度选择最终模型。</div>
+              </div>
+              <div class="space-y-3">
+                <div
+                  v-for="attempt in selectedIdentificationExplain.attempts"
+                  :key="`${attempt.windowSource}-${attempt.modelType}-${attempt.rank}`"
+                  class="rounded-xl border px-4 py-3 shadow-sm"
+                  :class="attempt.isSelected ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white'"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-bold text-slate-800">候选 #{{ attempt.rank }}</span>
+                      <span class="rounded-full px-2.5 py-1 text-xs font-semibold"
+                        :class="attempt.isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'">
+                        {{ attempt.isSelected ? '当前选中' : attempt.modelType }}
+                      </span>
+                    </div>
+                    <div class="text-xs text-slate-500">{{ attempt.windowSource }}</div>
+                  </div>
+                  <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">模型类型</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.modelType }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">窗口点数</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.points }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">标准化RMSE</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.normalizedRmse }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">R²</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.r2 }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">置信度</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.confidence }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">候选评分</div>
+                      <div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.performance }}</div>
+                    </div>
+                  </div>
+                  <div class="mt-3 text-xs leading-relaxed text-slate-600">
+                    {{ attempt.explanation }}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -408,7 +619,54 @@
             <option value="pressure">压力</option>
             <option value="level">液位</option>
           </select>
-          <p class="mt-2 text-xs text-slate-500">整定方法将由后端根据回路类型、模型质量和数据情况自动选择。</p>
+        </div>
+
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">工况</label>
+          <select v-model="scenario" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+            <option value="startup">开车</option>
+            <option value="shutdown">停车</option>
+            <option value="steady_operation">稳态生产</option>
+            <option value="load_change">变负荷</option>
+            <option value="product_switch">切产品</option>
+            <option value="feed_switch">原料切换</option>
+            <option value="tower_pressure_fluctuation">塔压波动</option>
+            <option value="reflux_fluctuation">回流波动</option>
+            <option value="steam_fluctuation">蒸汽波动</option>
+            <option value="analyzer_maintenance">分析仪维护</option>
+            <option value="low_load">低负荷</option>
+            <option value="full_load">满负荷</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">装置类型</label>
+          <select v-model="plantType" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+            <option value="distillation_column">精馏塔</option>
+            <option value="atmospheric_column">常压塔</option>
+            <option value="vacuum_column">减压塔</option>
+            <option value="side_draw_column">侧线抽出塔</option>
+            <option value="reboiler">再沸器</option>
+            <option value="condenser">冷凝器</option>
+            <option value="reflux_system">回流系统</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">控制对象</label>
+          <select v-model="controlObject" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+            <option value="top_temperature">塔顶温度</option>
+            <option value="middle_temperature">塔中温度</option>
+            <option value="bottom_temperature">塔釜温度</option>
+            <option value="tower_pressure">塔压</option>
+            <option value="reflux_flow">回流流量</option>
+            <option value="steam_flow">蒸汽流量</option>
+            <option value="feed_flow">进料流量</option>
+            <option value="cooling_flow">冷却流量</option>
+            <option value="side_draw_flow">侧线抽出流量</option>
+            <option value="level">液位</option>
+            <option value="composition">产品组成</option>
+          </select>
         </div>
 
         <button @click="startTuning" :disabled="loading"
@@ -1026,13 +1284,13 @@
 
         <div v-if="currentPage === 'tuning' && messages.length === 0" class="text-center py-16">
           <div class="w-24 h-24 bg-gradient-to-br from-blue-500 to-purple-600 rounded-3xl flex items-center justify-center text-5xl mx-auto mb-6 shadow-2xl">
-            🤖
+            🎛️
           </div>
           <h2 class="text-3xl font-bold text-slate-800 mb-3">PID智能整定系统</h2>
-          <p class="text-slate-500 mb-8 text-lg">基于多智能体协同的自动参数整定平台</p>
+          <p class="text-slate-500 mb-8 text-lg">基于多智能体协同与知识增强的自动参数整定平台</p>
           <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 max-w-2xl mx-auto text-left border border-blue-100 shadow-lg">
             <h3 class="font-bold text-blue-900 mb-4 text-lg">🎯 系统特性</h3>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div class="bg-white rounded-lg p-4 border border-blue-100">
                 <div class="text-2xl mb-2">🔍</div>
                 <div class="font-semibold text-slate-800 mb-1">数据分析智能体</div>
@@ -1041,17 +1299,22 @@
               <div class="bg-white rounded-lg p-4 border border-green-100">
                 <div class="text-2xl mb-2">📊</div>
                 <div class="font-semibold text-slate-800 mb-1">系统辨识智能体</div>
-                <div class="text-xs text-slate-600">FOPDT模型拟合</div>
+                <div class="text-xs text-slate-600">自动辨识过程模型</div>
+              </div>
+              <div class="bg-white rounded-lg p-4 border border-cyan-100">
+                <div class="text-2xl mb-2">🧠</div>
+                <div class="font-semibold text-slate-800 mb-1">本体知识智能体</div>
+                <div class="text-xs text-slate-600">融合本体规则、公理与约束知识</div>
               </div>
               <div class="bg-white rounded-lg p-4 border border-purple-100">
                 <div class="text-2xl mb-2">⚙️</div>
                 <div class="font-semibold text-slate-800 mb-1">PID专家智能体</div>
                 <div class="text-xs text-slate-600">多策略参数计算</div>
               </div>
-              <div class="bg-white rounded-lg p-4 border border-orange-100">
+              <div class="bg-white rounded-lg p-4 border border-orange-100 md:col-span-2">
                 <div class="text-2xl mb-2">📈</div>
                 <div class="font-semibold text-slate-800 mb-1">评估智能体</div>
-                <div class="text-xs text-slate-600">性能评分与验证</div>
+                <div class="text-xs text-slate-600">性能评分与投用建议</div>
               </div>
             </div>
           </div>
@@ -1096,12 +1359,22 @@
                       <span class="text-xl">🔧</span>
                       <span class="font-bold text-slate-800">{{ tool.tool_name }}</span>
                     </div>
-                    <span v-if="tool.result" class="text-xs font-semibold px-2.5 py-1 rounded-full"
-                      :class="tool.is_error ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">
-                      {{ tool.is_error ? '❌ 失败' : '✅ 成功' }}
-                    </span>
+                    <div class="flex items-center gap-2">
+                      <span v-if="tool.result" class="text-xs font-semibold px-2.5 py-1 rounded-full"
+                        :class="tool.is_error ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">
+                        {{ tool.is_error ? '❌ 失败' : '✅ 成功' }}
+                      </span>
+                      <button
+                        type="button"
+                        class="w-8 h-8 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+                        :title="tool.collapsed ? '展开工具详情' : '折叠工具详情'"
+                        @click.stop="toggleToolCollapse(msg.id, idx)"
+                      >
+                        {{ tool.collapsed ? '▼' : '▲' }}
+                      </button>
+                    </div>
                   </div>
-                  <div v-if="!compactMode" class="space-y-3">
+                  <div v-if="!compactMode && !tool.collapsed" class="space-y-3">
                     <div v-if="tool.args">
                       <div class="text-xs font-semibold text-blue-700 mb-2 flex items-center gap-1">
                         <span>📥</span><span>输入参数</span>
@@ -1122,6 +1395,32 @@
                     <span>💬</span><span>智能体分析</span>
                   </div>
                   <div class="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{{ msg.response }}</div>
+                  <div
+                    v-if="hasDataAnalysisExplain(msg)"
+                    class="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3"
+                  >
+                    <div class="text-xs text-slate-500">可查看本次辨识窗口的时间范围、索引范围和候选阶跃事件明细。</div>
+                    <button
+                      type="button"
+                      @click.stop="openDataAnalysisExplain(msg)"
+                      class="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-all"
+                    >
+                      <span>🪟</span><span>查看辨识窗口详情</span>
+                    </button>
+                  </div>
+                  <div
+                    v-if="hasIdentificationExplain(msg)"
+                    class="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3"
+                  >
+                    <div class="text-xs text-slate-500">可查看当前模型的候选比较、选模逻辑，以及 K/T/L 或 K/T1/T2/L 参数是如何从候选拟合中确定下来的。</div>
+                    <button
+                      type="button"
+                      @click.stop="openIdentificationExplain(msg)"
+                      class="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition-all"
+                    >
+                      <span>🧠</span><span>查看辨识过程详情</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1515,6 +1814,49 @@
                       </div>
                     </div>
                   </div>
+                  <div v-if="msg.data.knowledge && msg.data.knowledge.guidance" class="mt-2 bg-cyan-50 border border-cyan-200 rounded-lg p-3">
+                    <div class="text-sm font-semibold text-cyan-900 mb-2">本体知识参考</div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                      <div class="bg-white rounded p-2 border border-cyan-100">
+                        <div class="text-slate-500">命中规则数</div>
+                        <div class="font-mono text-slate-800">{{ msg.data.knowledge.guidance?.matched_count ?? 0 }}</div>
+                      </div>
+                      <div class="bg-white rounded p-2 border border-cyan-100">
+                        <div class="text-slate-500">推荐策略</div>
+                        <div class="font-mono text-slate-800">{{ msg.data.knowledge.guidance?.preferred_strategy || '-' }}</div>
+                      </div>
+                      <div class="bg-white rounded p-2 border border-cyan-100">
+                        <div class="text-slate-500">建议等级</div>
+                        <div class="font-mono text-slate-800">{{ msg.data.knowledge.guidance?.recommendation_level || '-' }}</div>
+                      </div>
+                      <div class="bg-white rounded p-2 border border-cyan-100">
+                        <div class="text-slate-500">风险提示数</div>
+                        <div class="font-mono text-slate-800">{{ msg.data.knowledge.guidance?.risk_hints?.length ?? 0 }}</div>
+                      </div>
+                    </div>
+                    <div v-if="msg.data.knowledge.guidance?.matched_rules?.length" class="mt-3">
+                      <div class="text-xs font-semibold text-cyan-900 mb-2">命中规则</div>
+                      <div class="space-y-2">
+                        <div v-for="rule in msg.data.knowledge.guidance.matched_rules" :key="rule.rule_id || rule.title" class="rounded bg-white border border-cyan-100 p-2">
+                          <div class="font-semibold text-slate-800">{{ rule.title || '-' }}</div>
+                          <div class="mt-1 text-xs text-slate-600">{{ rule.summary || '-' }}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-if="msg.data.knowledge.guidance?.constraints?.length" class="mt-3">
+                      <div class="text-xs font-semibold text-cyan-900 mb-2">主要约束</div>
+                      <div class="space-y-2">
+                        <div v-for="constraint in msg.data.knowledge.guidance.constraints" :key="constraint.rule_id || constraint.title" class="rounded bg-white border border-cyan-100 p-2">
+                          <div class="font-semibold text-slate-800">{{ constraint.title || '-' }}</div>
+                          <div class="mt-1 text-xs text-slate-600">{{ constraint.summary || '-' }}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-if="msg.data.knowledge.guidance?.risk_hints?.length" class="mt-3 rounded bg-white border border-cyan-100 p-2">
+                      <div class="text-xs font-semibold text-cyan-900 mb-1">专家经验</div>
+                      <div class="text-xs text-slate-700">{{ msg.data.knowledge.guidance.risk_hints.join('；') }}</div>
+                    </div>
+                  </div>
                   <div v-if="false && msg.data.pidParams.candidateStrategies && msg.data.pidParams.candidateStrategies.length" class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
                     <div class="text-sm font-semibold text-slate-700 mb-2">候选方法试算</div>
                     <div class="space-y-2">
@@ -1594,7 +1936,7 @@
                     <div class="bg-orange-50 rounded-lg p-3 flex items-center justify-between">
                       <span class="text-slate-700 font-medium">性能评分</span>
                       <span class="font-mono font-bold text-2xl" :class="msg.data.evaluation.performance_score >= 7 ? 'text-green-600' : msg.data.evaluation.performance_score >= 5 ? 'text-yellow-600' : 'text-red-600'">
-                        {{ msg.data.evaluation.performance_score.toFixed(2) }}<span class="text-sm text-slate-500">/10</span>
+                        {{ formatScore100(msg.data.evaluation.performance_score, 1) }}<span class="text-sm text-slate-500">/100</span>
                       </span>
                     </div>
                     <div class="grid grid-cols-2 gap-2 text-sm">
@@ -1605,7 +1947,7 @@
                       <div class="bg-orange-50 rounded-lg p-2 flex justify-between">
                         <span class="text-slate-600">综合评级</span>
                         <span class="font-mono font-bold" :class="msg.data.evaluation.final_rating >= 6 ? 'text-green-600' : 'text-red-600'">
-                          {{ msg.data.evaluation.final_rating.toFixed(2) }}
+                          {{ formatScore100(msg.data.evaluation.final_rating, 1) }}
                         </span>
                       </div>
                     </div>
@@ -1707,6 +2049,9 @@
           endTime: '1772553600000',
           historyPanelCollapsed: false,
           loopType: 'flow',
+          scenario: 'steady_operation',
+          plantType: 'distillation_column',
+          controlObject: 'reflux_flow',
           experienceLoading: false,
           experienceDetailLoading: false,
           experienceStats: {},
@@ -1729,6 +2074,10 @@
           helpCenterActiveSection: '',
           helpCenterExpandedSections: {},
           helpCenterShortcuts: [],
+          dataAnalysisExplainOpen: false,
+          selectedDataAnalysisExplain: null,
+          identificationExplainOpen: false,
+          selectedIdentificationExplain: null,
           caseLibraryLoading: false,
           caseLibraryDetailLoading: false,
           caseLibraryStats: {},
@@ -1754,6 +2103,7 @@
           progressSteps: [
             { name: '数据分析', icon: '🔍', active: false, bgActive: 'bg-blue-500 text-white', bgInactive: 'bg-slate-200 text-slate-400' },
             { name: '系统辨识', icon: '📊', active: false, bgActive: 'bg-green-500 text-white', bgInactive: 'bg-slate-200 text-slate-400' },
+            { name: '知识检索', icon: '🧠', active: false, bgActive: 'bg-cyan-500 text-white', bgInactive: 'bg-slate-200 text-slate-400' },
             { name: 'PID整定', icon: '⚙️', active: false, bgActive: 'bg-purple-500 text-white', bgInactive: 'bg-slate-200 text-slate-400' },
             { name: '性能评估', icon: '📈', active: false, bgActive: 'bg-orange-500 text-white', bgInactive: 'bg-slate-200 text-slate-400' }
           ]
@@ -1777,7 +2127,17 @@
           if (!raw) return;
           try {
             const parsed = JSON.parse(raw);
-            this.messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+            this.messages = Array.isArray(parsed.messages)
+              ? parsed.messages.map(msg => ({
+                  ...msg,
+                  tools: Array.isArray(msg.tools)
+                    ? msg.tools.map(tool => ({
+                        ...tool,
+                        collapsed: Boolean(tool.collapsed)
+                      }))
+                    : msg.tools
+                }))
+              : [];
             this.messageIdCounter = Number(parsed.messageIdCounter) || this.messages.reduce((maxId, msg) => Math.max(maxId, msg.id || 0), 0);
             this.compactMode = Boolean(parsed.compactMode);
           } catch (error) {
@@ -1793,6 +2153,222 @@
           if (page === 'case-library') {
             await this.loadCaseLibraryCenter();
           }
+        },
+
+        getToolEntry(msg, toolName) {
+          if (!msg || !Array.isArray(msg.tools)) return null;
+          return msg.tools.find(tool => tool && tool.tool_name === toolName) || null;
+        },
+
+        getToolResult(msg, toolName) {
+          return this.getToolEntry(msg, toolName)?.result || null;
+        },
+
+        hasDataAnalysisExplain(msg) {
+          if (!msg || msg.agent !== '数据分析智能体') return false;
+          const result = this.getToolResult(msg, 'tool_load_data');
+          const selectedWindow = result?.selected_window || {};
+          const stepEvents = Array.isArray(result?.step_events) ? result.step_events : [];
+          return Boolean(stepEvents.length || selectedWindow.rows || selectedWindow.start_index !== undefined);
+        },
+
+        describeStepEventType(type) {
+          const mapping = {
+            step_up: '设定值上升阶跃',
+            step_down: '设定值下降阶跃',
+            mv_change: '操纵量变化事件',
+            full_range: '全量数据窗口'
+          };
+          return mapping[String(type || '')] || String(type || '候选事件');
+        },
+
+        estimateEventTimeRange(result, event) {
+          const startTime = result?.window_overview?.start_time;
+          const dt = Number(result?.sampling_time);
+          const startIdx = Number(event?.start_idx);
+          const endIdx = Number(event?.end_idx);
+          if (!startTime || !Number.isFinite(dt) || dt <= 0 || !Number.isFinite(startIdx) || !Number.isFinite(endIdx)) {
+            return null;
+          }
+          const base = new Date(startTime.replace(' ', 'T'));
+          if (Number.isNaN(base.getTime())) {
+            return null;
+          }
+          const start = new Date(base.getTime() + startIdx * dt * 1000);
+          const end = new Date(base.getTime() + endIdx * dt * 1000);
+          const pad = (num) => String(num).padStart(2, '0');
+          const format = (value) => `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+          return {
+            singleLine: `${format(start)} -> ${format(end)}`,
+            multiLine: `${format(start)}\n-> ${format(end)}`
+          };
+        },
+
+        eventTimeRange(result, event) {
+          if (event?.start_time && event?.end_time) {
+            return `${event.start_time} -> ${event.end_time}`;
+          }
+          const estimated = this.estimateEventTimeRange(result, event);
+          if (estimated) {
+            return estimated.singleLine;
+          }
+          if (result?.window_overview?.window_start_time && result?.window_overview?.window_end_time) {
+            return `窗口内候选事件，索引 ${event?.start_idx ?? 0} - ${event?.end_idx ?? 0}`;
+          }
+          return `索引 ${event?.start_idx ?? 0} - ${event?.end_idx ?? 0}`;
+        },
+
+        eventTimeRangeDetail(result, event) {
+          if (event?.start_time && event?.end_time) {
+            return `${event.start_time}\n-> ${event.end_time}`;
+          }
+          const estimated = this.estimateEventTimeRange(result, event);
+          if (estimated) {
+            return estimated.multiLine;
+          }
+          return this.eventTimeRange(result, event);
+        },
+
+        buildDataAnalysisExplainPayload(msg) {
+          const result = this.getToolResult(msg, 'tool_load_data');
+          if (!result) return null;
+
+          const selectedWindow = result.selected_window || {};
+          const windowOverview = result.window_overview || {};
+          const stepEvents = Array.isArray(result.step_events) ? result.step_events : [];
+          const selectedStart = Number(selectedWindow.event_start_index);
+          const selectedEnd = Number(selectedWindow.event_end_index);
+          const selectedOrder = stepEvents.findIndex(
+            event => Number(event?.start_idx) === selectedStart && Number(event?.end_idx) === selectedEnd
+          );
+          const selectionReason =
+            selectedOrder >= 0
+              ? `当前窗口由候选事件 #${selectedOrder + 1} 触发。系统会围绕所有候选阶跃构造窗口，并默认选择阶跃幅值最大的候选窗口进入辨识，因此这条事件被作为本次辨识窗口的来源。`
+              : '系统会围绕检测到的候选阶跃构造多个窗口，并默认选择最有代表性的候选窗口进入后续辨识。';
+
+          return {
+            windowRows: selectedWindow.rows ?? '-',
+            windowTimeRange: this.rangeLabel(
+              windowOverview.window_start_time,
+              windowOverview.window_end_time,
+              selectedWindow.start_index,
+              selectedWindow.end_index
+            ),
+            windowIndexRange: `${selectedWindow.start_index ?? 0} -> ${selectedWindow.end_index ?? 0}`,
+            triggerEventLabel: this.describeStepEventType(selectedWindow.event_type),
+            selectionReason,
+            stepEvents: stepEvents.map((event, idx) => ({
+              order: idx + 1,
+              isSelected:
+                Number(event?.start_idx) === selectedStart &&
+                Number(event?.end_idx) === selectedEnd,
+              typeLabel: this.describeStepEventType(event?.type),
+              indexRange: `${event?.start_idx ?? 0} -> ${event?.end_idx ?? 0}`,
+              timeRange: this.eventTimeRange(result, event),
+              timeRangeDetail: this.eventTimeRangeDetail(result, event),
+              amplitude: this.formatNumber(event?.amplitude, 3),
+              svChange:
+                Number.isFinite(Number(event?.sv_start)) && Number.isFinite(Number(event?.sv_end))
+                  ? `${this.formatNumber(event?.sv_start, 3)} -> ${this.formatNumber(event?.sv_end, 3)}`
+                  : '-'
+            }))
+          };
+        },
+
+        openDataAnalysisExplain(msg) {
+          const payload = this.buildDataAnalysisExplainPayload(msg);
+          if (!payload) return;
+          this.selectedDataAnalysisExplain = payload;
+          this.dataAnalysisExplainOpen = true;
+        },
+
+        closeDataAnalysisExplain() {
+          this.dataAnalysisExplainOpen = false;
+          this.selectedDataAnalysisExplain = null;
+        },
+
+        hasIdentificationExplain(msg) {
+          const result = this.getToolResult(msg, 'tool_fit_fopdt');
+          return Boolean(result && Array.isArray(result.attempts) && result.attempts.length);
+        },
+
+        formatAttemptExplanation(attempt) {
+          if (attempt?.success === false) {
+            return `该候选拟合失败：${attempt?.error || '模型拟合未成功'}`;
+          }
+          return `系统在窗口 ${attempt?.window_source || '-'} 上拟合 ${attempt?.model_type || '-'} 模型，得到标准化RMSE=${this.formatNumber(attempt?.normalized_rmse, 3)}、R²=${this.formatNumber(attempt?.r2_score, 3)}、置信度=${this.formatPercent(attempt?.confidence, 1)}，并结合该模型对应的候选整定性能评分进行比较。`;
+        },
+
+        buildParameterExplanation(modelType, selectedModelParams) {
+          const normalized = String(modelType || '').toUpperCase();
+          if (normalized === 'SOPDT') {
+            return `当前选择的是 SOPDT 模型。K 表示过程增益，T1 与 T2 表示两个主导惯性时间常数，L 表示死区时间。这组参数来自当前最优候选窗口上的二阶加纯滞后模型拟合结果，系统会把不同模型和窗口的拟合质量与后续整定可用性综合比较后，再确定是否采用这组参数。`;
+          }
+          if (normalized === 'FOPDT') {
+            return `当前选择的是 FOPDT 模型。K 表示过程增益，T 表示主导时间常数，L 表示死区时间。这组参数来自当前最优候选窗口上的一阶加纯滞后模型拟合结果，并经过候选模型比较后确定。`;
+          }
+          if (normalized === 'FO') {
+            return `当前选择的是 FO 模型。K 表示过程增益，T 表示主导时间常数。系统在多个候选窗口和模型中比较后，认为这组一阶模型最能解释当前数据。`;
+          }
+          if (normalized === 'IPDT') {
+            return `当前选择的是 IPDT 模型。K 表示积分增益，L 表示等效死区。系统在候选窗口上比较积分对象与自衡对象的拟合效果后，认为当前对象更符合积分过程特征。`;
+          }
+          return `这组参数来自当前最优候选窗口上的模型拟合结果，系统会综合比较候选模型的拟合误差、解释度、置信度以及后续整定表现后再最终确定。`;
+        },
+
+        buildIdentificationExplainPayload(msg) {
+          const result = this.getToolResult(msg, 'tool_fit_fopdt');
+          if (!result) return null;
+
+          const modelType = String(result.model_type || '').toUpperCase() || '-';
+          const selectedModelParams = result.selected_model_params || {};
+          const attempts = Array.isArray(result.attempts) ? result.attempts.slice() : [];
+          const sortedAttempts = attempts
+            .map((attempt, idx) => ({ ...attempt, _idx: idx }))
+            .sort((a, b) => {
+              const aSuccess = a.success === false ? 0 : 1;
+              const bSuccess = b.success === false ? 0 : 1;
+              if (aSuccess !== bSuccess) return bSuccess - aSuccess;
+              const perfDiff = Number(b.benchmark_performance_score || 0) - Number(a.benchmark_performance_score || 0);
+              if (Math.abs(perfDiff) > 1e-9) return perfDiff;
+              return Number(b.confidence || 0) - Number(a.confidence || 0);
+            })
+            .map((attempt, idx) => ({
+              rank: idx + 1,
+              isSelected:
+                String(attempt.model_type || '').toUpperCase() === modelType &&
+                String(attempt.window_source || '') === String(result.selected_window_source || ''),
+              modelType: String(attempt.model_type || '').toUpperCase() || '-',
+              windowSource: attempt.window_source || '-',
+              points: attempt.points ?? '-',
+              normalizedRmse: this.formatNumber(attempt.normalized_rmse, 3),
+              r2: this.formatNumber(attempt.r2_score, 3),
+              confidence: this.formatPercent(attempt.confidence, 1),
+              performance: this.formatNumber(attempt.benchmark_performance_score, 2),
+              explanation: this.formatAttemptExplanation(attempt)
+            }));
+
+          return {
+            modelType,
+            modelParamsSummary: this.summarizeModelParams({ model_type: modelType, ...selectedModelParams }),
+            windowSource: result.selected_window_source || '-',
+            confidence: this.formatPercent(result.confidence, 1),
+            selectionReason: result.model_selection_reason || '系统会在候选窗口上比较多种模型的拟合质量与后续整定表现，最终选取综合表现最优的模型。',
+            parameterExplanation: this.buildParameterExplanation(modelType, selectedModelParams),
+            attempts: sortedAttempts
+          };
+        },
+
+        openIdentificationExplain(msg) {
+          const payload = this.buildIdentificationExplainPayload(msg);
+          if (!payload) return;
+          this.selectedIdentificationExplain = payload;
+          this.identificationExplainOpen = true;
+        },
+
+        closeIdentificationExplain() {
+          this.identificationExplainOpen = false;
+          this.selectedIdentificationExplain = null;
         },
 
         async openHelpCenter() {
@@ -2199,6 +2775,7 @@
           const icons = {
             '数据分析智能体': '🔍',
             '系统辨识智能体': '📊',
+            '本体知识智能体': '🧠',
             'PID专家智能体': '⚙️',
             '评估智能体': '📈'
           };
@@ -2209,6 +2786,7 @@
           const classes = {
             '数据分析智能体': 'agent-border-blue border-blue-300',
             '系统辨识智能体': 'agent-border-green border-green-300',
+            '本体知识智能体': 'agent-border-cyan border-cyan-300',
             'PID专家智能体': 'agent-border-purple border-purple-300',
             '评估智能体': 'agent-border-orange border-orange-300'
           };
@@ -2219,6 +2797,7 @@
           const classes = {
             '数据分析智能体': 'bg-blue-50',
             '系统辨识智能体': 'bg-green-50',
+            '本体知识智能体': 'bg-cyan-50',
             'PID专家智能体': 'bg-purple-50',
             '评估智能体': 'bg-orange-50'
           };
@@ -2229,6 +2808,7 @@
           const classes = {
             '数据分析智能体': 'text-blue-800',
             '系统辨识智能体': 'text-green-800',
+            '本体知识智能体': 'text-cyan-800',
             'PID专家智能体': 'text-purple-800',
             '评估智能体': 'text-orange-800'
           };
@@ -2239,6 +2819,7 @@
           const colors = {
             '数据分析智能体': { bg: '#eff6ff', border: '#3b82f6', text: '#1e40af' },
             '系统辨识智能体': { bg: '#f0fdf4', border: '#10b981', text: '#065f46' },
+            '本体知识智能体': { bg: '#ecfeff', border: '#06b6d4', text: '#155e75' },
             'PID专家智能体': { bg: '#faf5ff', border: '#8b5cf6', text: '#6b21a8' },
             '评估智能体': { bg: '#fff7ed', border: '#f59e0b', text: '#92400e' }
           };
@@ -2249,8 +2830,9 @@
           const agentMap = {
             '数据分析智能体': 0,
             '系统辨识智能体': 1,
-            'PID专家智能体': 2,
-            '评估智能体': 3
+            '本体知识智能体': 2,
+            'PID专家智能体': 3,
+            '评估智能体': 4
           };
           const index = agentMap[agentName];
           if (index !== undefined) {
@@ -2326,13 +2908,19 @@
             content: usingUploadedCsv
               ? `为控制回路 ${this.loopName} 整定PID参数
 数据来源: 上传CSV
-回路类型: ${this.loopType}`
+回路类型: ${this.loopType}
+工况: ${this.scenarioLabel(this.scenario)}
+装置类型: ${this.plantTypeLabel(this.plantType)}
+控制对象: ${this.controlObjectLabel(this.controlObject)}`
               : `为控制回路 ${this.loopName} 整定PID参数
 数据来源: 历史数据
 loop_uri: ${this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b'}
 start_time: ${this.startTime || '1772467200000'}
 end_time: ${this.endTime || '1772553600000'}
-回路类型: ${this.loopType}`,
+回路类型: ${this.loopType}
+工况: ${this.scenarioLabel(this.scenario)}
+装置类型: ${this.plantTypeLabel(this.plantType)}
+控制对象: ${this.controlObjectLabel(this.controlObject)}`,
             file_name: usingUploadedCsv ? this.uploadedFile.name : null
           });
 
@@ -2345,6 +2933,9 @@ end_time: ${this.endTime || '1772553600000'}
           formData.append('loop_uri', this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b');
           formData.append('start_time', this.startTime || '1772467200000');
           formData.append('end_time', this.endTime || '1772553600000');
+          formData.append('scenario', this.scenario || '');
+          formData.append('plant_type', this.plantType || 'distillation_column');
+          formData.append('control_object', this.controlObject || '');
 
           try {
             this.loadingMessage = '智能体正在协同处理...';
@@ -2374,7 +2965,10 @@ end_time: ${this.endTime || '1772553600000'}
             this.addMessage({
               type: 'agent_turn',
               agent: data.agent,
-              tools: data.tools || [],
+              tools: (data.tools || []).map(tool => ({
+                ...tool,
+                collapsed: Boolean(tool.collapsed)
+              })),
               response: data.response || '',
               collapsed: false
             });
@@ -2442,6 +3036,15 @@ end_time: ${this.endTime || '1772553600000'}
           }
         },
 
+        toggleToolCollapse(msgId, toolIndex) {
+          const msg = this.messages.find(m => m.id === msgId);
+          if (!msg || !Array.isArray(msg.tools) || !msg.tools[toolIndex]) {
+            return;
+          }
+          msg.tools[toolIndex].collapsed = !msg.tools[toolIndex].collapsed;
+          this.saveMessages();
+        },
+
         formatJson(obj) {
           return JSON.stringify(obj, null, 2);
         },
@@ -2452,6 +3055,10 @@ end_time: ${this.endTime || '1772553600000'}
 
         formatPercent(value, digits = 1) {
           return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : '-';
+        },
+
+        formatScore100(value, digits = 1) {
+          return typeof value === 'number' && Number.isFinite(value) ? (value * 10).toFixed(digits) : '-';
         },
 
         summarizeModelParams(model) {
@@ -2661,12 +3268,67 @@ end_time: ${this.endTime || '1772553600000'}
             `  历史偏好模型 = ${data.memory?.experienceGuidance?.matches?.[0]?.model_type || data.model?.modelType || '-'}\n` +
             `  历史相似案例数 = ${data.memory?.experienceGuidance?.summary?.match_count ?? 0}\n` +
             `  推荐收紧比例 = Kp×${this.formatNumber(data.memory?.experienceGuidance?.summary?.recommended_kp_scale, 2)} / Ki×${this.formatNumber(data.memory?.experienceGuidance?.summary?.recommended_ki_scale, 2)}\n\n` +
+            `本体知识参考:\n` +
+            `  命中规则数 = ${data.knowledge?.guidance?.matched_count ?? 0}\n` +
+            `  推荐策略 = ${data.knowledge?.guidance?.preferred_strategy || '-'}\n` +
+            `  命中规则 = ${(data.knowledge?.guidance?.matched_rules || []).map(item => item.title).join('；') || '-'}\n` +
+            `  主要约束 = ${(data.knowledge?.guidance?.constraints || []).map(item => item.title).join('；') || '-'}\n` +
+            `  专家经验 = ${(data.knowledge?.guidance?.risk_hints || []).join('；') || '-'}\n\n` +
             `${data.evaluation?.initial_assessment?.evaluated_pid && data.evaluation?.auto_refine_result?.applied ? `首次评估PID参数:\n  Kp = ${this.formatNumber(data.evaluation.initial_assessment.evaluated_pid.Kp, 4)}\n  Ki = ${this.formatNumber(data.evaluation.initial_assessment.evaluated_pid.Ki, 4)}\n  Kd = ${this.formatNumber(data.evaluation.initial_assessment.evaluated_pid.Kd, 4)}\n\n` : ''}` +
-            `性能评分: ${data.evaluation?.performance_score.toFixed(2)}/10`;
+            `性能评分: ${this.formatScore100(data.evaluation?.performance_score, 1)}/100\n` +
+            `综合评分: ${this.formatScore100(data.evaluation?.final_rating, 1)}/100`;
 
           navigator.clipboard.writeText(text).then(() => {
             alert('参数已复制到剪贴板！');
           });
+        },
+
+        plantTypeLabel(value) {
+          const labels = {
+            distillation_column: '精馏塔',
+            atmospheric_column: '常压塔',
+            vacuum_column: '减压塔',
+            side_draw_column: '侧线抽出塔',
+            reboiler: '再沸器',
+            condenser: '冷凝器',
+            reflux_system: '回流系统'
+          };
+          return labels[value] || value || '-';
+        },
+
+        scenarioLabel(value) {
+          const labels = {
+            startup: '开车',
+            shutdown: '停车',
+            steady_operation: '稳态生产',
+            load_change: '变负荷',
+            product_switch: '切产品',
+            feed_switch: '原料切换',
+            tower_pressure_fluctuation: '塔压波动',
+            reflux_fluctuation: '回流波动',
+            steam_fluctuation: '蒸汽波动',
+            analyzer_maintenance: '分析仪维护',
+            low_load: '低负荷',
+            full_load: '满负荷'
+          };
+          return labels[value] || value || '-';
+        },
+
+        controlObjectLabel(value) {
+          const labels = {
+            top_temperature: '塔顶温度',
+            middle_temperature: '塔中温度',
+            bottom_temperature: '塔釜温度',
+            tower_pressure: '塔压',
+            reflux_flow: '回流流量',
+            steam_flow: '蒸汽流量',
+            feed_flow: '进料流量',
+            cooling_flow: '冷却流量',
+            side_draw_flow: '侧线抽出流量',
+            level: '液位',
+            composition: '产品组成'
+          };
+          return labels[value] || value || '-';
         },
 
         clearMessages() {
@@ -2731,11 +3393,6 @@ end_time: ${this.endTime || '1772553600000'}
           const tuningPanel = root.querySelector('.p-6.space-y-4.flex-1');
           if (!tuningPanel) return;
 
-          const labels = tuningPanel.querySelectorAll('label.block.text-sm.font-semibold.text-slate-700.mb-2');
-          if (labels[1]) labels[1].textContent = '\u6570\u636e\u6765\u6e90';
-          if (labels[3]) labels[3].textContent = '\u4e0a\u4f20 CSV \u6570\u636e\u6587\u4ef6';
-          if (labels[4]) labels[4].textContent = '\u56de\u8def\u7c7b\u578b';
-
           const sourceButtons = tuningPanel.querySelectorAll('.grid.grid-cols-2.gap-3 > button');
           if (sourceButtons[0]) {
             const texts = sourceButtons[0].querySelectorAll('div');
@@ -2754,9 +3411,7 @@ end_time: ${this.endTime || '1772553600000'}
             if (headerTitle) headerTitle.textContent = '\u5386\u53f2\u6570\u636e\u53c2\u6570';
 
             const note = historyPanel.querySelector('p.text-xs.text-amber-700');
-            if (note) {
-              note.textContent = '\u672a\u4e0a\u4f20CSV\u65f6\uff0c\u5c06\u6309\u4e0b\u65b9\u5386\u53f2\u53c2\u6570\u83b7\u53d6\u6570\u636e\uff1b\u82e5\u53c2\u6570\u7559\u7a7a\uff0c\u5219\u4f7f\u7528\u9ed8\u8ba4\u503c\u3002';
-            }
+            if (note) note.remove();
 
             const historyLabels = historyPanel.querySelectorAll('label.block.text-sm.font-semibold.text-slate-700.mb-2');
             if (historyLabels[0]) historyLabels[0].textContent = 'Loop URI';
@@ -2766,8 +3421,8 @@ end_time: ${this.endTime || '1772553600000'}
             const collapseButton = historyPanel.querySelector('button[type="button"]');
             if (collapseButton) {
               const spans = collapseButton.querySelectorAll('span');
-              if (spans[0]) spans[0].textContent = this.historyPanelCollapsed ? '\u5c55\u5f00\u53c2\u6570' : '\u6298\u53e0\u53c2\u6570';
-              if (spans[1]) spans[1].textContent = this.historyPanelCollapsed ? '\u25bc' : '\u25b2';
+              if (spans[0]) spans[0].textContent = this.historyPanelCollapsed ? '\u25bc' : '\u25b2';
+              if (spans[1]) spans[1].remove();
             }
           }
 

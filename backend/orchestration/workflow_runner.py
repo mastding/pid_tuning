@@ -25,6 +25,9 @@ def _build_task_message(
     csv_path: str,
     loop_name: str,
     loop_type: str,
+    plant_type: str,
+    scenario: str,
+    control_object: str,
     loop_uri: str,
     start_time: str,
     end_time: str,
@@ -38,12 +41,16 @@ def _build_task_message(
         f"loop_uri: {loop_uri}\n"
         f"start_time: {display_start}\n"
         f"end_time: {display_end}\n"
-        f"回路类型: {loop_type}\n\n"
+        f"回路类型: {loop_type}\n"
+        f"装置类型: {plant_type or '未指定'}\n"
+        f"工况: {scenario or '未指定'}\n"
+        f"控制对象: {control_object or '未指定'}\n\n"
         "请按以下顺序协作完成：\n"
         "1. 数据分析智能体：加载和分析数据\n"
         "2. 系统辨识智能体：辨识过程模型\n"
-        "3. PID专家智能体：计算 PID 参数\n"
-        "4. 评估智能体：评估整定质量\n\n"
+        "3. 本体知识智能体：检索专家规则与约束\n"
+        "4. PID专家智能体：计算 PID 参数\n"
+        "5. 评估智能体：评估整定质量\n\n"
         "每个智能体完成任务后，请明确交接给下一位智能体。"
     )
 
@@ -140,6 +147,9 @@ async def run_multi_agent_collaboration(
     csv_path: str,
     loop_name: str,
     loop_type: str,
+    plant_type: str,
+    scenario: str,
+    control_object: str,
     loop_uri: str,
     start_time: str,
     end_time: str,
@@ -156,7 +166,11 @@ async def run_multi_agent_collaboration(
     to_jsonable: Callable[[Any], Any],
 ) -> AsyncGenerator[Dict[str, Any], None]:
     shared_data_store.clear()
+    shared_data_store["loop_name"] = loop_name
     shared_data_store["loop_type"] = loop_type
+    shared_data_store["plant_type"] = plant_type
+    shared_data_store["scenario"] = scenario
+    shared_data_store["control_object"] = control_object
 
     model_client = create_model_client(
         model_api_key=llm_config["api_key"],
@@ -180,6 +194,9 @@ async def run_multi_agent_collaboration(
         csv_path=csv_path,
         loop_name=loop_name,
         loop_type=loop_type,
+        plant_type=plant_type,
+        scenario=scenario,
+        control_object=control_object,
         loop_uri=loop_uri,
         start_time=start_time,
         end_time=end_time,
@@ -343,6 +360,9 @@ async def run_multi_agent_collaboration(
                 "experienceGuidance": shared_data.get("experience_guidance", {}),
                 "candidateStrategies": shared_data.get("candidate_strategies", []),
                 "description": effective_pid_params.get("description", shared_data.get("description", "")),
+            },
+            "knowledge": {
+                "guidance": shared_data.get("expert_knowledge_guidance", {}) or shared_data_store.get("expert_knowledge_guidance", {}),
             },
         }
 

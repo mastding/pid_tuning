@@ -10,6 +10,57 @@ from skills.rating import ModelRating
 ALL_STRATEGIES = ["IMC", "LAMBDA", "ZN", "CHR"]
 
 
+def _normalize_strategy_hint(strategy: str) -> str:
+    strategy_name = str(strategy or "").strip().upper()
+    if strategy_name in ALL_STRATEGIES:
+        return strategy_name
+    if strategy_name in {"PI", "CONSERVATIVE_PI", "VERY_CONSERVATIVE_PI", "LAMBDA_TUNING"}:
+        return "LAMBDA"
+    if strategy_name in {"PID", "CONSERVATIVE_PID"}:
+        return "IMC"
+    return ""
+
+
+def _apply_knowledge_bias_to_pid_params(
+    *,
+    pid_params: Dict[str, Any],
+    tuning_bias: Dict[str, Any] | None,
+    strategy_name: str,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    if not tuning_bias:
+        return dict(pid_params), {}
+
+    adjusted = dict(pid_params)
+    applied: Dict[str, Any] = {}
+    kp_scale_max = float(tuning_bias.get("kp_scale_max", 1.0) or 1.0)
+    ki_scale_max = float(tuning_bias.get("ki_scale_max", 1.0) or 1.0)
+    kd_scale_max = float(tuning_bias.get("kd_scale_max", 1.0) or 1.0)
+    discourage_derivative = bool(tuning_bias.get("discourage_derivative"))
+    conservative_mode = bool(tuning_bias.get("conservative_mode"))
+
+    if kp_scale_max < 0.999:
+        adjusted["Kp"] = float(adjusted["Kp"]) * kp_scale_max
+        applied["kp_scale_max"] = kp_scale_max
+    if ki_scale_max < 0.999:
+        adjusted["Ki"] = float(adjusted["Ki"]) * ki_scale_max
+        applied["ki_scale_max"] = ki_scale_max
+    if discourage_derivative:
+        adjusted["Kd"] = min(float(adjusted["Kd"]), float(adjusted["Kd"]) * kd_scale_max)
+        applied["discourage_derivative"] = True
+        if kd_scale_max < 0.999:
+            applied["kd_scale_max"] = kd_scale_max
+    elif kd_scale_max < 0.999 and abs(float(adjusted.get("Kd", 0.0))) > 1e-9:
+        adjusted["Kd"] = float(adjusted["Kd"]) * kd_scale_max
+        applied["kd_scale_max"] = kd_scale_max
+
+    if conservative_mode and str(strategy_name or "").upper() in {"ZN", "CHR"}:
+        adjusted["Kp"] = float(adjusted["Kp"]) * 0.92
+        adjusted["Ki"] = float(adjusted["Ki"]) * 0.9
+        applied["conservative_strategy_trim"] = str(strategy_name or "").upper()
+
+    return adjusted, applied
+
+
 def _normalize_model_params(
     *,
     model_type: str,
@@ -223,8 +274,14 @@ def _evaluate_strategy(
     confidence_score: float,
     strategy_name: str,
     experience_bonus: float = 0.0,
+    tuning_bias: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     pid_params = apply_tuning_rules(K, T, L, strategy_name, model_type=model_type, model_params=selected_model_params)
+    pid_params, guidance_applied = _apply_knowledge_bias_to_pid_params(
+        pid_params=pid_params,
+        tuning_bias=tuning_bias,
+        strategy_name=strategy_name,
+    )
     model_params = _build_model_params_for_evaluation(
         model_type=model_type,
         selected_model_params=selected_model_params,
@@ -253,6 +310,7 @@ def _evaluate_strategy(
         "is_stable": bool(eval_result["simulation"].get("is_stable", False)),
         "experience_bonus": experience_bonus,
         "evaluation_result": eval_result,
+        "knowledge_constraints_applied": guidance_applied,
     }
 
 
@@ -269,7 +327,13 @@ def _evaluate_pid_params(
     pid_params: Dict[str, Any],
     description_suffix: str = "",
     experience_bonus: float = 0.0,
+    tuning_bias: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    pid_params, guidance_applied = _apply_knowledge_bias_to_pid_params(
+        pid_params=pid_params,
+        tuning_bias=tuning_bias,
+        strategy_name=strategy_name,
+    )
     model_params = _build_model_params_for_evaluation(
         model_type=model_type,
         selected_model_params=selected_model_params,
@@ -298,6 +362,7 @@ def _evaluate_pid_params(
         "is_stable": bool(eval_result["simulation"].get("is_stable", False)),
         "experience_bonus": experience_bonus,
         "evaluation_result": eval_result,
+        "knowledge_constraints_applied": guidance_applied,
     }
 
 
@@ -460,6 +525,7 @@ def select_best_pid_strategy(
     r2_score: float,
     dt: float,
     experience_guidance: Dict[str, Any] | None = None,
+    knowledge_guidance: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     primary_inputs = _derive_primary_tuning_inputs(
         model_type=model_type,
@@ -516,9 +582,15 @@ def select_best_pid_strategy(
     recommended_ki_scale = float(summary.get("recommended_ki_scale", 1.0) or 1.0)
     recommended_kd_scale = float(summary.get("recommended_kd_scale", 1.0) or 1.0)
     preferred_refine_pattern = str(summary.get("preferred_refine_pattern", ""))
+    knowledge_guidance = dict(knowledge_guidance or {})
+    tuning_bias = dict(knowledge_guidance.get("tuning_bias") or {})
+    knowledge_preferred_strategy = _normalize_strategy_hint(tuning_bias.get("preferred_strategy") or preferred_strategy)
+    knowledge_constraints = list(knowledge_guidance.get("constraints") or [])
+    knowledge_risk_hints = list(knowledge_guidance.get("risk_hints") or [])
+    avoid_aggressive = bool(tuning_bias.get("avoid_aggressive_strategies")) or bool(tuning_bias.get("conservative_mode"))
 
     prioritized: List[str] = []
-    for strategy_name in [preferred_strategy, str(heuristic_selection.get("strategy", "")).upper()]:
+    for strategy_name in [knowledge_preferred_strategy, preferred_strategy, str(heuristic_selection.get("strategy", "")).upper()]:
         if strategy_name in ALL_STRATEGIES and strategy_name not in prioritized:
             prioritized.append(strategy_name)
 
@@ -532,6 +604,10 @@ def select_best_pid_strategy(
         nonlocal best_candidate
         for strategy_name in strategies:
             experience_bonus = 0.15 if preferred_strategy and strategy_name == preferred_strategy else 0.0
+            if knowledge_preferred_strategy and strategy_name == knowledge_preferred_strategy:
+                experience_bonus += 0.18
+            if avoid_aggressive and strategy_name in {"ZN", "CHR"}:
+                experience_bonus -= 0.18
             candidate = _evaluate_strategy(
                 K=K,
                 T=T,
@@ -542,6 +618,7 @@ def select_best_pid_strategy(
                 confidence_score=confidence_score,
                 strategy_name=strategy_name,
                 experience_bonus=experience_bonus,
+                tuning_bias=tuning_bias,
             )
             candidate_results.append(candidate)
             if _is_better_candidate(candidate, best_candidate):
@@ -569,6 +646,7 @@ def select_best_pid_strategy(
                     pid_params=history_seed_pid,
                     description_suffix=" (history_seeded)",
                     experience_bonus=experience_bonus + 0.12,
+                    tuning_bias=tuning_bias,
                 )
                 seeded_candidate["history_seeded"] = True
                 if top_match:
@@ -607,6 +685,7 @@ def select_best_pid_strategy(
                     pid_params=refined_pid,
                     description_suffix=" (history_refined)",
                     experience_bonus=experience_bonus + 0.1,
+                    tuning_bias=tuning_bias,
                 )
                 refined_candidate["history_refined"] = True
                 refined_candidate["refine_scales"] = {
@@ -642,7 +721,22 @@ def select_best_pid_strategy(
         model_type=normalized_model_type,
         model_params=selected_model_params,
     )
+    pid_params, final_constraints_applied = _apply_knowledge_bias_to_pid_params(
+        pid_params=pid_params,
+        tuning_bias=tuning_bias,
+        strategy_name=best_candidate["strategy"],
+    )
     if best_candidate.get("history_refined"):
+        pid_params = {
+            **pid_params,
+            "Kp": float(best_candidate["Kp"]),
+            "Ki": float(best_candidate["Ki"]),
+            "Kd": float(best_candidate["Kd"]),
+            "Ti": float(best_candidate["Ti"]),
+            "Td": float(best_candidate["Td"]),
+            "description": str(best_candidate.get("description", pid_params.get("description", ""))),
+        }
+    else:
         pid_params = {
             **pid_params,
             "Kp": float(best_candidate["Kp"]),
@@ -685,6 +779,8 @@ def select_best_pid_strategy(
         )
     if guidance_text:
         selection_reason += f" {guidance_text}"
+    if knowledge_guidance.get("summary"):
+        selection_reason += f" 专家规则：{knowledge_guidance.get('summary')}"
 
     selection_inputs = {
         "loop_type": loop_type,
@@ -703,6 +799,10 @@ def select_best_pid_strategy(
         "recommended_kp_scale": recommended_kp_scale,
         "recommended_ki_scale": recommended_ki_scale,
         "recommended_kd_scale": recommended_kd_scale,
+        "knowledge_preferred_strategy": knowledge_preferred_strategy,
+        "knowledge_risk_hints": knowledge_risk_hints[:3],
+        "knowledge_constraints": knowledge_constraints[:3],
+        "knowledge_tuning_bias": tuning_bias,
         "tested_candidates": [
             {
                 "strategy": item["strategy"],
@@ -713,6 +813,7 @@ def select_best_pid_strategy(
                     if item.get("history_seeded")
                     else "heuristic_or_benchmark"
                 ),
+                "knowledge_constraints_applied": item.get("knowledge_constraints_applied", {}),
             }
             for item in candidate_results
         ],
@@ -751,4 +852,6 @@ def select_best_pid_strategy(
         "selection_reason": selection_reason,
         "selection_inputs": selection_inputs,
         "experience_guidance": experience_guidance or {},
+        "knowledge_guidance": knowledge_guidance,
+        "knowledge_constraints_applied": final_constraints_applied,
     }

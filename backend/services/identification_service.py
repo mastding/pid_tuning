@@ -21,6 +21,38 @@ MODEL_ORDER_BY_LOOP_TYPE = {
 }
 
 
+def sanitize_selected_model_params(model_type: str, model_params: Dict[str, Any] | None) -> Dict[str, Any]:
+    params = dict(model_params or {})
+    normalized_type = str(model_type or params.get("model_type", "FOPDT")).upper()
+
+    if normalized_type == "SOPDT":
+        return {
+            "model_type": "SOPDT",
+            "K": float(params.get("K", 0.0) or 0.0),
+            "T1": float(params.get("T1", params.get("T", 0.0)) or 0.0),
+            "T2": float(params.get("T2", params.get("T", 0.0)) or 0.0),
+            "L": float(params.get("L", 0.0) or 0.0),
+        }
+    if normalized_type == "IPDT":
+        return {
+            "model_type": "IPDT",
+            "K": float(params.get("K", 0.0) or 0.0),
+            "L": float(params.get("L", 0.0) or 0.0),
+        }
+    if normalized_type == "FO":
+        return {
+            "model_type": "FO",
+            "K": float(params.get("K", 0.0) or 0.0),
+            "T": float(params.get("T", 0.0) or 0.0),
+        }
+    return {
+        "model_type": "FOPDT",
+        "K": float(params.get("K", 0.0) or 0.0),
+        "T": float(params.get("T", 0.0) or 0.0),
+        "L": float(params.get("L", 0.0) or 0.0),
+    }
+
+
 def extract_candidate_windows(cleaned_df: Any, candidate_windows: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
     candidate_windows = candidate_windows or []
@@ -388,6 +420,8 @@ def fit_best_fopdt_window(
         f"最终选择 {selected_model_type} 作为当前最优辨识模型，并进入对应模型类型的 PID 试算。"
     )
 
+    clean_selected_model_params = sanitize_selected_model_params(selected_model_type, best_model_params)
+
     return {
         "model_params": best_model_params,
         "confidence": best_confidence,
@@ -401,7 +435,7 @@ def fit_best_fopdt_window(
         "fit_preview": fit_preview,
         "selected_window": selected_window,
         "selected_model_type": selected_model_type,
-        "selected_model_params": best_model_params,
+        "selected_model_params": clean_selected_model_params,
         "tuning_model": tuning_model,
         "selection_reason": selection_reason,
     }

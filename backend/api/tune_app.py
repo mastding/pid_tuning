@@ -88,7 +88,10 @@ class WorkflowRunRequest(BaseModel):
     end_time: str = Field(..., description="结束时间")
     loop_type: str = Field(..., description="回路类型")
     loop_uri: str = Field(..., description="回路URI")
-    response_mode: str = Field("async", description="async、blocking 或 streaming")
+    plant_type: str = Field("distillation_column", description="装置类型")
+    scenario: str = Field("", description="工况")
+    control_object: str = Field("", description="控制对象")
+    response_mode: str = Field("async", description="响应模式：async、blocking 或 streaming")
 
 
 def _normalize_loop_type(loop_type: str) -> str:
@@ -119,10 +122,11 @@ def _event_progress(event: Dict[str, Any]) -> tuple[str, str, int] | None:
     if event_type == "agent_turn":
         agent = str(event.get("agent") or "")
         mapping = {
-            "数据分析智能体": ("data_analysis", "数据分析", 25),
-            "系统辨识智能体": ("model_identification", "系统辨识", 50),
-            "PID专家智能体": ("pid_tuning", "PID整定", 75),
-            "评估智能体": ("evaluation", "整定评估", 90),
+            "数据分析智能体": ("data_analysis", "数据分析", 20),
+            "系统辨识智能体": ("model_identification", "系统辨识", 40),
+            "本体知识智能体": ("knowledge_graph", "知识检索", 60),
+            "PID专家智能体": ("pid_tuning", "PID整定", 80),
+            "评估智能体": ("evaluation", "整定评估", 95),
         }
         return mapping.get(agent)
     if event_type == "result":
@@ -216,6 +220,9 @@ def create_app(
         csv_path: str,
         loop_name: str,
         loop_type: str,
+        plant_type: str,
+        scenario: str,
+        control_object: str,
         loop_uri: str,
         start_time: str,
         end_time: str,
@@ -225,6 +232,9 @@ def create_app(
             csv_path=csv_path,
             loop_name=loop_name,
             loop_type=loop_type,
+            plant_type=plant_type,
+            scenario=scenario,
+            control_object=control_object,
             loop_uri=loop_uri,
             start_time=start_time,
             end_time=end_time,
@@ -238,6 +248,9 @@ def create_app(
         task_id: str,
         loop_name: str,
         loop_type: str,
+        plant_type: str,
+        scenario: str,
+        control_object: str,
         loop_uri: str,
         start_time: str,
         end_time: str,
@@ -249,6 +262,9 @@ def create_app(
                 csv_path="",
                 loop_name=loop_name,
                 loop_type=loop_type,
+                plant_type=plant_type,
+                scenario=scenario,
+                control_object=control_object,
                 loop_uri=loop_uri,
                 start_time=start_time,
                 end_time=end_time,
@@ -293,6 +309,9 @@ def create_app(
         file: UploadFile = File(None),
         loop_name: str = Form(...),
         loop_type: str = Form("flow"),
+        plant_type: str = Form("distillation_column"),
+        scenario: str = Form(""),
+        control_object: str = Form(""),
         loop_uri: str = Form(default_loop_uri),
         start_time: str = Form(default_history_start_time),
         end_time: str = Form(default_history_end_time),
@@ -311,6 +330,9 @@ def create_app(
                     csv_path=csv_path,
                     loop_name=loop_name,
                     loop_type=loop_type,
+                    plant_type=plant_type,
+                    scenario=scenario,
+                    control_object=control_object,
                     loop_uri=loop_uri,
                     start_time=start_time,
                     end_time=end_time,
@@ -374,6 +396,9 @@ def create_app(
                         csv_path="",
                         loop_name=loop_name,
                         loop_type=normalized_loop_type,
+                        plant_type=payload.plant_type,
+                        scenario=payload.scenario,
+                        control_object=payload.control_object,
                         loop_uri=payload.loop_uri,
                         start_time=payload.start_time,
                         end_time=payload.end_time,
@@ -410,6 +435,9 @@ def create_app(
                     task_id=task_id,
                     loop_name=loop_name,
                     loop_type=normalized_loop_type,
+                    plant_type=payload.plant_type,
+                    scenario=payload.scenario,
+                    control_object=payload.control_object,
                     loop_uri=payload.loop_uri,
                     start_time=payload.start_time,
                     end_time=payload.end_time,

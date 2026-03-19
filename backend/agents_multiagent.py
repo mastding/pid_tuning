@@ -37,6 +37,7 @@ from services.tool_adapter_service import (
     fetch_history_data_tool as service_fetch_history_data_tool,
     fit_fopdt_tool as service_fit_fopdt_tool,
     load_data_tool as service_load_data_tool,
+    query_expert_knowledge_tool as service_query_expert_knowledge_tool,
     tune_pid_tool as service_tune_pid_tool,
 )
 from orchestration.event_mapper import (
@@ -50,6 +51,9 @@ from orchestration.workflow_runner import run_multi_agent_collaboration as orche
 from api.tune_app import create_app
 from memory.experience_service import build_experience_record, persist_experience_record, register_experience_reuse
 from state.session_store import SessionStore
+
+DEFAULT_KNOWLEDGE_GRAPH_API_URL = "http://graphrag.dicp.sixseven.ltd:5924/api/query"
+DEFAULT_KNOWLEDGE_GRAPH_ID = "build_20260317_003858"
 
 
 def create_model_client(*, model_api_key: str, model_api_url: str, model: str) -> OpenAIChatCompletionClient:
@@ -237,6 +241,35 @@ async def tool_tune_pid(
     return _to_jsonable(result)
 
 
+async def tool_query_expert_knowledge(
+    loop_type: str,
+    loop_name: str = "",
+    plant_type: str = "",
+    scenario: str = "",
+    control_object: str = "",
+    tower_section: str = "",
+    control_target: str = "",
+) -> Dict[str, Any]:
+    """Query distillation-column expert knowledge and store the guidance for PID tuning."""
+    result = await asyncio.to_thread(
+        service_query_expert_knowledge_tool,
+        session_store=_shared_data_store,
+        loop_type=loop_type,
+        loop_name=loop_name,
+        plant_type=plant_type,
+        scenario=scenario,
+        control_object=control_object,
+        tower_section=tower_section,
+        control_target=control_target,
+        graph_id=os.getenv("KNOWLEDGE_GRAPH_ID", DEFAULT_KNOWLEDGE_GRAPH_ID),
+        graph_api_url=os.getenv("KNOWLEDGE_GRAPH_API_URL", DEFAULT_KNOWLEDGE_GRAPH_API_URL),
+        query_mode=os.getenv("KNOWLEDGE_GRAPH_QUERY_MODE", "local"),
+        response_type=os.getenv("KNOWLEDGE_GRAPH_RESPONSE_TYPE", "要点式，尽量精炼"),
+        include_context=True,
+    )
+    return _to_jsonable(result)
+
+
 async def tool_evaluate_pid(
     model_type: str = "AUTO",
     selected_model_params: Any = None,
@@ -294,6 +327,7 @@ def create_pid_agents(
         tool_load_data=tool_load_data,
         tool_fetch_history_data=tool_fetch_history_data,
         tool_fit_fopdt=tool_fit_fopdt,
+        tool_query_expert_knowledge=tool_query_expert_knowledge,
         tool_tune_pid=tool_tune_pid,
         tool_evaluate_pid=tool_evaluate_pid,
     )
@@ -303,6 +337,9 @@ async def run_multi_agent_collaboration(
     csv_path: str,
     loop_name: str,
     loop_type: str,
+    plant_type: str,
+    scenario: str,
+    control_object: str,
     loop_uri: str,
     start_time: str,
     end_time: str,
@@ -313,6 +350,9 @@ async def run_multi_agent_collaboration(
         csv_path=csv_path,
         loop_name=loop_name,
         loop_type=loop_type,
+        plant_type=plant_type,
+        scenario=scenario,
+        control_object=control_object,
         loop_uri=loop_uri,
         start_time=start_time,
         end_time=end_time,

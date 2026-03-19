@@ -7,6 +7,26 @@ import pandas as pd
 from skills.data_analysis_skills import prepare_pid_dataset
 
 
+def enrich_step_events_with_time(cleaned_df: Any, step_events: list[Dict[str, Any]] | None) -> list[Dict[str, Any]]:
+    if cleaned_df is None or len(cleaned_df) == 0 or not step_events:
+        return step_events or []
+    if "timestamp" not in cleaned_df.columns:
+        return step_events or []
+
+    timestamps = cleaned_df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
+    last_index = len(timestamps) - 1
+    enriched: list[Dict[str, Any]] = []
+    for event in step_events:
+        start_idx = max(0, min(int(event.get("start_idx", 0)), last_index))
+        end_idx = max(start_idx, min(int(event.get("end_idx", start_idx)), last_index))
+        enriched.append({
+            **event,
+            "start_time": timestamps[start_idx],
+            "end_time": timestamps[end_idx],
+        })
+    return enriched
+
+
 def build_window_overview(
     cleaned_df: Any,
     selected_window: Dict[str, Any] | None,
@@ -62,7 +82,7 @@ def load_pid_dataset(csv_path: str) -> Dict[str, Any]:
     cleaned_df = prepared["cleaned_df"]
     window_df = prepared["window_df"]
     dt = float(prepared["dt"])
-    step_events = prepared["step_events"]
+    step_events = enrich_step_events_with_time(cleaned_df, prepared["step_events"])
     candidate_windows = prepared.get("candidate_windows") or []
     selected_event = prepared["selected_event"]
     quality_metrics = prepared["quality_metrics"] or {}
