@@ -19,6 +19,14 @@ from case_library import (
     list_case_library_items,
     list_similar_case_library_items,
 )
+from benchmarking import (
+    clone_candidate,
+    evaluate_candidate,
+    generate_candidate,
+    get_candidate_detail,
+    list_candidates,
+    list_cases,
+)
 from memory.experience_service import (
     clear_experience_center,
     get_experience_center_stats,
@@ -92,6 +100,15 @@ class WorkflowRunRequest(BaseModel):
     scenario: str = Field("", description="工况")
     control_object: str = Field("", description="控制对象")
     response_mode: str = Field("async", description="响应模式：async、blocking 或 streaming")
+
+
+class StrategyLabGenerateRequest(BaseModel):
+    candidate_id: str = Field("", description="Candidate ID")
+    profile_id: str = Field("default", description="Profile ID")
+    plugin_ids: list[str] = Field(default_factory=list, description="Plugin IDs")
+    objective: str = Field("", description="Objective")
+    case_id: str = Field("distillation_bidirectional", description="Case ID")
+    notes: str = Field("", description="Notes")
 
 
 def _normalize_loop_type(loop_type: str) -> str:
@@ -711,5 +728,39 @@ def create_app(
     @app.get("/api/case-library/{case_id}/similar")
     async def case_library_similar(case_id: str, limit: int = 5) -> JSONResponse:
         return JSONResponse({"items": list_similar_case_library_items(case_id, limit=limit)})
+
+    @app.get("/api/strategy-lab/cases")
+    async def strategy_lab_cases() -> JSONResponse:
+        return JSONResponse({"items": list_cases()})
+
+    @app.get("/api/strategy-lab/candidates")
+    async def strategy_lab_candidates() -> JSONResponse:
+        return JSONResponse({"items": list_candidates()})
+
+    @app.get("/api/strategy-lab/candidates/{candidate_id}")
+    async def strategy_lab_candidate_detail(candidate_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(get_candidate_detail(candidate_id))
+        except FileNotFoundError:
+            return JSONResponse({"error": "candidate_not_found", "candidate_id": candidate_id}, status_code=404)
+
+    @app.post("/api/strategy-lab/candidates/generate")
+    async def strategy_lab_generate(request: StrategyLabGenerateRequest) -> JSONResponse:
+        summary = generate_candidate(request.model_dump())
+        return JSONResponse({"item": summary})
+
+    @app.post("/api/strategy-lab/candidates/{candidate_id}/evaluate")
+    async def strategy_lab_evaluate(candidate_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(evaluate_candidate(candidate_id))
+        except FileNotFoundError:
+            return JSONResponse({"error": "candidate_not_found", "candidate_id": candidate_id}, status_code=404)
+
+    @app.post("/api/strategy-lab/candidates/{candidate_id}/clone")
+    async def strategy_lab_clone(candidate_id: str) -> JSONResponse:
+        try:
+            return JSONResponse({"item": clone_candidate(candidate_id)})
+        except FileNotFoundError:
+            return JSONResponse({"error": "candidate_not_found", "candidate_id": candidate_id}, status_code=404)
 
     return app

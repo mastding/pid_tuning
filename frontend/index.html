@@ -408,7 +408,7 @@
 
       <!-- 进度指示器 -->
       <div class="px-6 py-4 border-b border-slate-200 bg-white">
-        <div class="grid grid-cols-3 gap-2 rounded-xl bg-slate-100 p-1">
+        <div class="grid grid-cols-4 gap-2 rounded-xl bg-slate-100 p-1">
           <button
             @click="switchPage('tuning')"
             class="rounded-lg px-4 py-2 text-sm font-semibold transition-all"
@@ -429,6 +429,13 @@
             :class="currentPage === 'case-library' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
           >
             案例库
+          </button>
+          <button
+            @click="switchPage('strategy-lab')"
+            class="rounded-lg px-4 py-2 text-sm font-semibold transition-all"
+            :class="currentPage === 'strategy-lab' ? 'bg-white text-amber-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+          >
+            策略实验室
           </button>
         </div>
       </div>
@@ -544,18 +551,6 @@
           </div>
         </div>
 
-        <div v-if="false && dataSource === 'upload'">
-          <label class="block text-sm font-semibold text-slate-700 mb-2">上传CSV数据文件</label>
-          <input ref="fileInput" type="file" accept=".csv" @change="handleFileUpload" class="hidden">
-          <button @click="$refs.fileInput.click()"
-            class="w-full px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded-lg hover:from-blue-100 hover:to-indigo-100 border border-blue-200 transition-all font-medium">
-            <span class="text-xl mr-2">📁</span> 选择CSV文件
-          </button>
-          <p v-if="uploadedFile" class="text-xs text-slate-600 mt-2 truncate bg-green-50 px-3 py-2 rounded border border-green-200">
-            ✅ {{ uploadedFile.name }}
-          </p>
-        </div>
-
         <div v-if="dataSource === 'history'" class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
           <div class="flex items-start justify-between gap-3">
             <div class="text-sm font-semibold text-slate-700">历史数据参数</div>
@@ -599,13 +594,13 @@
 
         <div v-if="dataSource === 'upload'">
           <label class="block text-sm font-semibold text-slate-700 mb-2">上传 CSV 数据文件</label>
-          <input ref="fileInput" type="file" accept=".csv" @change="handleFileUpload" class="hidden">
-          <button
-            @click="$refs.fileInput.click()"
-            class="w-full px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded-lg hover:from-blue-100 hover:to-indigo-100 border border-blue-200 transition-all font-medium"
+          <input id="csv-upload-input" ref="fileInput" type="file" accept=".csv" @change="handleFileUpload" class="hidden">
+          <label
+            for="csv-upload-input"
+            class="flex w-full cursor-pointer items-center justify-center rounded-lg border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3 font-medium text-blue-700 transition-all hover:from-blue-100 hover:to-indigo-100"
           >
             <span class="text-xl mr-2">📎</span> 选择 CSV 文件
-          </button>
+          </label>
           <p v-if="uploadedFile" class="text-xs text-slate-600 mt-2 truncate bg-green-50 px-3 py-2 rounded border border-green-200">
             已选择：{{ uploadedFile.name }}
           </p>
@@ -686,7 +681,7 @@
         </div>
       </div>
 
-      <div v-else class="p-6 space-y-4 flex-1">
+      <div v-else-if="currentPage === 'experience'" class="p-6 space-y-4 flex-1">
         <div>
           <label class="block text-sm font-semibold text-slate-700 mb-2">关键词搜索</label>
           <input v-model="experienceFilters.keyword" type="text" placeholder="回路名称 / loop_uri / experience_id"
@@ -749,6 +744,53 @@
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
           <div class="font-semibold text-slate-800 mb-2">说明</div>
           <p>经验中心用于查看已沉淀的整定经验、筛选历史案例，并为后续类似回路提供参考。</p>
+        </div>
+      </div>
+      <div v-if="currentPage === 'strategy-lab'" class="p-6 space-y-4 flex-1">
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">候选策略 ID</label>
+          <input :value="strategyLabCandidateIdDisplayValue()" @input="updateStrategyLabCandidateIdDisplay($event.target.value)" type="text" placeholder="精馏塔双向候选策略 V1"
+            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">策略画像</label>
+          <select v-model="strategyLabForm.profileId"
+            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all">
+            <option value="default">默认策略</option>
+            <option value="distillation">精馏塔策略</option>
+            <option value="regulatory">抗扰策略</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">插件列表</label>
+          <input :value="strategyLabPluginIdsDisplayValue()" @input="updateStrategyLabPluginIdsDisplay($event.target.value)" type="text" placeholder="激励质量，双向配对"
+            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">优化目标</label>
+          <textarea v-model="strategyLabForm.objective" rows="4"
+            class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"></textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">基线案例</label>
+          <select v-model="strategyLabForm.caseId"
+            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all">
+            <option v-for="item in strategyLabCases" :key="item.id" :value="item.id">{{ item.name }}</option>
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <button @click="generateStrategyLabCandidate"
+            class="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-600 transition-all">
+            生成候选策略
+          </button>
+          <button @click="resetStrategyLabForm"
+            class="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all">
+            重置配置
+          </button>
+        </div>
+        <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <div class="font-semibold mb-2">实验室说明</div>
+          <p>这里用于管理基准评测案例、候选策略和每一版策略的评估结果。</p>
         </div>
       </div>
     </aside>
@@ -1100,7 +1142,7 @@
             <div class="flex items-start justify-between gap-4">
               <div>
                 <h2 class="text-2xl font-bold text-slate-800">案例库</h2>
-                <p class="mt-2 text-sm text-slate-600">查看从 pid-tuning 项目导入的标准案例、外部案例和 benchmark 资产。</p>
+                <p class="mt-2 text-sm text-slate-600">查看从 pid-tuning 项目导入的标准案例、外部案例和基准评测资产。</p>
               </div>
               <button
                 @click="loadCaseLibraryCenter"
@@ -1228,7 +1270,7 @@
               <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div class="px-5 py-4 border-b border-slate-200">
                   <h3 class="text-lg font-bold text-slate-800">案例详情</h3>
-                  <p class="text-xs text-slate-500 mt-1">查看案例元信息、模型、标签和 benchmark 摘要。</p>
+                  <p class="text-xs text-slate-500 mt-1">查看案例元信息、模型、标签和基准评测摘要。</p>
                 </div>
                 <div v-if="caseLibraryDetailLoading" class="px-5 py-8 text-sm text-slate-500">正在加载案例详情...</div>
                 <div v-else-if="!selectedCase" class="px-5 py-8 text-sm text-slate-500">尚未选择案例。</div>
@@ -1276,6 +1318,391 @@
                       <div><span class="text-slate-500">结束时间</span><div class="font-mono text-slate-800 break-all">{{ selectedCase.raw_timeseries_summary?.time_end || '-' }}</div></div>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="currentPage === 'strategy-lab'" class="space-y-6">
+          <div class="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-6 shadow-sm">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h2 class="text-2xl font-bold text-slate-800">策略实验室</h2>
+                <p class="mt-2 text-sm text-slate-600">管理基准评测案例、生成候选策略，以及查看评估结果。</p>
+              </div>
+              <button
+                @click="resetStrategyLabForm"
+                class="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 transition-all"
+              >
+                新建实验
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div class="text-xs font-semibold text-slate-500">基准评测案例数</div>
+              <div class="mt-2 text-2xl font-bold text-slate-900">{{ strategyLabCases.length }}</div>
+            </div>
+            <div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm">
+              <div class="text-xs font-semibold text-slate-500">候选策略总数</div>
+              <div class="mt-2 text-2xl font-bold text-blue-700">{{ strategyLabCandidates.length }}</div>
+            </div>
+            <div class="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
+              <div class="text-xs font-semibold text-slate-500">发布闸门通过</div>
+              <div class="mt-2 text-2xl font-bold text-emerald-700">{{ strategyLabCandidates.filter(item => item.releaseGatePassed).length }}</div>
+            </div>
+            <div class="rounded-xl border border-purple-200 bg-white p-4 shadow-sm">
+              <div class="text-xs font-semibold text-slate-500">当前基线案例</div>
+              <div class="mt-2 text-base font-bold text-purple-700">{{ strategyLabCaseName(strategyLabForm.caseId) }}</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-5 gap-6">
+            <div class="xl:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">案例列表</h3>
+                <p class="text-xs text-slate-500 mt-1">查看基准评测案例的期望插件、回路类型和基线摘要。</p>
+              </div>
+              <div class="divide-y divide-slate-100">
+                <div v-for="item in strategyLabCases" :key="item.id" class="px-5 py-4">
+                  <div class="font-semibold text-slate-900">{{ item.name }}</div>
+                  <div class="mt-1 text-sm text-slate-600">{{ item.summary }}</div>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">{{ strategyLabLoopTypeLabel(item.loopType) }}</span>
+                    <span class="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">{{ strategyLabProfileLabel(item.profileId) }}</span>
+                    <span v-for="plugin in item.expectedPlugins" :key="`${item.id}-${plugin}`" class="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+                      {{ strategyLabPluginLabel(plugin) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="xl:col-span-3 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+                <div>
+                  <h3 class="text-lg font-bold text-slate-800">候选策略列表</h3>
+                  <p class="text-xs text-slate-500 mt-1">生成后可在这里查看评分、状态和详情。</p>
+                </div>
+                <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{{ strategyLabCandidates.length }} 条</span>
+              </div>
+
+              <div v-if="!strategyLabCandidates.length" class="px-5 py-10 text-sm text-slate-500">
+                尚未生成候选策略，可在左侧配置后生成。
+              </div>
+
+              <div v-else class="divide-y divide-slate-100">
+                <button
+                  v-for="item in strategyLabCandidates"
+                  :key="item.id"
+                  @click="selectStrategyLabCandidate(item.id)"
+                  class="w-full px-5 py-4 text-left hover:bg-slate-50 transition-colors"
+                >
+                  <div class="flex items-start justify-between gap-4">
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <div class="font-semibold text-slate-900">{{ strategyLabCandidateLabel(item.id) }}</div>
+                        <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{{ strategyLabProfileLabel(item.profileId) }}</span>
+                        <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="item.releaseGatePassed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">
+                          {{ item.releaseGatePassed ? '发布闸门通过' : '待调整' }}
+                        </span>
+                      </div>
+                      <div class="mt-2 text-sm text-slate-600">{{ item.objective }}</div>
+                    </div>
+                    <div class="text-right text-sm">
+                      <div class="text-slate-500">平均分</div>
+                      <div class="font-mono text-slate-900">{{ formatNumber(item.averageScore, 2) }}</div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-3">
+              <div>
+                <h3 class="text-lg font-bold text-slate-800">候选策略详情</h3>
+                <p class="text-xs text-slate-500 mt-1">显示提示词摘要、基准评测报告和候选插件列表。</p>
+              </div>
+              <div v-if="selectedStrategyLabCandidate" class="flex items-center gap-2">
+                <button
+                  @click="evaluateStrategyLabCandidate(selectedStrategyLabCandidate.id)"
+                  class="rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-all"
+                >
+                  重新评测
+                </button>
+                <button
+                  @click="cloneStrategyLabCandidate(selectedStrategyLabCandidate.id)"
+                  class="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 transition-all"
+                >
+                  派生新版本
+                </button>
+              </div>
+            </div>
+            <div v-if="!selectedStrategyLabCandidate" class="px-5 py-10 text-sm text-slate-500">
+              点击上方候选策略记录查看详情。
+            </div>
+            <div v-else class="p-5 space-y-4">
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+                <div class="rounded-lg bg-slate-50 p-3">
+                  <div class="text-xs text-slate-500">候选策略 ID</div>
+                  <div class="mt-1 font-semibold text-slate-800">{{ strategyLabCandidateLabel(selectedStrategyLabCandidate.id) }}</div>
+                  <div class="mt-1 text-[11px] text-slate-500">已自动匹配候选名称</div>
+                </div>
+                <div class="rounded-lg bg-slate-50 p-3">
+                  <div class="text-xs text-slate-500">基线案例</div>
+                  <div class="mt-1 font-semibold text-slate-800">{{ strategyLabCaseName(selectedStrategyLabCandidate.caseId) }}</div>
+                </div>
+                <div class="rounded-lg bg-slate-50 p-3">
+                  <div class="text-xs text-slate-500">评估分数</div>
+                  <div class="mt-1 font-mono text-slate-800">{{ formatNumber(selectedStrategyLabCandidate.averageScore, 2) }}</div>
+                </div>
+                <div class="rounded-lg bg-slate-50 p-3">
+                  <div class="text-xs text-slate-500">发布闸门</div>
+                  <div class="mt-1 font-semibold" :class="selectedStrategyLabCandidate.releaseGatePassed ? 'text-emerald-700' : 'text-amber-700'">{{ selectedStrategyLabCandidate.releaseGatePassed ? '通过' : '未通过' }}</div>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div class="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-semibold text-slate-800">候选演化链</div>
+                    <div class="mt-1 text-xs text-slate-500">展示当前候选从哪一版演化而来，便于追踪版本来源和每次迭代结果。</div>
+                  </div>
+                  <div class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 border border-slate-200">
+                    {{ strategyLabEvolutionChain(selectedStrategyLabCandidate).length }} 个版本节点
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <div
+                    v-for="node in strategyLabEvolutionChain(selectedStrategyLabCandidate)"
+                    :key="`chain-${node.id}`"
+                    class="rounded-xl border border-slate-200 bg-white p-4"
+                    :class="node.id === selectedStrategyLabCandidate.id ? 'ring-2 ring-blue-200 border-blue-300' : ''"
+                  >
+                    <div class="flex items-center justify-between gap-3">
+                      <div>
+                        <div class="text-xs font-semibold text-slate-500">{{ node.stepLabel }}</div>
+                        <div class="mt-1 text-sm font-bold text-slate-900">{{ strategyLabCandidateLabel(node.id) }}</div>
+                        <div class="mt-1 text-[11px] text-slate-500">版本来源已记录</div>
+                      </div>
+                      <button
+                        v-if="node.id !== selectedStrategyLabCandidate.id"
+                        @click="selectStrategyLabCandidate(node.id)"
+                        class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-all"
+                      >
+                        查看此版
+                      </button>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500">{{ node.relationLabel }}</div>
+                    <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div class="rounded-lg bg-slate-50 p-2">
+                        <div class="text-slate-500">状态</div>
+                        <div class="mt-1 font-semibold text-slate-800">{{ strategyLabStatusLabel(node.status) }}</div>
+                      </div>
+                      <div class="rounded-lg bg-slate-50 p-2">
+                        <div class="text-slate-500">平均分</div>
+                        <div class="mt-1 font-semibold text-slate-800">{{ formatNumber(node.averageScore, 2) }}</div>
+                      </div>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-600">{{ node.notes || '该版本未额外记录备注。' }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-violet-200 bg-violet-50 p-4">
+                <div class="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-semibold text-slate-800">候选对比</div>
+                    <div class="mt-1 text-xs text-slate-500">选择另一版候选策略，直接比较平均分、插件差异和逐案例表现。</div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <select
+                      v-model="strategyLabCompareCandidateId"
+                      class="rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                    >
+                      <option value="">请选择对比候选</option>
+                      <option v-for="item in strategyLabCompareCandidates(selectedStrategyLabCandidate.id)" :key="`compare-${item.id}`" :value="item.id">
+                        {{ strategyLabCandidateLabel(item.id) }}
+                      </option>
+                    </select>
+                    <button
+                      v-if="strategyLabCompareCandidateId"
+                      @click="strategyLabCompareCandidateId = ''"
+                      class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-all"
+                    >
+                      清空对比
+                    </button>
+                  </div>
+                </div>
+                <div v-if="!comparedStrategyLabCandidate" class="rounded-lg border border-dashed border-violet-200 bg-white/80 px-4 py-5 text-sm text-slate-500">
+                  请选择一版候选策略进行并排对比。
+                </div>
+                <div v-else class="space-y-4">
+                  <div class="rounded-lg border border-violet-100 bg-white px-4 py-3 text-sm text-slate-700">
+                    {{ strategyLabCompareHeadline(selectedStrategyLabCandidate, comparedStrategyLabCandidate) }}
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+                    <div class="rounded-lg bg-white p-3 border border-violet-100">
+                      <div class="text-xs text-slate-500">当前候选</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ strategyLabCandidateLabel(selectedStrategyLabCandidate.id) }}</div>
+                    </div>
+                    <div class="rounded-lg bg-white p-3 border border-violet-100">
+                      <div class="text-xs text-slate-500">对比候选</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ strategyLabCandidateLabel(comparedStrategyLabCandidate.id) }}</div>
+                    </div>
+                    <div class="rounded-lg bg-white p-3 border border-violet-100">
+                      <div class="text-xs text-slate-500">平均分差值</div>
+                      <div class="mt-1 font-semibold" :class="strategyLabScoreDelta(selectedStrategyLabCandidate, comparedStrategyLabCandidate) >= 0 ? 'text-emerald-700' : 'text-rose-700'">
+                        {{ strategyLabScoreDelta(selectedStrategyLabCandidate, comparedStrategyLabCandidate) >= 0 ? '+' : '' }}{{ formatNumber(strategyLabScoreDelta(selectedStrategyLabCandidate, comparedStrategyLabCandidate), 2) }}
+                      </div>
+                    </div>
+                    <div class="rounded-lg bg-white p-3 border border-violet-100">
+                      <div class="text-xs text-slate-500">插件差异</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ strategyLabPluginDiff(selectedStrategyLabCandidate, comparedStrategyLabCandidate) }}</div>
+                    </div>
+                  </div>
+                  <div class="space-y-3">
+                    <div
+                      v-for="row in strategyLabCompareCaseRows(selectedStrategyLabCandidate, comparedStrategyLabCandidate)"
+                      :key="`case-compare-${row.caseId}`"
+                      class="rounded-xl border border-violet-100 bg-white p-4"
+                    >
+                      <div class="flex items-start justify-between gap-3">
+                        <div>
+                          <div class="text-sm font-semibold text-slate-800">{{ row.caseName }}</div>
+                          <div class="mt-1 text-xs text-slate-500">{{ row.headline }}</div>
+                        </div>
+                        <div class="rounded-full px-3 py-1 text-xs font-semibold" :class="row.delta >= 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'">
+                          {{ row.delta >= 0 ? '+' : '' }}{{ formatNumber(row.delta, 2) }}
+                        </div>
+                      </div>
+                      <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        <div class="rounded-lg bg-slate-50 p-3 border border-slate-200">
+                          <div class="text-xs text-slate-500">当前候选</div>
+                          <div class="mt-1 font-semibold text-slate-800">{{ formatNumber(row.current?.score, 2) }}</div>
+                          <div class="mt-2 text-xs text-slate-600">{{ row.current?.summary || '该案例暂无结果。' }}</div>
+                        </div>
+                        <div class="rounded-lg bg-slate-50 p-3 border border-slate-200">
+                          <div class="text-xs text-slate-500">对比候选</div>
+                          <div class="mt-1 font-semibold text-slate-800">{{ formatNumber(row.compared?.score, 2) }}</div>
+                          <div class="mt-2 text-xs text-slate-600">{{ row.compared?.summary || '该案例暂无结果。' }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div class="text-sm font-semibold text-slate-800 mb-2">提示词摘要</div>
+                <div class="text-sm text-slate-700 leading-7 whitespace-pre-line">{{ formatStrategyLabPrompt(selectedStrategyLabCandidate.prompt) }}</div>
+              </div>
+
+              <div class="rounded-lg border border-blue-100 bg-blue-50 p-4">
+                <div class="text-sm font-semibold text-slate-800 mb-2">基准评测报告</div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                  <div class="rounded-lg bg-white/80 p-3 border border-blue-100">
+                    <div class="text-xs text-slate-500">命中期望插件</div>
+                    <div class="mt-1 font-semibold text-slate-800">{{ selectedStrategyLabCandidate.expectedPluginHit ? '是' : '否' }}</div>
+                  </div>
+                  <div class="rounded-lg bg-white/80 p-3 border border-blue-100">
+                    <div class="text-xs text-slate-500">双向配对命中</div>
+                    <div class="mt-1 font-semibold text-slate-800">{{ selectedStrategyLabCandidate.bidirectionalPairHit ? '是' : '否' }}</div>
+                  </div>
+                  <div class="rounded-lg bg-white/80 p-3 border border-blue-100">
+                    <div class="text-xs text-slate-500">主要诊断</div>
+                    <div class="mt-1 font-semibold text-slate-800">{{ selectedStrategyLabCandidate.diagnostic }}</div>
+                  </div>
+                </div>
+                <div class="mt-4 rounded-lg border border-blue-100 bg-white/80 p-4">
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <div class="text-sm font-semibold text-slate-800">报告摘要</div>
+                    <div class="text-xs font-mono text-slate-500">{{ selectedStrategyLabCandidate.benchmarkReport?.reportId || 'local-demo-report' }}</div>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">案例通过数</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ selectedStrategyLabCandidate.benchmarkReport?.passedCases ?? 0 }} / {{ selectedStrategyLabCandidate.benchmarkReport?.totalCases ?? 0 }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">平均分</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ formatNumber(selectedStrategyLabCandidate.benchmarkReport?.averageScore, 2) }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">最佳案例</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ selectedStrategyLabCandidate.benchmarkReport?.bestCase || '-' }}</div>
+                    </div>
+                    <div class="rounded-lg bg-slate-50 p-3">
+                      <div class="text-xs text-slate-500">主要短板</div>
+                      <div class="mt-1 font-semibold text-slate-800">{{ selectedStrategyLabCandidate.benchmarkReport?.mainGap || '-' }}</div>
+                    </div>
+                  </div>
+                  <div class="mt-4">
+                    <div class="text-xs font-semibold text-slate-500 mb-2">逐案例结果</div>
+                    <div class="space-y-2">
+                      <div v-for="item in (selectedStrategyLabCandidate.benchmarkReport?.cases || [])" :key="item.caseId" class="rounded-lg border border-blue-100 bg-white p-3 text-sm">
+                        <div class="flex items-start justify-between gap-4">
+                          <div class="min-w-0">
+                            <div class="font-semibold text-slate-800">{{ item.caseName }}</div>
+                            <div class="mt-1 text-slate-600">{{ item.summary }}</div>
+                          </div>
+                          <div class="text-right">
+                            <div class="font-mono text-slate-800">{{ formatNumber(item.score, 2) }}</div>
+                            <div class="text-xs" :class="item.passed ? 'text-emerald-700' : 'text-amber-700'">{{ item.passed ? '通过' : '待改进' }}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-amber-100 bg-amber-50 p-4">
+                <div class="text-sm font-semibold text-slate-800 mb-2">插件列表</div>
+                <div class="flex flex-wrap gap-2">
+                  <span v-for="plugin in selectedStrategyLabCandidate.pluginIds" :key="`detail-${plugin}`" class="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-semibold text-amber-700">
+                    {{ strategyLabPluginLabel(plugin) }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div class="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-semibold text-slate-800">插件源码 / 自动生成代码区</div>
+                    <div class="mt-1 text-xs text-slate-500">显示本次候选策略对应的插件源码、生成方式和目标文件位置。</div>
+                  </div>
+                  <div class="text-right text-xs text-slate-500">
+                    <div>生成方式：{{ strategyLabGeneratorLabel(selectedStrategyLabCandidate.codeArtifact?.backend) }}</div>
+                    <div>目标文件：{{ strategyLabFileLabel(selectedStrategyLabCandidate.codeArtifact?.fileName) }}</div>
+                  </div>
+                </div>
+                <div class="mb-4 grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+                  <div class="rounded-lg bg-white p-3 border border-slate-200">
+                    <div class="text-xs text-slate-500">代码用途</div>
+                    <div class="mt-1 font-semibold text-slate-800">{{ strategyLabCodePurpose(selectedStrategyLabCandidate) }}</div>
+                  </div>
+                  <div class="rounded-lg bg-white p-3 border border-slate-200">
+                    <div class="text-xs text-slate-500">主要插件能力</div>
+                    <div class="mt-1 font-semibold text-slate-800">{{ strategyLabPrimaryPlugin(selectedStrategyLabCandidate) }}</div>
+                  </div>
+                  <div class="rounded-lg bg-white p-3 border border-slate-200">
+                    <div class="text-xs text-slate-500">代码来源</div>
+                    <div class="mt-1 font-semibold text-slate-800">{{ strategyLabCodeSource(selectedStrategyLabCandidate) }}</div>
+                  </div>
+                  <div class="rounded-lg bg-white p-3 border border-slate-200">
+                    <div class="text-xs text-slate-500">发布状态</div>
+                    <div class="mt-1 font-semibold" :class="selectedStrategyLabCandidate.releaseGatePassed ? 'text-emerald-700' : 'text-amber-700'">
+                      {{ selectedStrategyLabCandidate.releaseGatePassed ? '已通过发布闸门' : '尚未通过发布闸门' }}
+                    </div>
+                  </div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-950 p-4">
+                  <pre class="overflow-x-auto whitespace-pre-wrap break-words text-xs leading-6 text-slate-100">{{ selectedStrategyLabCandidate.codeArtifact?.sourceCode || '# 暂无插件源码' }}</pre>
                 </div>
               </div>
             </div>
@@ -2066,6 +2493,115 @@
             L: ''
           },
           experienceSearchResults: null,
+          strategyLabForm: {
+            candidateId: 'distillation_candidate_v1',
+            profileId: 'distillation',
+            pluginIds: 'excitation_quality,directional_pair',
+            objective: '提升候选窗口排序质量，并保留更丰富的诊断信息。',
+            caseId: 'distillation_bidirectional'
+          },
+          strategyLabCases: [
+            {
+              id: 'distillation_bidirectional',
+              name: '精馏塔顶温度双向阶跃案例',
+              summary: '包含正负两个方向的阶跃响应，用于检查双向配对和诊断质量。',
+              loopType: 'temperature',
+              profileId: 'distillation',
+              expectedPlugins: ['excitation_quality', 'directional_pair']
+            },
+            {
+              id: 'generic_flow_step',
+              name: '通用流量回路单次设定值阶跃案例',
+              summary: '适用于默认策略，检查激励质量排序是否合理。',
+              loopType: 'flow',
+              profileId: 'default',
+              expectedPlugins: ['excitation_quality']
+            },
+            {
+              id: 'regulatory_disturbance',
+              name: '恒定设定值下的抗扰抑制案例',
+              summary: '在 SV 基本不变的情况下检查是否可以补充扰动窗口。',
+              loopType: 'temperature',
+              profileId: 'regulatory',
+              expectedPlugins: ['regulatory_window']
+            }
+          ],
+          strategyLabCandidates: [
+            {
+              id: 'distillation_candidate_demo',
+              profileId: 'distillation',
+              pluginIds: ['excitation_quality', 'directional_pair'],
+              objective: '提升候选窗口排序质量，并保留更丰富的诊断信息。',
+              caseId: 'distillation_bidirectional',
+              averageScore: 88,
+              expectedPluginHit: true,
+              bidirectionalPairHit: true,
+              releaseGatePassed: true,
+              diagnostic: '已命中期望插件，候选窗口的诊断质量较好。',
+              benchmarkReport: {
+                reportId: 'benchmark-demo-001',
+                passedCases: 3,
+                totalCases: 3,
+                averageScore: 88,
+                bestCase: '精馏塔顶温度双向阶跃案例',
+                mainGap: '抗扰场景下的窗口补充仍可继续增强',
+                cases: [
+                  {
+                    caseId: 'distillation_bidirectional',
+                    caseName: '精馏塔顶温度双向阶跃案例',
+                    score: 92,
+                    passed: true,
+                    summary: '双向配对命中，诊断信息完整，适合当前精馏场景。'
+                  },
+                  {
+                    caseId: 'generic_flow_step',
+                    caseName: '通用流量回路单次设定值阶跃案例',
+                    score: 84,
+                    passed: true,
+                    summary: '激励质量排序合理，默认场景下可直接复用。'
+                  },
+                  {
+                    caseId: 'regulatory_disturbance',
+                    caseName: '恒定设定值下的抗扰抑制案例',
+                    score: 78,
+                    passed: true,
+                    summary: '扰动窗口能力基本可用，但还可以继续补强。'
+                  }
+                ]
+              },
+              codeArtifact: {
+                backend: 'heuristic',
+                fileName: 'window_plugins/directional_pair.py',
+                sourceCode: [
+                  'def rank_directional_pairs(candidate_windows, diagnostics):',
+                  '    """',
+                  '    Prefer paired positive/negative windows for distillation loops.',
+                  '    Keep explainable diagnostics for the selected pair.',
+                  '    """',
+                  '    ranked = []',
+                  '    for window in candidate_windows:',
+                  '        score = float(window.get(\"score\", 0.0))',
+                  '        if window.get(\"direction\") in {\"up\", \"down\"}:',
+                  '            score += 0.15',
+                  '        ranked.append({**window, \"score\": score})',
+                  '    ranked.sort(key=lambda item: item.get(\"score\", 0.0), reverse=True)',
+                  '    diagnostics.append(\"directional_pair ranking applied\")',
+                  '    return ranked'
+                ].join('\n')
+              },
+              prompt: [
+                '候选策略 ID：精馏塔双向候选策略示例版',
+                '策略画像：精馏塔策略',
+                '基线案例：精馏塔顶温度双向阶跃案例',
+                '优化目标：提升候选窗口排序质量，并保留更丰富的诊断信息。',
+                '插件列表：激励质量，双向配对',
+                '请围绕候选窗口生成、排序与诊断可解释性进行优化。'
+              ].join('\\n'),
+              createdAt: new Date().toLocaleString()
+            }
+          ],
+          selectedStrategyLabCandidateId: 'distillation_candidate_demo',
+          strategyLabCompareCandidateId: '',
           helpCenterOpen: false,
           helpCenterLoading: false,
           helpCenterHtml: '',
@@ -2114,6 +2650,10 @@
           return 'pid_tuning_messages_v1';
         },
 
+        strategyLabStorageKey() {
+          return 'pid_tuning_strategy_lab_v1';
+        },
+
         saveMessages() {
           localStorage.setItem(this.messageStorageKey(), JSON.stringify({
             messages: this.messages,
@@ -2145,6 +2685,131 @@
           }
         },
 
+        loadStrategyLabState() {
+          const raw = localStorage.getItem(this.strategyLabStorageKey());
+          if (!raw) return;
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.selectedId) {
+              this.selectedStrategyLabCandidateId = parsed.selectedId;
+            }
+            if (parsed.compareId) {
+              this.strategyLabCompareCandidateId = parsed.compareId;
+            }
+          } catch (error) {
+            console.warn('Failed to restore strategy lab state:', error);
+          }
+        },
+
+        saveStrategyLabState() {
+          localStorage.setItem(this.strategyLabStorageKey(), JSON.stringify({
+            selectedId: this.selectedStrategyLabCandidateId,
+            compareId: this.strategyLabCompareCandidateId
+          }));
+        },
+
+        normalizeStrategyLabCandidate(summary, detail = null) {
+          const manifest = detail?.manifest || {};
+          const report = detail?.benchmark_report || {};
+          const summaryPayload = summary || {};
+          const benchmarkSummary = report?.benchmark_summary || manifest?.benchmark_summary || {};
+          const releaseGate = report?.release_gate || {};
+          const pluginSources = Array.isArray(detail?.plugin_sources) ? detail.plugin_sources : [];
+          const primarySource = pluginSources[0] || null;
+          const notes = summaryPayload.notes || manifest.notes || '';
+          const sourceCandidate = summaryPayload.sourceCandidate
+            || summaryPayload.source_candidate
+            || manifest.source_candidate
+            || detail?.generation_request?.source_candidate
+            || (String(notes).startsWith('Cloned from ') ? String(notes).replace('Cloned from ', '').trim() : '');
+          return {
+            id: summaryPayload.id || manifest.candidate_id,
+            profileId: summaryPayload.profile_id || manifest.profile_id || 'default',
+            pluginIds: summaryPayload.plugin_ids || manifest.plugin_ids || [],
+            status: summaryPayload.status || manifest.status || 'draft',
+            objective: summaryPayload.objective || detail?.generation_request?.objective || '',
+            caseId: detail?.generation_request?.case_id || 'distillation_bidirectional',
+            averageScore: Number(summaryPayload.average_score ?? benchmarkSummary.average_score ?? 0),
+            expectedPluginHit: Array.isArray((benchmarkSummary.results || [])[0]?.details?.plugin_hits)
+              ? (benchmarkSummary.results[0].details.plugin_hits || []).length > 0
+              : Boolean(summaryPayload.release_gate_passed),
+            bidirectionalPairHit: Boolean((benchmarkSummary.results || [])[0]?.details?.pair_detected),
+            releaseGatePassed: Boolean(summaryPayload.release_gate_passed ?? releaseGate.approved),
+            diagnostic: (benchmarkSummary.results || [])[0]?.details?.window_diagnostics?.map(item => this.strategyLabPluginLabel(item.plugin)).join('，') || '暂无诊断摘要',
+            prompt: detail?.prompt || '',
+            benchmarkReport: detail ? {
+              reportId: detail?.manifest?.benchmark_report_path || '',
+              passedCases: Number(benchmarkSummary.passed_count || 0),
+              totalCases: Number(benchmarkSummary.case_count || 0),
+              averageScore: Number(benchmarkSummary.average_score || 0),
+              bestCase: this.strategyLabCaseName((benchmarkSummary.results || []).sort((a, b) => Number(b.score || 0) - Number(a.score || 0))[0]?.case_id) || '-',
+              mainGap: releaseGate.approved ? '当前候选已通过发布闸门。' : '当前候选尚未通过发布闸门。',
+              cases: (benchmarkSummary.results || []).map(item => ({
+                caseId: item.case_id,
+                caseName: this.strategyLabCaseName(item.case_id),
+                score: Number(item.score || 0),
+                passed: Boolean(item.passed),
+                summary: (item.details?.reason_codes || []).join('；') || item.details?.selection_reason || '已完成候选评测。'
+              }))
+            } : summaryPayload.benchmarkReport,
+            codeArtifact: detail ? {
+              backend: detail?.promotion?.generator_backend || 'artifact',
+              fileName: primarySource?.file_name || '-',
+              sourceCode: primarySource?.source_code || '# 暂无插件源码'
+            } : summaryPayload.codeArtifact,
+            pluginSources,
+            generationRequest: detail?.generation_request || {},
+            profile: detail?.profile || {},
+            baselineSnapshot: detail?.baseline_snapshot || {},
+            promotion: detail?.promotion || {},
+            sourceCandidate,
+            notes,
+            createdAt: summaryPayload.updated_at || ''
+          };
+        },
+
+        async loadStrategyLabCases() {
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/cases`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            this.strategyLabCases = (payload.items || []).map(item => ({
+              id: item.id,
+              name: item.name,
+              profileId: item.profile_id,
+              loopType: item.loop_type,
+              summary: item.summary,
+              expectedPlugins: item.expected_plugins || []
+            }));
+          } catch (error) {
+            console.error('Failed to load strategy lab cases:', error);
+          }
+        },
+
+        async loadStrategyLabCandidates() {
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            this.strategyLabCandidates = (payload.items || []).map(item => this.normalizeStrategyLabCandidate(item));
+            if (
+              this.strategyLabCandidates.length &&
+              (!this.selectedStrategyLabCandidateId || !this.strategyLabCandidates.find(item => item.id === this.selectedStrategyLabCandidateId))
+            ) {
+              this.selectedStrategyLabCandidateId = this.strategyLabCandidates[0].id;
+            }
+            if (this.selectedStrategyLabCandidateId) {
+              await this.selectStrategyLabCandidate(this.selectedStrategyLabCandidateId);
+            }
+            if (this.strategyLabCompareCandidateId && !this.strategyLabCandidates.find(item => item.id === this.strategyLabCompareCandidateId)) {
+              this.strategyLabCompareCandidateId = '';
+            }
+            this.saveStrategyLabState();
+          } catch (error) {
+            console.error('Failed to load strategy lab candidates:', error);
+          }
+        },
+
         async switchPage(page) {
           this.currentPage = page;
           if (page === 'experience') {
@@ -2152,6 +2817,477 @@
           }
           if (page === 'case-library') {
             await this.loadCaseLibraryCenter();
+          }
+          if (page === 'strategy-lab') {
+            await this.loadStrategyLabCases();
+            await this.loadStrategyLabCandidates();
+          }
+        },
+
+        resetStrategyLabForm() {
+          this.strategyLabForm = {
+            candidateId: `candidate_${Date.now()}`,
+            profileId: 'distillation',
+            pluginIds: 'excitation_quality,directional_pair',
+            objective: '提升候选窗口排序质量，给出可解释诊断信息。',
+            caseId: 'distillation_bidirectional'
+          };
+        },
+
+        strategyLabCaseName(caseId) {
+          return this.strategyLabCases.find(item => item.id === caseId)?.name || caseId || '-';
+        },
+
+        strategyLabLoopTypeLabel(loopType) {
+          const labels = {
+            temperature: '温度',
+            flow: '流量',
+            pressure: '压力',
+            level: '液位'
+          };
+          return labels[String(loopType || '').trim()] || loopType || '-';
+        },
+
+        strategyLabCandidateLabel(candidateId) {
+          const labels = {
+            example: '默认示例候选策略',
+            agent_example: '激励质量候选策略',
+            agent_example_v2: '激励质量候选策略 V2',
+            distillation_candidate_demo: '精馏塔双向候选策略示例版',
+            distillation_candidate_v1: '精馏塔双向候选策略 V1',
+            distillation_candidate_v2: '精馏塔双向候选策略 V2',
+            distillation_candidate_v3: '精馏塔双向候选策略 V3',
+            distillation_candidate_v3_v2: '精馏塔双向候选策略 V3 派生版'
+          };
+          const raw = String(candidateId || '').trim();
+          if (!raw) return '-';
+          if (labels[raw]) return labels[raw];
+          return raw
+            .replace(/^distillation_candidate/i, '精馏塔候选策略')
+            .replace(/^agent_example/i, '实验候选策略')
+            .replace(/_v(\d+)/gi, ' V$1')
+            .replace(/_/g, ' ');
+        },
+
+        strategyLabCandidateIdDisplayValue() {
+          return this.strategyLabCandidateLabel(this.strategyLabForm.candidateId || '');
+        },
+
+        strategyLabCandidateIdFromDisplay(value) {
+          const normalized = String(value || '').trim();
+          if (!normalized) return '';
+          const direct = this.strategyLabCandidates.find(item => this.strategyLabCandidateLabel(item.id) === normalized)?.id;
+          if (direct) return direct;
+          const preset = {
+            '默认示例候选策略': 'example',
+            '激励质量候选策略': 'agent_example',
+            '激励质量候选策略 V2': 'agent_example_v2',
+            '精馏塔双向候选策略示例版': 'distillation_candidate_demo',
+            '精馏塔双向候选策略 V1': 'distillation_candidate_v1',
+            '精馏塔双向候选策略 V2': 'distillation_candidate_v2',
+            '精馏塔双向候选策略 V3': 'distillation_candidate_v3',
+            '精馏塔双向候选策略 V3 派生版': 'distillation_candidate_v3_v2'
+          };
+          return preset[normalized] || normalized;
+        },
+
+        updateStrategyLabCandidateIdDisplay(value) {
+          this.strategyLabForm.candidateId = this.strategyLabCandidateIdFromDisplay(value);
+        },
+
+        strategyLabPluginIdsDisplayValue() {
+          return String(this.strategyLabForm.pluginIds || '')
+            .split(',')
+            .map(item => this.strategyLabPluginLabel(item.trim()))
+            .filter(Boolean)
+            .join('，');
+        },
+
+        updateStrategyLabPluginIdsDisplay(value) {
+          const reverse = {
+            '激励质量': 'excitation_quality',
+            '双向配对': 'directional_pair',
+            '抗扰窗口': 'regulatory_window'
+          };
+          const normalized = String(value || '')
+            .replaceAll('，', ',')
+            .split(',')
+            .map(item => {
+              const token = item.trim();
+              return reverse[token] || token;
+            })
+            .filter(Boolean)
+            .join(',');
+          this.strategyLabForm.pluginIds = normalized;
+        },
+
+        strategyLabPluginLabel(pluginId) {
+          const labels = {
+            excitation_quality: '激励质量',
+            directional_pair: '双向配对',
+            regulatory_window: '抗扰窗口'
+          };
+          return labels[pluginId] || pluginId || '-';
+        },
+
+        strategyLabGeneratorLabel(backend) {
+          const labels = {
+            heuristic: '内置启发式生成',
+            artifact: '离线实验产物',
+            command: '外部命令生成'
+          };
+          return labels[backend] || backend || '-';
+        },
+
+        strategyLabFileLabel(fileName) {
+          const value = String(fileName || '').trim();
+          if (!value) return 'window_plugin.py';
+          if (value.includes('/')) {
+            const [folder, name] = value.split(/\/(.+)/, 2);
+            if (folder && name) {
+              return `${folder} 目录 / ${name}`;
+            }
+          }
+          return value;
+        },
+
+        strategyLabPrimaryPlugin(candidate) {
+          const pluginId = candidate?.pluginIds?.[0];
+          return this.strategyLabPluginLabel(pluginId);
+        },
+
+        strategyLabStatusLabel(status) {
+          const labels = {
+            draft: '草稿',
+            validated: '已验证',
+            approved: '已批准',
+            released: '已发布'
+          };
+          return labels[String(status || '').trim()] || (status || '未标注');
+        },
+
+        strategyLabCodePurpose(candidate) {
+          const pluginIds = candidate?.pluginIds || [];
+          if (pluginIds.includes('directional_pair')) {
+            return '用于双向窗口配对与优先级重排';
+          }
+          if (pluginIds.includes('regulatory_window')) {
+            return '用于补充抗扰场景窗口';
+          }
+          if (pluginIds.includes('excitation_quality')) {
+            return '用于评估激励质量并优化窗口排序';
+          }
+          return '用于生成候选窗口处理逻辑';
+        },
+
+        strategyLabCodeSource(candidate) {
+          const backend = candidate?.codeArtifact?.backend;
+          if (backend === 'artifact') {
+            return '来自离线实验产物';
+          }
+          if (backend === 'command') {
+            return '来自外部命令生成';
+          }
+          if (backend === 'heuristic') {
+            return '来自内置启发式生成';
+          }
+          return '来源未标注';
+        },
+
+        strategyLabProfileLabel(profileId) {
+          const labels = {
+            distillation: '精馏塔策略',
+            default: '默认策略',
+            regulatory: '抗扰策略'
+          };
+          return labels[String(profileId || '').trim()] || (profileId || '-');
+        },
+
+        strategyLabCompareCandidates(currentId) {
+          return this.strategyLabCandidates.filter(item => item.id !== currentId);
+        },
+
+        strategyLabScoreDelta(base, target) {
+          const baseScore = Number(base?.averageScore || 0);
+          const targetScore = Number(target?.averageScore || 0);
+          return targetScore - baseScore;
+        },
+
+        strategyLabPluginDiff(base, target) {
+          const basePlugins = new Set(base?.pluginIds || []);
+          const targetPlugins = new Set(target?.pluginIds || []);
+          const added = [...targetPlugins].filter(item => !basePlugins.has(item)).map(item => this.strategyLabPluginLabel(item));
+          const removed = [...basePlugins].filter(item => !targetPlugins.has(item)).map(item => this.strategyLabPluginLabel(item));
+          if (!added.length && !removed.length) {
+            return '插件集合一致';
+          }
+          const parts = [];
+          if (added.length) parts.push(`新增 ${added.join('、')}`);
+          if (removed.length) parts.push(`移除 ${removed.join('、')}`);
+          return parts.join('；');
+        },
+
+        strategyLabCompareHeadline(base, target) {
+          if (!base || !target) return '请选择一个候选策略进行对比。';
+          const delta = this.strategyLabScoreDelta(base, target);
+          const targetLabel = this.strategyLabCandidateLabel(target.id);
+          if (delta > 0.01) {
+            return `${targetLabel} 相比当前候选平均分提升 ${this.formatNumber(delta, 2)} 分。`;
+          }
+          if (delta < -0.01) {
+            return `${targetLabel} 相比当前候选平均分低 ${this.formatNumber(Math.abs(delta), 2)} 分。`;
+          }
+          return '两版候选的平均分接近，可继续对比插件和逐案例差异。';
+        },
+
+        strategyLabCompareCaseRows(base, target) {
+          const baseCases = base?.benchmarkReport?.cases || [];
+          const targetCases = target?.benchmarkReport?.cases || [];
+          const ids = [...new Set([...baseCases.map(item => item.caseId), ...targetCases.map(item => item.caseId)])];
+          return ids.map((caseId) => {
+            const current = baseCases.find(item => item.caseId === caseId) || null;
+            const compared = targetCases.find(item => item.caseId === caseId) || null;
+            const delta = Number((compared?.score || 0) - (current?.score || 0));
+            return {
+              caseId,
+              caseName: this.strategyLabCaseName(caseId),
+              current,
+              compared,
+              delta,
+              headline: delta > 0.01
+                ? '对比候选在该案例上更优'
+                : delta < -0.01
+                  ? '当前候选在该案例上更优'
+                  : '两版候选在该案例上表现接近'
+            };
+          });
+        },
+
+        strategyLabEvolutionChain(candidate) {
+          if (!candidate) return [];
+          const byId = new Map(this.strategyLabCandidates.map(item => [item.id, item]));
+          const chain = [];
+          const seen = new Set();
+          let cursor = candidate;
+          while (cursor && !seen.has(cursor.id)) {
+            chain.unshift(cursor);
+            seen.add(cursor.id);
+            cursor = cursor.sourceCandidate ? byId.get(cursor.sourceCandidate) || null : null;
+          }
+          return chain.map((item, index) => ({
+            ...item,
+            stepLabel: `第 ${index + 1} 版`,
+            relationLabel: index === 0 ? '初始候选' : `派生自 ${this.strategyLabCandidateLabel(chain[index - 1].id)}`
+          }));
+        },
+
+        formatStrategyLabPrompt(prompt) {
+          const text = String(prompt || '');
+          if (!text) return '';
+          const valueMap = {
+            distillation_column: '精馏塔',
+            reflux_ratio_change: '回流比变化',
+            distillation_bidirectional: '精馏塔塔顶温度双向阶跃案例',
+            generic_flow_step: '通用流量回路单次设定值阶跃案例',
+            regulatory_disturbance: '恒定设定值下的扰动抑制案例',
+            tower_top_temperature: '塔顶温度',
+            distillation: '精馏塔策略',
+            default: '默认策略',
+            regulatory: '抗扰策略',
+            temperature: '温度',
+            flow: '流量',
+            pressure: '压力',
+            level: '液位',
+            excitation_quality: '激励质量',
+            directional_pair: '双向配对',
+            regulatory_window: '抗扰窗口',
+            distillation_candidate: '精馏塔候选策略',
+            distillation_candidate_demo: '精馏塔双向候选策略示例版',
+            distillation_candidate_v1: '精馏塔双向候选策略 V1',
+            distillation_candidate_v2: '精馏塔双向候选策略 V2',
+            distillation_candidate_v3: '精馏塔双向候选策略 V3',
+            distillation_candidate_v3_v2: '精馏塔双向候选策略 V3 派生版',
+            agent_example: '激励质量候选策略',
+            agent_example_v2: '激励质量候选策略 V2'
+          };
+          const linePrefixMap = {
+            'Candidate ID': '候选策略 ID',
+            'Profile ID': '策略画像',
+            'Target Plugins': '目标插件',
+            'Objective': '优化目标',
+            'Target Equipment': '目标设备/装置',
+            'Target Loop Type': '目标回路类型',
+            'Target Scenario': '目标工况',
+            'Case': '基线案例',
+            'Baseline summary': '基线摘要',
+            'Baseline profile': '基线策略画像',
+            'Case count': '案例数量',
+            'Passed count': '通过案例数',
+            'Average score': '平均分',
+            'Design constraints': '设计约束',
+            'Benchmark cases to optimize against': '待优化基准评测案例',
+            'Output requirements': '输出要求'
+          };
+          const localizePromptFragment = (value) => {
+            let localized = String(value || '');
+            Object.entries(valueMap).forEach(([source, target]) => {
+              localized = localized.replaceAll(source, target);
+            });
+            return localized
+              .replaceAll('Baseline profile', '基线策略画像')
+              .replaceAll('Case count', '案例数量')
+              .replaceAll('Passed count', '通过案例数')
+              .replaceAll('Average score', '平均分')
+              .replaceAll('selected_event_type', '选中事件类型')
+              .replaceAll('diagnostic_plugins', '诊断插件')
+              .replaceAll('score=', '得分=')
+              .replaceAll('passed=True', '通过=是')
+              .replaceAll('passed=False', '通过=否')
+              .replaceAll('True', '是')
+              .replaceAll('False', '否')
+              .replaceAll('no explicit gaps captured', '未记录明显缺口')
+              .replaceAll('step_down', '下降阶跃')
+              .replaceAll('step_up', '上升阶跃')
+              .replaceAll('expect_bidirectional_pair', '期望双向配对')
+              .replaceAll('expect_bidirectional_pair', '期望双向配对')
+              .replaceAll('expect_bi双向配对', '期望双向配对')
+              .replaceAll('min_candidate_windows', '最少候选窗口数')
+              .replaceAll('gaps', '缺口')
+              .replaceAll('context', '上下文')
+              .replaceAll('expectations', '期望')
+              .replaceAll('profile_id', '策略画像 ID')
+              .replaceAll('expected_plugins', '期望插件')
+              .replaceAll('loop_type', '回路类型')
+              .replaceAll('loop_name', '回路名称')
+              .replaceAll('plant_type', '装置类型')
+              .replaceAll('scenario', '工况')
+              .replaceAll('control_object', '控制对象')
+              .replaceAll('tower_section', '塔段')
+              .replaceAll('candidate_windows', '候选窗口')
+              .replaceAll('selected_event', '选中事件')
+              .replaceAll('diagnostics', '诊断信息')
+              .replaceAll('plugins/*.py', 'plugins 目录下的插件文件')
+              .replaceAll('profile.json', '策略画像文件 profile.json')
+              .replaceAll('generation_request.json', '生成请求文件 generation_request.json')
+              .replaceAll('prompt.md', '提示词文件 prompt.md')
+              .replaceAll('WindowPluginResult', '窗口插件结果对象 WindowPluginResult')
+              .replaceAll('Case ', '案例 ')
+              .replaceAll('If baseline gaps mention missing pair detection or fallback behavior, address those gaps explicitly in diagnostics.', '如果基线缺口提到缺少双向配对检测或回退行为，请在诊断中明确回应这些问题。');
+          };
+          return text
+            .split('\n')
+            .map((line) => {
+              const trimmed = line.trim();
+              if (!trimmed) return line;
+              const entry = Object.entries(linePrefixMap).find(([key]) => trimmed.startsWith(`${key}:`) || trimmed === key);
+              if (entry) {
+                const [source, target] = entry;
+                if (trimmed === source) return target;
+                const value = trimmed.slice(source.length + 1).trim();
+                const mappedValue = value
+                  .split(',')
+                  .map((part) => {
+                    const token = part.trim();
+                    return localizePromptFragment(
+                      valueMap[token] || this.strategyLabCaseName(token) || this.strategyLabCandidateLabel(token) || token
+                    );
+                  })
+                  .join('，');
+                return `${target}：${mappedValue}`;
+              }
+              return localizePromptFragment(line)
+                .replace('Keep the plugin side-effect free and deterministic.', '保持插件无副作用且结果稳定可复现。')
+                .replace('Return WindowPluginResult with updated candidate_windows, selected_event, and diagnostics.', '返回包含候选窗口、选中事件和诊断信息的窗口插件结果对象。')
+                .replace('Do not depend on online services.', '不要依赖在线服务。')
+                .replace('Prefer ranking or enriching windows over destructive filtering unless the signal is clearly invalid.', '除非信号明确无效，否则优先做窗口排序和补充诊断，不要直接进行破坏性过滤。')
+                .replace('Only modify candidate workspace files: profile.json, generation_request.json, prompt.md, and plugins/*.py.', '只允许修改候选工作区文件：策略画像文件、生成请求文件、提示词文件以及 plugins 目录下的插件文件。')
+                .replace('Update only the candidate workspace files.', '只更新候选工作区文件。')
+                .replace('Implement or override the requested plugin ids in plugins/*.py.', '在 plugins 目录下的插件文件中实现或覆盖所请求的插件。')
+                .replace('Add useful diagnostics that explain why windows were re-ranked or preserved.', '补充有解释性的诊断信息，说明为什么候选窗口被重排或保留。')
+                .replace('If baseline gaps mention missing pair detection or fallback behavior, address those gaps explicitly in diagnostics.', '如果基线缺口提到缺少双向配对检测或回退行为，请在诊断中明确回应这些问题。');
+            })
+            .join('\n')
+            .replaceAll('expect_bi双向配对', '期望双向配对')
+            .replaceAll('If baseline gaps mention missing pair detection or fallback behavior, address those gaps explicitly in diagnostics.', '如果基线缺口提到缺少双向配对检测或回退行为，请在诊断中明确回应这些问题。')
+            .replaceAll('If baseline 缺口 mention missing pair detection or fallback behavior, address those 缺口 explicitly in diagnostics.', '如果基线缺口提到缺少双向配对检测或回退行为，请在诊断中明确回应这些问题。');
+        },
+        async selectStrategyLabCandidate(candidateId) {
+          this.selectedStrategyLabCandidateId = candidateId;
+          if (this.strategyLabCompareCandidateId === candidateId) {
+            this.strategyLabCompareCandidateId = '';
+          }
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates/${encodeURIComponent(candidateId)}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            const normalized = this.normalizeStrategyLabCandidate(
+              this.strategyLabCandidates.find(item => item.id === candidateId) || { id: candidateId },
+              payload
+            );
+            this.strategyLabCandidates = this.strategyLabCandidates.map(item => item.id === candidateId ? normalized : item);
+          } catch (error) {
+            console.error('Failed to load strategy lab candidate detail:', error);
+          }
+          this.saveStrategyLabState();
+        },
+
+        async generateStrategyLabCandidate() {
+          const pluginIds = String(this.strategyLabForm.pluginIds || '')
+            .split(',')
+            .map(item => item.trim())
+            .filter(Boolean);
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates/generate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                candidate_id: this.strategyLabForm.candidateId || `candidate_${Date.now()}`,
+                profile_id: this.strategyLabForm.profileId,
+                plugin_ids: pluginIds,
+                objective: this.strategyLabForm.objective,
+                case_id: this.strategyLabForm.caseId
+              })
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            await this.loadStrategyLabCandidates();
+            if (payload.item?.id) {
+              this.selectedStrategyLabCandidateId = payload.item.id;
+              await this.evaluateStrategyLabCandidate(payload.item.id);
+            }
+          } catch (error) {
+            console.error('Failed to generate strategy lab candidate:', error);
+          }
+        },
+
+        async evaluateStrategyLabCandidate(candidateId) {
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates/${encodeURIComponent(candidateId)}/evaluate`, {
+              method: 'POST'
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            await this.loadStrategyLabCandidates();
+            await this.selectStrategyLabCandidate(candidateId);
+          } catch (error) {
+            console.error('Failed to evaluate strategy lab candidate:', error);
+          }
+        },
+
+        async cloneStrategyLabCandidate(candidateId) {
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates/${encodeURIComponent(candidateId)}/clone`, {
+              method: 'POST'
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            await this.loadStrategyLabCandidates();
+            if (payload.item?.id) {
+              this.selectedStrategyLabCandidateId = payload.item.id;
+              this.strategyLabCompareCandidateId = candidateId;
+              await this.selectStrategyLabCandidate(payload.item.id);
+            }
+          } catch (error) {
+            console.error('Failed to clone strategy lab candidate:', error);
           }
         },
 
@@ -3387,64 +4523,28 @@ end_time: ${this.endTime || '1772553600000'}
             if (uploadedText && this.uploadedFile) uploadedText.textContent = `已选择：${this.uploadedFile.name}`;
           }
         } */
-        fixTuningSidebarCopy() {
-          const root = document.querySelector('#app');
-          if (!root) return;
-          const tuningPanel = root.querySelector('.p-6.space-y-4.flex-1');
-          if (!tuningPanel) return;
-
-          const sourceButtons = tuningPanel.querySelectorAll('.grid.grid-cols-2.gap-3 > button');
-          if (sourceButtons[0]) {
-            const texts = sourceButtons[0].querySelectorAll('div');
-            if (texts[0]) texts[0].textContent = '\u4e0a\u4f20 CSV';
-            if (texts[1]) texts[1].textContent = '\u4f7f\u7528\u672c\u5730\u6587\u4ef6\u76f4\u63a5\u53d1\u8d77\u6574\u5b9a';
-          }
-          if (sourceButtons[1]) {
-            const texts = sourceButtons[1].querySelectorAll('div');
-            if (texts[0]) texts[0].textContent = '\u83b7\u53d6\u5386\u53f2\u6570\u636e';
-            if (texts[1]) texts[1].textContent = '\u6309\u56de\u8def\u53c2\u6570\u4ece\u5386\u53f2\u7cfb\u7edf\u53d6\u6570';
-          }
-
-          const historyPanel = tuningPanel.querySelector('.rounded-xl.border.border-slate-200.bg-slate-50.p-4.space-y-4');
-          if (historyPanel) {
-            const headerTitle = historyPanel.querySelector('.text-sm.font-semibold.text-slate-700');
-            if (headerTitle) headerTitle.textContent = '\u5386\u53f2\u6570\u636e\u53c2\u6570';
-
-            const note = historyPanel.querySelector('p.text-xs.text-amber-700');
-            if (note) note.remove();
-
-            const historyLabels = historyPanel.querySelectorAll('label.block.text-sm.font-semibold.text-slate-700.mb-2');
-            if (historyLabels[0]) historyLabels[0].textContent = 'Loop URI';
-            if (historyLabels[1]) historyLabels[1].textContent = '\u5f00\u59cb\u65f6\u95f4';
-            if (historyLabels[2]) historyLabels[2].textContent = '\u7ed3\u675f\u65f6\u95f4';
-
-            const collapseButton = historyPanel.querySelector('button[type="button"]');
-            if (collapseButton) {
-              const spans = collapseButton.querySelectorAll('span');
-              if (spans[0]) spans[0].textContent = this.historyPanelCollapsed ? '\u25bc' : '\u25b2';
-              if (spans[1]) spans[1].remove();
-            }
-          }
-
-          const uploadBlock = tuningPanel.querySelector('input[type="file"][accept=".csv"]')?.parentElement;
-          if (uploadBlock) {
-            const uploadButton = uploadBlock.querySelector('button');
-            if (uploadButton) uploadButton.innerHTML = '<span class="text-xl mr-2">📎</span> \u9009\u62e9 CSV \u6587\u4ef6';
-            const uploadedText = uploadBlock.querySelector('p.text-xs.text-slate-600');
-            if (uploadedText && this.uploadedFile) uploadedText.textContent = `\u5df2\u9009\u62e9\uff1a${this.uploadedFile.name}`;
-          }
+      },
+      computed: {
+        selectedStrategyLabCandidate() {
+          return this.strategyLabCandidates.find(item => item.id === this.selectedStrategyLabCandidateId) || null;
+        },
+        comparedStrategyLabCandidate() {
+          return this.strategyLabCandidates.find(item => item.id === this.strategyLabCompareCandidateId) || null;
+        }
+      },
+      watch: {
+        selectedStrategyLabCandidateId() {
+          this.saveStrategyLabState();
+        },
+        strategyLabCompareCandidateId() {
+          this.saveStrategyLabState();
         }
       },
       mounted() {
         this.loadMessages();
-        this.$nextTick(() => this.fixTuningSidebarCopy());
-        this._copyFixTimer = window.setInterval(() => this.fixTuningSidebarCopy(), 800);
+        this.loadStrategyLabState();
       },
       beforeUnmount() {
-        if (this._copyFixTimer) {
-          clearInterval(this._copyFixTimer);
-          this._copyFixTimer = null;
-        }
       }
     }).mount('#app');
   </script>
