@@ -179,6 +179,7 @@ async def tool_fetch_history_data(
     start_time: str = DEFAULT_HISTORY_START_TIME,
     end_time: str = DEFAULT_HISTORY_END_TIME,
     data_type: str = "interpolated",
+    window: int = 1,
 ) -> Dict[str, Any]:
     """Fetch historical CSV data and persist the local file path in session state."""
     result = await asyncio.to_thread(
@@ -188,6 +189,7 @@ async def tool_fetch_history_data(
         start_time=start_time,
         end_time=end_time,
         data_type=data_type,
+        window=window,
         fetch_history_data_csv_fn=fetch_history_data_csv,
     )
     return _to_jsonable(result)
@@ -314,6 +316,7 @@ def create_pid_agents(
     start_time: str,
     end_time: str,
     data_type: str,
+    window: int,
     loop_type: str,
 ) -> List[AssistantAgent]:
     return orchestration_create_pid_agents(
@@ -323,6 +326,7 @@ def create_pid_agents(
         start_time=start_time,
         end_time=end_time,
         data_type=data_type,
+        window=window,
         loop_type=loop_type,
         tool_load_data=tool_load_data,
         tool_fetch_history_data=tool_fetch_history_data,
@@ -344,6 +348,7 @@ async def run_multi_agent_collaboration(
     start_time: str,
     end_time: str,
     data_type: str,
+    window: int,
     llm_config: Dict[str, Any],
 ) -> AsyncGenerator[Dict[str, Any], None]:
     async for event in orchestration_run_multi_agent_collaboration(
@@ -357,6 +362,7 @@ async def run_multi_agent_collaboration(
         start_time=start_time,
         end_time=end_time,
         data_type=data_type,
+        window=window,
         llm_config=llm_config,
         shared_data_store=_shared_data_store,
         create_model_client=create_model_client,

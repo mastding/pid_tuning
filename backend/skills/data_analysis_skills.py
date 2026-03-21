@@ -13,13 +13,11 @@ from scipy import signal
 from scipy.interpolate import interp1d
 
 
-HISTORY_DATA_EXPORT_URL = "http://holli-pid-agent.hollysys-project.sit-cloud.ieccloud.hollicube.com/api/data_query/export-history-data-csv"
+HISTORY_DATA_EXPORT_URL = "http://holli-pid-agent.hollysys-project.sit-cloud.ieccloud.hollicube.com/api/agent/history-data-raw"
 DEFAULT_LOOP_URI = "/pid_zd/5989fb05a2ce4828a7ae36c682906f2b"
 DEFAULT_HISTORY_START_TIME = "1772467200000"
-# The user-provided 1771718400 is earlier than the requested start time once normalized.
-# Use a valid default 1-day window ending exactly 24 hours after the default start.
-DEFAULT_HISTORY_END_TIME = "1772553600000"
-MAX_HISTORY_RANGE_MS = 24 * 60 * 60 * 1000
+DEFAULT_HISTORY_END_TIME = "1772617199000"
+DEFAULT_HISTORY_WINDOW_SECONDS = 1
 LOCAL_TIMEZONE = "Asia/Shanghai"
 PID_COLUMN_ALIASES = {
     "timestamp": ["timestamp", "time", "datetime", "ts"],
@@ -65,6 +63,7 @@ def fetch_history_data_csv(
     start_time: str | None = None,
     end_time: str | None = None,
     data_type: str = "interpolated",
+    window: int | str = DEFAULT_HISTORY_WINDOW_SECONDS,
     timeout: int = 60,
 ) -> Dict:
     """
@@ -72,10 +71,7 @@ def fetch_history_data_csv(
     """
     normalized_start_time = _normalize_time_value(start_time, fallback=DEFAULT_HISTORY_START_TIME)
     normalized_end_time = _normalize_time_value(end_time, fallback=DEFAULT_HISTORY_END_TIME)
-    normalized_data_type = (data_type or "interpolated").strip().lower()
-
-    if normalized_data_type not in {"raw", "interpolated"}:
-        raise ValueError("data_type must be 'raw' or 'interpolated'")
+    normalized_data_type = (data_type or "raw").strip().lower()
 
     start_ms = _parse_time_to_ms(normalized_start_time)
     end_ms = _parse_time_to_ms(normalized_end_time)
@@ -86,16 +82,16 @@ def fetch_history_data_csv(
             f"Received start_time={normalized_start_time}, end_time={normalized_end_time}"
         )
 
-    if end_ms - start_ms > MAX_HISTORY_RANGE_MS:
-        raise ValueError(
-            "Invalid history range: each request can fetch at most 1 day of data."
-        )
+    try:
+        normalized_window = max(1, int(window))
+    except Exception:
+        normalized_window = DEFAULT_HISTORY_WINDOW_SECONDS
 
     params = {
         "loop_uri": loop_uri or DEFAULT_LOOP_URI,
         "start_time": str(start_ms),
         "end_time": str(end_ms),
-        "data_type": normalized_data_type,
+        "window": str(normalized_window),
     }
 
     try:
@@ -117,24 +113,47 @@ def fetch_history_data_csv(
             detail += f"；响应摘要：{preview}"
         raise ValueError(detail) from exc
 
-    content_type = response.headers.get("Content-Type", "")
-    if "text/csv" not in content_type and "application/octet-stream" not in content_type:
-        preview = response.text[:300]
-        if "," not in preview:
-            raise ValueError(f"Unexpected response content type: {content_type}, body preview: {preview}")
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
-        tmp_file.write(response.content)
-        csv_path = tmp_file.name
+    content_type = (response.headers.get("Content-Type", "") or "").lower()
+    if "application/json" in content_type:
+        payload = response.json()
+        if not isinstance(payload, dict) or int(payload.get("code", -1)) != 0:
+            raise ValueError(f"Unexpected history data response: {str(payload)[:300]}")
+        raw_data = payload.get("data") or {}
+        records = raw_data.get("data") if isinstance(raw_data, dict) else None
+        if not isinstance(records, list) or not records:
+            raise ValueError("历史数据接口返回成功，但 data.data 为空")
+        history_df = pd.DataFrame(records)
+        if history_df.empty:
+            raise ValueError("历史数据接口返回成功，但转换后的数据为空")
+        rename_map = {
+            "timestamp": "timestamp",
+            "sv": "SV",
+            "pv": "PV",
+            "mv": "MV",
+        }
+        history_df = history_df.rename(columns=rename_map)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", newline="", encoding="utf-8-sig") as tmp_file:
+            history_df.to_csv(tmp_file.name, index=False)
+            csv_path = tmp_file.name
+    else:
+        if "text/csv" not in content_type and "application/octet-stream" not in content_type:
+            preview = response.text[:300]
+            if "," not in preview:
+                raise ValueError(f"Unexpected response content type: {content_type}, body preview: {preview}")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
+            tmp_file.write(response.content)
+            csv_path = tmp_file.name
 
     return {
         "csv_path": csv_path,
         "loop_uri": params["loop_uri"],
         "start_time": normalized_start_time,
         "end_time": normalized_end_time,
-        "data_type": normalized_data_type,
+        "data_type": "raw",
+        "requested_data_type": normalized_data_type,
+        "window": normalized_window,
         "file_size": os.path.getsize(csv_path),
-        "status": "历史数据已下载为本地CSV",
+        "status": "历史数据已下载并转换为本地CSV",
     }
 
 

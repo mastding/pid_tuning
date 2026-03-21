@@ -31,6 +31,7 @@ def _build_task_message(
     loop_uri: str,
     start_time: str,
     end_time: str,
+    window: int,
 ) -> str:
     data_source = "上传CSV" if csv_path else "获取历史数据"
     display_start = start_time or "使用默认开始时间"
@@ -41,6 +42,7 @@ def _build_task_message(
         f"loop_uri: {loop_uri}\n"
         f"start_time: {display_start}\n"
         f"end_time: {display_end}\n"
+        f"window: {window}s\n"
         f"回路类型: {loop_type}\n"
         f"装置类型: {plant_type or '未指定'}\n"
         f"工况: {scenario or '未指定'}\n"
@@ -154,6 +156,7 @@ async def run_multi_agent_collaboration(
     start_time: str,
     end_time: str,
     data_type: str,
+    window: int,
     llm_config: Dict[str, Any],
     shared_data_store: Dict[str, Any],
     create_model_client: Callable[..., Any],
@@ -185,6 +188,7 @@ async def run_multi_agent_collaboration(
         start_time=start_time,
         end_time=end_time,
         data_type=data_type,
+        window=window,
         loop_type=loop_type,
     )
 
@@ -200,6 +204,7 @@ async def run_multi_agent_collaboration(
         loop_uri=loop_uri,
         start_time=start_time,
         end_time=end_time,
+        window=window,
     )
 
     yield {

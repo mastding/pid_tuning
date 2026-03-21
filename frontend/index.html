@@ -589,6 +589,18 @@
                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               >
             </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-2">采样间隔（秒）</label>
+              <select
+                v-model="historyWindow"
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              >
+                <option :value="1">1 秒</option>
+                <option :value="2">2 秒</option>
+                <option :value="5">5 秒</option>
+                <option :value="10">10 秒</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -2474,6 +2486,7 @@
           loopUri: '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b',
           startTime: '1772467200000',
           endTime: '1772553600000',
+          historyWindow: 1,
           historyPanelCollapsed: false,
           loopType: 'flow',
           scenario: 'steady_operation',
@@ -4053,6 +4066,7 @@
 loop_uri: ${this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b'}
 start_time: ${this.startTime || '1772467200000'}
 end_time: ${this.endTime || '1772553600000'}
+window: ${this.historyWindow || 1}
 回路类型: ${this.loopType}
 工况: ${this.scenarioLabel(this.scenario)}
 装置类型: ${this.plantTypeLabel(this.plantType)}
@@ -4069,6 +4083,7 @@ end_time: ${this.endTime || '1772553600000'}
           formData.append('loop_uri', this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b');
           formData.append('start_time', this.startTime || '1772467200000');
           formData.append('end_time', this.endTime || '1772553600000');
+          formData.append('window', String(this.historyWindow || 1));
           formData.append('scenario', this.scenario || '');
           formData.append('plant_type', this.plantType || 'distillation_column');
           formData.append('control_object', this.controlObject || '');

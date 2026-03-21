@@ -54,6 +54,7 @@ def fetch_history_data_tool(
     start_time: str,
     end_time: str,
     data_type: str,
+    window: int | str,
     fetch_history_data_csv_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     result = fetch_history_data_csv_fn(
@@ -61,12 +62,14 @@ def fetch_history_data_tool(
         start_time=start_time,
         end_time=end_time,
         data_type=data_type,
+        window=window,
     )
     session_store["csv_path"] = result["csv_path"]
     session_store["loop_uri"] = result["loop_uri"]
     session_store["start_time"] = result["start_time"]
     session_store["end_time"] = result["end_time"]
     session_store["data_type"] = result["data_type"]
+    session_store["history_window"] = result.get("window")
     return result
 
 

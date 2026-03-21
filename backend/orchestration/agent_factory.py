@@ -14,6 +14,7 @@ def create_pid_agents(
     start_time: str,
     end_time: str,
     data_type: str,
+    window: int,
     loop_type: str,
     tool_load_data: Callable[..., Any],
     tool_fetch_history_data: Callable[..., Any],
@@ -33,7 +34,7 @@ After the tool succeeds, summarize the data size, sampling time, candidate step 
         data_analyst_prompt = f"""You are the data analysis agent.
 No CSV file was uploaded, so you must fetch historical data first.
 Call:
-tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_time="{end_time}", data_type="{data_type}")
+tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_time="{end_time}", data_type="{data_type}", window={window})
 Then call tool_load_data(csv_path=...) with the returned csv_path.
 After both steps succeed, summarize the data size, sampling time, candidate step count, and selected identification window in one concise Chinese sentence."""
 

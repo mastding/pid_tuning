@@ -96,6 +96,7 @@ class WorkflowRunRequest(BaseModel):
     end_time: str = Field(..., description="结束时间")
     loop_type: str = Field(..., description="回路类型")
     loop_uri: str = Field(..., description="回路URI")
+    window: int = Field(1, description="历史数据时间戳间隔（秒）")
     plant_type: str = Field("distillation_column", description="装置类型")
     scenario: str = Field("", description="工况")
     control_object: str = Field("", description="控制对象")
@@ -244,6 +245,7 @@ def create_app(
         start_time: str,
         end_time: str,
         data_type: str,
+        window: int,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         async for event in run_multi_agent_collaboration(
             csv_path=csv_path,
@@ -256,6 +258,7 @@ def create_app(
             start_time=start_time,
             end_time=end_time,
             data_type=data_type,
+            window=window,
             llm_config=llm_config,
         ):
             yield event
@@ -271,6 +274,7 @@ def create_app(
         loop_uri: str,
         start_time: str,
         end_time: str,
+        window: int,
     ) -> None:
         task_store.start_task(task_id)
         final_result: Dict[str, Any] | None = None
@@ -286,6 +290,7 @@ def create_app(
                 start_time=start_time,
                 end_time=end_time,
                 data_type="interpolated",
+                window=window,
             ):
                 progress = _event_progress(event)
                 if progress is not None:
@@ -333,6 +338,7 @@ def create_app(
         start_time: str = Form(default_history_start_time),
         end_time: str = Form(default_history_end_time),
         data_type: str = Form("interpolated"),
+        window: int = Form(1),
     ) -> StreamingResponse:
         csv_path = ""
         if file is not None:
@@ -354,6 +360,7 @@ def create_app(
                     start_time=start_time,
                     end_time=end_time,
                     data_type=data_type,
+                    window=window,
                 ):
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             except Exception as exc:
@@ -398,6 +405,7 @@ def create_app(
             {
                 "start_time": payload.start_time,
                 "end_time": payload.end_time,
+                "window": payload.window,
                 "loop_type": normalized_loop_type,
                 "loop_uri": payload.loop_uri,
                 "response_mode": response_mode,
@@ -420,6 +428,7 @@ def create_app(
                         start_time=payload.start_time,
                         end_time=payload.end_time,
                         data_type="interpolated",
+                        window=payload.window,
                     ):
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 except Exception as exc:
@@ -458,6 +467,7 @@ def create_app(
                     loop_uri=payload.loop_uri,
                     start_time=payload.start_time,
                     end_time=payload.end_time,
+                    window=payload.window,
                 )
             )
             background_jobs.add(job)
@@ -481,6 +491,7 @@ def create_app(
                 start_time=payload.start_time,
                 end_time=payload.end_time,
                 data_type="interpolated",
+                window=payload.window,
             ):
                 progress = _event_progress(event)
                 if progress is not None:
