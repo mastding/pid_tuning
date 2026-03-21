@@ -11,9 +11,9 @@ import requests
 from requests import RequestException
 from scipy import signal
 from scipy.interpolate import interp1d
+from services.system_config_service import get_history_data_api_url
 
 
-HISTORY_DATA_EXPORT_URL = "http://holli-pid-agent.hollysys-project.sit-cloud.ieccloud.hollicube.com/api/agent/history-data-raw"
 DEFAULT_LOOP_URI = "/pid_zd/5989fb05a2ce4828a7ae36c682906f2b"
 DEFAULT_HISTORY_START_TIME = "1772467200000"
 DEFAULT_HISTORY_END_TIME = "1772617199000"
@@ -95,7 +95,7 @@ def fetch_history_data_csv(
     }
 
     try:
-        response = requests.get(HISTORY_DATA_EXPORT_URL, params=params, timeout=timeout)
+        response = requests.get(get_history_data_api_url(), params=params, timeout=timeout)
         response.raise_for_status()
     except RequestException as exc:
         response = getattr(exc, "response", None)

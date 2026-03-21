@@ -35,6 +35,10 @@ from memory.experience_service import (
     rebuild_experience_center_index,
     retrieve_experience_guidance,
 )
+from services.system_config_service import (
+    get_runtime_system_config,
+    update_runtime_system_config,
+)
 from state.workflow_task_store import WorkflowTaskStore
 
 RunCollaborationFn = Callable[..., AsyncGenerator[Dict[str, Any], None]]
@@ -110,6 +114,22 @@ class StrategyLabGenerateRequest(BaseModel):
     objective: str = Field("", description="Objective")
     case_id: str = Field("distillation_bidirectional", description="Case ID")
     notes: str = Field("", description="Notes")
+
+
+class ModelConfigPayload(BaseModel):
+    name: str = Field(..., description="模型名称")
+    api_url: str = Field(..., description="模型服务地址")
+    api_key: str = Field(..., description="模型 API Key")
+
+
+class IntegrationConfigPayload(BaseModel):
+    history_data_api_url: str = Field(..., description="历史数据服务地址")
+    knowledge_graph_api_url: str = Field(..., description="本体知识图谱服务地址")
+
+
+class SystemConfigPayload(BaseModel):
+    model: ModelConfigPayload
+    integration: IntegrationConfigPayload
 
 
 def _normalize_loop_type(loop_type: str) -> str:
@@ -739,6 +759,23 @@ def create_app(
     @app.get("/api/case-library/{case_id}/similar")
     async def case_library_similar(case_id: str, limit: int = 5) -> JSONResponse:
         return JSONResponse({"items": list_similar_case_library_items(case_id, limit=limit)})
+
+    @app.get("/api/system-config")
+    async def system_config_get() -> JSONResponse:
+        return JSONResponse(get_runtime_system_config())
+
+    @app.put("/api/system-config")
+    async def system_config_update(payload: SystemConfigPayload) -> JSONResponse:
+        config = update_runtime_system_config(payload.model_dump())
+        llm_config.clear()
+        llm_config.update(
+            {
+                "api_key": config["model"]["api_key"],
+                "base_url": config["model"]["api_url"],
+                "model": config["model"]["name"],
+            }
+        )
+        return JSONResponse({"message": "system_config_updated", "config": config})
 
     @app.get("/api/strategy-lab/cases")
     async def strategy_lab_cases() -> JSONResponse:

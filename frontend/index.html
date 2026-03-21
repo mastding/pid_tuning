@@ -408,7 +408,7 @@
 
       <!-- 进度指示器 -->
       <div class="px-6 py-4 border-b border-slate-200 bg-white">
-        <div class="grid grid-cols-4 gap-2 rounded-xl bg-slate-100 p-1">
+        <div class="grid grid-cols-5 gap-2 rounded-xl bg-slate-100 p-1">
           <button
             @click="switchPage('tuning')"
             class="rounded-lg px-4 py-2 text-sm font-semibold transition-all"
@@ -436,6 +436,13 @@
             :class="currentPage === 'strategy-lab' ? 'bg-white text-amber-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
           >
             策略实验室
+          </button>
+          <button
+            @click="switchPage('system-config')"
+            class="rounded-lg px-4 py-2 text-sm font-semibold transition-all"
+            :class="currentPage === 'system-config' ? 'bg-white text-rose-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+          >
+            &#x7CFB;&#x7EDF;&#x914D;&#x7F6E;
           </button>
         </div>
       </div>
@@ -803,6 +810,38 @@
         <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <div class="font-semibold mb-2">实验室说明</div>
           <p>这里用于管理基准评测案例、候选策略和每一版策略的评估结果。</p>
+        </div>
+      </div>
+      <div v-else-if="currentPage === 'system-config'" class="p-6 space-y-4 flex-1">
+        <div class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+          <div class="font-semibold mb-2">系统配置</div>
+          <p>统一配置模型服务和系统对接地址，保存后新的整定请求会直接使用这里的最新配置。</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <button
+            @click="loadSystemConfig"
+            :disabled="systemConfigLoading"
+            class="rounded-xl bg-rose-500 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-600 transition-all disabled:opacity-60"
+          >
+            {{ systemConfigLoading ? '加载中...' : '重新加载' }}
+          </button>
+          <button
+            @click="saveSystemConfig"
+            :disabled="systemConfigSaving"
+            class="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all disabled:opacity-60"
+          >
+            {{ systemConfigSaving ? '保存中...' : '保存配置' }}
+          </button>
+        </div>
+        <div v-if="systemConfigMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+          {{ systemConfigMessage }}
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+          <div class="font-semibold text-slate-800 mb-2">当前配置摘要</div>
+          <div>模型名称：{{ systemConfig.model.name || '-' }}</div>
+          <div class="mt-1">模型服务地址：{{ systemConfig.model.api_url || '-' }}</div>
+          <div class="mt-1">历史数据服务地址：{{ systemConfig.integration.history_data_api_url || '-' }}</div>
+          <div class="mt-1">本体知识图谱服务地址：{{ systemConfig.integration.knowledge_graph_api_url || '-' }}</div>
         </div>
       </div>
     </aside>
@@ -1721,6 +1760,83 @@
           </div>
         </div>
 
+        <div v-if="currentPage === 'system-config'" class="space-y-6">
+          <div class="rounded-2xl border border-rose-200 bg-gradient-to-r from-rose-50 to-pink-50 p-6 shadow-sm">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h2 class="text-2xl font-bold text-slate-800">系统配置</h2>
+                <p class="mt-2 text-sm text-slate-600">统一查看和维护模型服务、本体知识图谱服务以及历史数据服务的运行配置。</p>
+              </div>
+              <div class="rounded-full bg-white px-4 py-2 text-xs font-semibold text-rose-700 border border-rose-200">
+                {{ systemConfigSaving ? '正在保存' : '运行时配置' }}
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">模型配置</h3>
+                <p class="text-xs text-slate-500 mt-1">配置当前整定流程调用的大模型名称、服务地址和 API Key。</p>
+              </div>
+              <div class="p-5 space-y-4">
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">模型名称</label>
+                  <input v-model="systemConfig.model.name" type="text" placeholder="qwen3-235b-a22b-instruct-2507"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all">
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">模型服务 URL</label>
+                  <input v-model="systemConfig.model.api_url" type="text" placeholder="http://host:port/v1"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all">
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">API Key</label>
+                  <div class="relative">
+                    <input
+                      v-model="systemConfig.model.api_key"
+                      :type="systemConfigShowApiKey ? 'text' : 'password'"
+                      placeholder="请输入模型 API Key"
+                      class="w-full px-4 py-2.5 pr-12 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all"
+                    >
+                    <button
+                      type="button"
+                      @click="systemConfigShowApiKey = !systemConfigShowApiKey"
+                      class="absolute inset-y-0 right-0 px-3 text-slate-500 hover:text-slate-700"
+                      :title="systemConfigShowApiKey ? '隐藏 API Key' : '查看 API Key'"
+                    >
+                      {{ systemConfigShowApiKey ? '🙈' : '👁️' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">系统对接配置</h3>
+                <p class="text-xs text-slate-500 mt-1">配置历史数据获取服务和本体知识图谱服务的地址。</p>
+              </div>
+              <div class="p-5 space-y-4">
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">历史数据服务 URL</label>
+                  <input v-model="systemConfig.integration.history_data_api_url" type="text" placeholder="http://host/api/agent/history-data-raw"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all">
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">本体知识图谱服务 URL</label>
+                  <input v-model="systemConfig.integration.knowledge_graph_api_url" type="text" placeholder="http://host/api/query"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all">
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  <div class="font-semibold text-slate-800 mb-2">说明</div>
+                  <p>保存后，模型请求、历史数据拉取和本体知识图谱检索都会在后续新任务中使用这里的最新配置。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div v-if="currentPage === 'tuning' && messages.length === 0" class="text-center py-16">
           <div class="w-24 h-24 bg-gradient-to-br from-blue-500 to-purple-600 rounded-3xl flex items-center justify-center text-5xl mx-auto mb-6 shadow-2xl">
             🎛️
@@ -2615,6 +2731,21 @@
           ],
           selectedStrategyLabCandidateId: 'distillation_candidate_demo',
           strategyLabCompareCandidateId: '',
+          systemConfigLoading: false,
+          systemConfigSaving: false,
+          systemConfigMessage: '',
+          systemConfigShowApiKey: false,
+          systemConfig: {
+            model: {
+              name: '',
+              api_url: '',
+              api_key: ''
+            },
+            integration: {
+              history_data_api_url: '',
+              knowledge_graph_api_url: ''
+            }
+          },
           helpCenterOpen: false,
           helpCenterLoading: false,
           helpCenterHtml: '',
@@ -2719,6 +2850,55 @@
             selectedId: this.selectedStrategyLabCandidateId,
             compareId: this.strategyLabCompareCandidateId
           }));
+        },
+
+        async loadSystemConfig() {
+          this.systemConfigLoading = true;
+          this.systemConfigMessage = '';
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/system-config`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            this.systemConfig = {
+              model: {
+                name: payload?.model?.name || '',
+                api_url: payload?.model?.api_url || '',
+                api_key: payload?.model?.api_key || ''
+              },
+              integration: {
+                history_data_api_url: payload?.integration?.history_data_api_url || '',
+                knowledge_graph_api_url: payload?.integration?.knowledge_graph_api_url || ''
+              }
+            };
+          } catch (error) {
+            console.error('Failed to load system config:', error);
+            this.systemConfigMessage = '系统配置加载失败，请检查后端服务。';
+          } finally {
+            this.systemConfigLoading = false;
+          }
+        },
+
+        async saveSystemConfig() {
+          this.systemConfigSaving = true;
+          this.systemConfigMessage = '';
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/system-config`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.systemConfig)
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            if (payload?.config) {
+              this.systemConfig = payload.config;
+            }
+            this.systemConfigMessage = '系统配置已保存，新的整定请求会使用最新配置。';
+          } catch (error) {
+            console.error('Failed to save system config:', error);
+            this.systemConfigMessage = '系统配置保存失败，请检查填写内容或后端日志。';
+          } finally {
+            this.systemConfigSaving = false;
+          }
         },
 
         normalizeStrategyLabCandidate(summary, detail = null) {
@@ -2834,6 +3014,9 @@
           if (page === 'strategy-lab') {
             await this.loadStrategyLabCases();
             await this.loadStrategyLabCandidates();
+          }
+          if (page === 'system-config') {
+            await this.loadSystemConfig();
           }
         },
 

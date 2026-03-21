@@ -40,6 +40,11 @@ from services.tool_adapter_service import (
     query_expert_knowledge_tool as service_query_expert_knowledge_tool,
     tune_pid_tool as service_tune_pid_tool,
 )
+from services.system_config_service import (
+    DEFAULT_KNOWLEDGE_GRAPH_ID,
+    get_knowledge_graph_runtime_config,
+    get_model_runtime_config,
+)
 from orchestration.event_mapper import (
     build_agent_response as orchestration_build_agent_response,
     build_feedback_turns as orchestration_build_feedback_turns,
@@ -51,10 +56,6 @@ from orchestration.workflow_runner import run_multi_agent_collaboration as orche
 from api.tune_app import create_app
 from memory.experience_service import build_experience_record, persist_experience_record, register_experience_reuse
 from state.session_store import SessionStore
-
-DEFAULT_KNOWLEDGE_GRAPH_API_URL = "http://graphrag.dicp.sixseven.ltd:5924/api/query"
-DEFAULT_KNOWLEDGE_GRAPH_ID = "build_20260317_003858"
-
 
 def create_model_client(*, model_api_key: str, model_api_url: str, model: str) -> OpenAIChatCompletionClient:
     """创建OpenAI兼容的模型客户端（千问）"""
@@ -253,6 +254,7 @@ async def tool_query_expert_knowledge(
     control_target: str = "",
 ) -> Dict[str, Any]:
     """Query distillation-column expert knowledge and store the guidance for PID tuning."""
+    knowledge_runtime_config = get_knowledge_graph_runtime_config()
     result = await asyncio.to_thread(
         service_query_expert_knowledge_tool,
         session_store=_shared_data_store,
@@ -263,8 +265,8 @@ async def tool_query_expert_knowledge(
         control_object=control_object,
         tower_section=tower_section,
         control_target=control_target,
-        graph_id=os.getenv("KNOWLEDGE_GRAPH_ID", DEFAULT_KNOWLEDGE_GRAPH_ID),
-        graph_api_url=os.getenv("KNOWLEDGE_GRAPH_API_URL", DEFAULT_KNOWLEDGE_GRAPH_API_URL),
+        graph_id=knowledge_runtime_config.get("graph_id", DEFAULT_KNOWLEDGE_GRAPH_ID),
+        graph_api_url=knowledge_runtime_config.get("graph_api_url", ""),
         query_mode=os.getenv("KNOWLEDGE_GRAPH_QUERY_MODE", "local"),
         response_type=os.getenv("KNOWLEDGE_GRAPH_RESPONSE_TYPE", "要点式，尽量精炼"),
         include_context=True,
@@ -383,11 +385,7 @@ if __name__ == "__main__":
     import uvicorn
 
     load_dotenv()
-    llm_config = {
-        "api_key": os.getenv("MODEL_API_KEY"),
-        "base_url": os.getenv("MODEL_API_URL"),
-        "model": os.getenv("MODEL", "qwen-plus"),
-    }
+    llm_config = get_model_runtime_config()
     app = create_app(
         run_multi_agent_collaboration=run_multi_agent_collaboration,
         llm_config=llm_config,
