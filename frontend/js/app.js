@@ -12,6 +12,13 @@ createApp({
     return {
       currentPage: 'tuning',
       shellSection: 'tuning-workbench',
+      taskSessions: [],
+      selectedTaskSessionId: '',
+      taskSessionCounter: 0,
+      taskSessionStatusFilter: '',
+      taskSessionTimeFilter: '',
+      taskSessionSortOrder: 'updated_desc',
+      taskSessionKeyword: '',
       messages: [],
       loading: false,
       loadingMessage: '\u6b63\u5728\u8fde\u63a5...',
@@ -154,9 +161,13 @@ createApp({
       strategyLabCandidateDrawerOpen: false,
       strategyLabGenerateModalOpen: false,
       professionalReportDrawerOpen: false,
+      tuningTaskModalOpen: false,
       systemConfigLoading: false,
       systemConfigSaving: false,
+      systemConfigTesting: false,
       systemConfigMessage: '',
+      systemConfigTestMessage: '',
+      systemConfigTestOk: false,
       systemConfigShowApiKey: false,
       systemConfig: {
         model: {
@@ -219,6 +230,10 @@ createApp({
           return 'pid_tuning_messages_v1';
         },
 
+        taskSessionStorageKey() {
+          return 'pid_tuning_task_sessions_v1';
+        },
+
         strategyLabStorageKey() {
           return 'pid_tuning_strategy_lab_v1';
         },
@@ -229,6 +244,7 @@ createApp({
             messageIdCounter: this.messageIdCounter,
             compactMode: this.compactMode
           }));
+          this.syncCurrentTaskSession();
         },
 
         loadMessages() {
@@ -252,6 +268,243 @@ createApp({
           } catch (error) {
             console.warn('Failed to restore messages:', error);
           }
+        },
+
+        currentTaskContextSnapshot() {
+          return {
+            loopName: this.loopName,
+            loopUri: this.loopUri,
+            loopType: this.loopType,
+            scenario: this.scenario,
+            scenarioLabel: this.scenarioLabel(this.scenario),
+            plantType: this.plantType,
+            plantTypeLabel: this.plantTypeLabel(this.plantType),
+            controlObject: this.controlObject,
+            controlObjectLabel: this.controlObjectLabel(this.controlObject),
+            dataSource: this.dataSource,
+            dataSourceLabel: this.dataSource === 'history' ? '历史接口' : 'CSV 上传',
+            startTime: this.startTime,
+            endTime: this.endTime,
+            historyWindow: this.historyWindow
+          };
+        },
+
+        buildTaskSessionTitle(context = {}) {
+          const loopName = context.loopName || this.loopName || '未命名回路';
+          const scenarioLabel = context.scenarioLabel || this.scenarioLabel(context.scenario || this.scenario);
+          const controlObjectLabel = context.controlObjectLabel || this.controlObjectLabel(context.controlObject || this.controlObject);
+          return `${loopName} / ${scenarioLabel} / ${controlObjectLabel}`;
+        },
+
+        hydrateTaskSession(session) {
+          if (!session) return;
+          this.messages = Array.isArray(session.messages)
+            ? JSON.parse(JSON.stringify(session.messages))
+            : [];
+          this.messageIdCounter = Number(session.messageIdCounter) || this.messages.reduce((maxId, msg) => Math.max(maxId, msg.id || 0), 0);
+        },
+
+        saveTaskSessions() {
+          localStorage.setItem(this.taskSessionStorageKey(), JSON.stringify({
+            items: this.taskSessions,
+            selectedTaskSessionId: this.selectedTaskSessionId,
+            taskSessionCounter: this.taskSessionCounter
+          }));
+        },
+
+        syncCurrentTaskSession(overrides = {}) {
+          if (!this.selectedTaskSessionId) return;
+          const index = this.taskSessions.findIndex(item => item.id === this.selectedTaskSessionId);
+          if (index === -1) return;
+          const existing = this.taskSessions[index];
+          const latestResultMessage = [...this.messages].reverse().find(msg => msg.type === 'result') || null;
+          const merged = {
+            ...existing,
+            ...overrides,
+            title: overrides.title || existing.title || this.buildTaskSessionTitle(existing.context || {}),
+            updatedAt: overrides.updatedAt || new Date().toLocaleString(),
+            status: overrides.status || existing.status || (latestResultMessage ? 'completed' : (this.loading ? 'running' : 'draft')),
+            context: {
+              ...(existing.context || {}),
+              ...this.currentTaskContextSnapshot()
+            },
+            messages: JSON.parse(JSON.stringify(this.messages || [])),
+            messageIdCounter: this.messageIdCounter,
+            latestResult: overrides.latestResult || latestResultMessage?.data || existing.latestResult || null
+          };
+          this.taskSessions.splice(index, 1, merged);
+          this.saveTaskSessions();
+        },
+
+        migrateLegacyMessagesToSession() {
+          this.loadMessages();
+          if (!this.messages.length) return;
+          const legacySessionId = `task_legacy_${Date.now()}`;
+          const legacyContext = this.currentTaskContextSnapshot();
+          this.taskSessions = [{
+            id: legacySessionId,
+            title: this.buildTaskSessionTitle(legacyContext),
+            createdAt: new Date().toLocaleString(),
+            updatedAt: new Date().toLocaleString(),
+            status: this.latestTuningResultData ? 'completed' : 'draft',
+            context: legacyContext,
+            messages: JSON.parse(JSON.stringify(this.messages)),
+            messageIdCounter: this.messageIdCounter,
+            latestResult: this.latestTuningResultData || null
+          }];
+          this.selectedTaskSessionId = legacySessionId;
+          this.taskSessionCounter = 1;
+          this.saveTaskSessions();
+        },
+
+        loadTaskSessions() {
+          const raw = localStorage.getItem(this.taskSessionStorageKey());
+          if (!raw) {
+            this.migrateLegacyMessagesToSession();
+            if (this.taskSessions.length) {
+              this.hydrateTaskSession(this.taskSessions[0]);
+            }
+            return;
+          }
+          try {
+            const parsed = JSON.parse(raw);
+            this.taskSessions = Array.isArray(parsed.items) ? parsed.items : [];
+            this.selectedTaskSessionId = parsed.selectedTaskSessionId || (this.taskSessions[0]?.id || '');
+            this.taskSessionCounter = Number(parsed.taskSessionCounter) || this.taskSessions.length;
+            const selected = this.taskSessions.find(item => item.id === this.selectedTaskSessionId) || this.taskSessions[0] || null;
+            if (selected) {
+              this.selectedTaskSessionId = selected.id;
+              this.hydrateTaskSession(selected);
+            } else {
+              this.messages = [];
+              this.messageIdCounter = 0;
+            }
+          } catch (error) {
+            console.warn('Failed to restore task sessions:', error);
+            this.taskSessions = [];
+            this.selectedTaskSessionId = '';
+            this.messages = [];
+            this.messageIdCounter = 0;
+          }
+        },
+
+        createTaskSession() {
+          const now = new Date().toLocaleString();
+          const context = this.currentTaskContextSnapshot();
+          const id = `task_${Date.now()}_${++this.taskSessionCounter}`;
+          const session = {
+            id,
+            title: this.buildTaskSessionTitle(context),
+            createdAt: now,
+            updatedAt: now,
+            status: 'running',
+            context,
+            messages: [],
+            messageIdCounter: 0,
+            latestResult: null
+          };
+          this.taskSessions.unshift(session);
+          this.selectedTaskSessionId = id;
+          this.messages = [];
+          this.messageIdCounter = 0;
+          this.saveTaskSessions();
+          return session;
+        },
+
+        selectTaskSession(sessionId, nextSection = '') {
+          const session = this.taskSessions.find(item => item.id === sessionId);
+          if (!session) return;
+          this.selectedTaskSessionId = session.id;
+          this.hydrateTaskSession(session);
+          if (nextSection) {
+            this.shellSection = nextSection;
+          }
+          this.saveTaskSessions();
+        },
+
+        taskSessionStatusLabel(status) {
+          const labels = {
+            draft: '草稿',
+            running: '执行中',
+            completed: '已完成',
+            failed: '失败'
+          };
+          return labels[String(status || '').trim()] || '未标注';
+        },
+
+        shellSectionLabel(sectionId) {
+          const item = this.shellSecondaryItemsFor(this.currentPage).find(entry => entry.id === sectionId);
+          return item?.label || '工作台';
+        },
+
+        tuningPageHeaderDescription() {
+          if (this.currentPage !== 'tuning') return '';
+          if (this.shellSection === 'tuning-workbench') {
+            return '从工作台发起新的整定任务。参数配置与历史数据参数统一通过弹窗填写，提交后自动生成独立任务会话。';
+          }
+          if (this.shellSection === 'tuning-history') {
+            return '先在任务会话中选择具体任务，再进入执行过程、调参结果、解释详情和专业报告。';
+          }
+          if (this.selectedTaskSession) {
+            return `当前会话：${this.selectedTaskSessionLabel} · ${this.selectedTaskSessionContextLine}`;
+          }
+          return '请先在“任务会话”中选择一条整定任务，再查看对应内容。';
+        },
+
+        taskSessionStatusClass(status) {
+          const value = String(status || '').trim();
+          if (value === 'completed') return 'is-success';
+          if (value === 'failed') return 'is-danger';
+          if (value === 'running') return 'is-warning';
+          return '';
+        },
+
+        openTaskSessionFromWorkbench(sessionId, targetSection = 'tuning-process') {
+          this.selectTaskSession(sessionId, targetSection);
+        },
+
+        renameTaskSession(sessionId) {
+          const session = this.taskSessions.find(item => item.id === sessionId);
+          if (!session) return;
+          const nextTitle = window.prompt('请输入新的任务会话名称：', session.title || '');
+          if (nextTitle === null) return;
+          const trimmed = String(nextTitle || '').trim();
+          if (!trimmed) return;
+          session.title = trimmed;
+          session.updatedAt = new Date().toLocaleString();
+          if (this.selectedTaskSessionId === session.id) {
+            this.syncCurrentTaskSession({ title: trimmed, updatedAt: session.updatedAt });
+          } else {
+            this.saveTaskSessions();
+          }
+        },
+
+        deleteTaskSession(sessionId) {
+          const session = this.taskSessions.find(item => item.id === sessionId);
+          if (!session) return;
+          const ok = window.confirm(`确定删除任务会话“${session.title}”吗？此操作不会影响已生成的经验记录。`);
+          if (!ok) return;
+          this.taskSessions = this.taskSessions.filter(item => item.id !== sessionId);
+          if (this.selectedTaskSessionId === sessionId) {
+            const next = this.taskSessions[0] || null;
+            if (next) {
+              this.selectedTaskSessionId = next.id;
+              this.hydrateTaskSession(next);
+            } else {
+              this.selectedTaskSessionId = '';
+              this.messages = [];
+              this.messageIdCounter = 0;
+              this.latestTuningResultData = null;
+              this.latestTuningResultMessage = null;
+            }
+          }
+          this.saveTaskSessions();
+        },
+
+        parseTaskSessionTime(value) {
+          if (!value) return 0;
+          const parsed = Date.parse(value);
+          return Number.isFinite(parsed) ? parsed : 0;
         },
 
         setShellSection(sectionId) {
@@ -300,7 +553,7 @@ createApp({
           const map = {
             tuning: [
               { id: 'tuning-workbench', label: '\u5de5\u4f5c\u53f0' },
-              { id: 'tuning-history', label: '\u5386\u53f2\u6570\u636e' },
+              { id: 'tuning-history', label: '\u4efb\u52a1\u4f1a\u8bdd' },
               { id: 'tuning-process', label: '\u6267\u884c\u8fc7\u7a0b' },
               { id: 'tuning-result', label: '\u8c03\u53c2\u7ed3\u679c' },
               { id: 'tuning-explain', label: '\u89e3\u91ca\u8be6\u60c5' }
@@ -377,6 +630,42 @@ createApp({
             this.systemConfigMessage = '系统配置保存失败，请检查填写内容或后端日志。';
           } finally {
             this.systemConfigSaving = false;
+          }
+        },
+
+        async testModelConnectivity() {
+          this.systemConfigTesting = true;
+          this.systemConfigTestMessage = '';
+          this.systemConfigTestOk = false;
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/system-config/test-model`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.systemConfig.model)
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            this.systemConfigTestOk = Boolean(payload?.ok);
+            const parts = [payload?.message || '模型连通性测试已完成。'];
+            if (payload?.error_type) {
+              parts.push(`错误类型：${this.workflowErrorTypeLabel(payload.error_type)}`);
+            }
+            if (payload?.status_code) {
+              parts.push(`状态码：${payload.status_code}`);
+            }
+            if (payload?.detail) {
+              parts.push(`详细原因：${payload.detail}`);
+            }
+            if (payload?.reply && payload.ok) {
+              parts.push(`模型回复：${payload.reply}`);
+            }
+            this.systemConfigTestMessage = parts.join('\n');
+          } catch (error) {
+            console.error('Failed to test model connectivity:', error);
+            this.systemConfigTestOk = false;
+            this.systemConfigTestMessage = '模型连通性测试失败，请检查后端服务或网络状态。';
+          } finally {
+            this.systemConfigTesting = false;
           }
         },
 
@@ -500,6 +789,9 @@ createApp({
           if (page === 'system-config') {
             await this.loadSystemConfig();
           }
+          if (page === 'tuning' && !this.selectedTaskSessionId && this.taskSessions.length) {
+            this.selectTaskSession(this.taskSessions[0].id, this.shellSection);
+          }
         },
 
         resetStrategyLabForm() {
@@ -560,6 +852,19 @@ createApp({
 
         closeProfessionalReportDrawer() {
           this.professionalReportDrawerOpen = false;
+        },
+
+        openTuningTaskModal() {
+          this.tuningTaskModalOpen = true;
+        },
+
+        closeTuningTaskModal() {
+          this.tuningTaskModalOpen = false;
+        },
+
+        async submitTuningTaskModal() {
+          this.tuningTaskModalOpen = false;
+          await this.startTuning();
         },
 
         strategyLabCaseName(caseId) {
@@ -1800,6 +2105,9 @@ createApp({
 
           this.loading = true;
           this.loadingMessage = usingUploadedCsv ? '正在上传文件...' : '正在获取历史数据...';
+          this.createTaskSession();
+          this.shellSection = 'tuning-process';
+          this.professionalReportDrawerOpen = false;
 
           this.addMessage({
             type: 'user',
@@ -1853,9 +2161,13 @@ window: ${this.historyWindow || 1}
               type: 'assistant',
               content: `请求失败: ${error.message}`
             });
+            this.syncCurrentTaskSession({ status: 'failed' });
           } finally {
             this.loading = false;
             this.progressSteps.forEach(step => step.active = false);
+            this.syncCurrentTaskSession({
+              status: this.latestTuningResultData ? 'completed' : (this.messages.length ? 'failed' : 'draft')
+            });
           }
         },
 
@@ -1907,10 +2219,33 @@ window: ${this.historyWindow || 1}
               data: data.data,
               collapsed: false
             });
+            this.syncCurrentTaskSession({
+              status: 'completed',
+              latestResult: data.data
+            });
           } else if (data.type === 'error') {
+            const errorParts = [data.message || '任务执行失败'];
+            if (data.error_type) {
+              errorParts.push(`错误类型：${this.workflowErrorTypeLabel(data.error_type)}`);
+            }
+            if (data.error_code) {
+              errorParts.push(`错误码：${data.error_code}`);
+            }
+            if (data.error_detail) {
+              errorParts.push(`详细原因：${data.error_detail}`);
+            }
             this.addMessage({
               type: 'assistant',
-              content: `❌ 错误: ${data.message}`
+              content: `❌ 错误：${errorParts.join('\n')}`
+            });
+            this.syncCurrentTaskSession({
+              status: 'failed',
+              error: {
+                message: data.message || '',
+                code: data.error_code || '',
+                type: data.error_type || '',
+                detail: data.error_detail || ''
+              }
             });
           }
 
@@ -1991,6 +2326,17 @@ window: ${this.historyWindow || 1}
 
         formatScore100(value, digits = 1) {
           return typeof value === 'number' && Number.isFinite(value) ? (value * 10).toFixed(digits) : '-';
+        },
+
+        workflowErrorTypeLabel(errorType) {
+          const labels = {
+            upstream_model_timeout: '模型服务超时',
+            upstream_model_bad_gateway: '模型网关异常',
+            upstream_model_unavailable: '模型服务不可用',
+            upstream_model_connection: '模型连接异常',
+            workflow_execution_error: '流程执行异常'
+          };
+          return labels[String(errorType || '').trim()] || (errorType || '未知错误');
         },
 
         summarizeModelParams(model) {
@@ -2374,7 +2720,14 @@ window: ${this.historyWindow || 1}
         clearMessages() {
           this.messages = [];
           this.messageIdCounter = 0;
-          localStorage.removeItem(this.messageStorageKey());
+          if (this.selectedTaskSessionId) {
+            this.syncCurrentTaskSession({
+              status: 'draft',
+              latestResult: null
+            });
+          } else {
+            localStorage.removeItem(this.messageStorageKey());
+          }
         },
 
         truncateText(text, maxLength = 120) {
@@ -2550,6 +2903,16 @@ window: ${this.historyWindow || 1}
           return `report_${safe}`;
         },
 
+        professionalReportFileSlug() {
+          const sessionTitle = this.selectedTaskSession?.title || this.loopName || 'pid_tuning_task';
+          const safeTitle = String(sessionTitle)
+            .trim()
+            .replace(/[^\w\u4e00-\u9fa5-]+/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_|_$/g, '');
+          return safeTitle ? `pid_report_${safeTitle}` : this.professionalReportId();
+        },
+
         reportStageSummary(stage) {
           if (!stage) return '-';
           const summary = Array.isArray(stage.key_findings) && stage.key_findings.length
@@ -2561,7 +2924,7 @@ window: ${this.historyWindow || 1}
         exportProfessionalReport(format = 'markdown') {
           const payload = this.professionalReportPayload;
           if (!payload) return;
-          const slug = payload?.report_meta?.report_id || this.professionalReportId();
+          const slug = this.professionalReportFileSlug();
           if (format === 'json') {
             this.downloadTextFile(`${slug}.json`, JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
             return;
@@ -2631,7 +2994,7 @@ window: ${this.historyWindow || 1}
           return {
             report_meta: {
               report_id: this.professionalReportId(),
-              task_id: this.latestTuningResultMessage?.id || '',
+              task_id: this.selectedTaskSession?.id || this.latestTuningResultMessage?.id || '',
               title: 'PID智能整定专业报告',
               generated_at: new Date().toISOString(),
               status: result ? (result.evaluation?.passed ? '已完成' : '待复核') : (this.loading ? '执行中' : '未开始'),
@@ -3000,6 +3363,11 @@ window: ${this.historyWindow || 1}
 
             return [
               {
+                title: '当前会话',
+                value: this.selectedTaskSession?.title || '未选择',
+                helper: this.selectedTaskSession ? `状态：${this.taskSessionStatusLabel(this.selectedTaskSession.status)}` : '发起整定后会自动生成任务会话'
+              },
+              {
                 title: '当前阶段',
                 value: this.executionOverview.currentStage || '等待启动',
                 helper: this.executionOverview.currentAgent || '尚未开始'
@@ -3098,6 +3466,21 @@ window: ${this.historyWindow || 1}
         comparedStrategyLabCandidate() {
           return this.strategyLabCandidates.find(item => item.id === this.strategyLabCompareCandidateId) || null;
         },
+        selectedTaskSession() {
+          return this.taskSessions.find(item => item.id === this.selectedTaskSessionId) || null;
+        },
+        selectedTaskSessionLabel() {
+          return this.selectedTaskSession?.title || '未选择任务会话';
+        },
+        selectedTaskSessionContextLine() {
+          if (!this.selectedTaskSession?.context) return '请先从任务会话中选择一次整定任务。';
+          const context = this.selectedTaskSession.context;
+          return [
+            context.loopName || '-',
+            context.scenarioLabel || this.scenarioLabel(context.scenario),
+            context.dataSourceLabel || (context.dataSource === 'history' ? '历史接口' : 'CSV 上传')
+          ].filter(Boolean).join(' · ');
+        },
         taskInputMessage() {
           return this.messages.find(msg => msg.type === 'user') || null;
         },
@@ -3172,6 +3555,84 @@ window: ${this.historyWindow || 1}
             finalStateClass: latestResult ? (latestResult.evaluation?.passed ? 'is-success' : 'is-warning') : (this.loading ? 'is-warning' : ''),
             insight: resultInsight
           };
+        },
+        taskSessionRows() {
+          return (this.taskSessions || []).map(item => ({
+            ...item,
+            statusLabel: this.taskSessionStatusLabel(item.status),
+            statusClass: this.taskSessionStatusClass(item.status),
+            dataSourceLabel: item.context?.dataSourceLabel || (item.context?.dataSource === 'history' ? '历史接口' : 'CSV 上传'),
+            scenarioLabel: item.context?.scenarioLabel || this.scenarioLabel(item.context?.scenario),
+            controlObjectLabel: item.context?.controlObjectLabel || this.controlObjectLabel(item.context?.controlObject),
+            scoreLabel: item.latestResult ? `${this.formatScore100(item.latestResult?.evaluation?.final_rating, 1)}/100` : '-',
+            updatedAtTs: this.parseTaskSessionTime(item.updatedAt || item.createdAt),
+            createdAtTs: this.parseTaskSessionTime(item.createdAt)
+          }));
+        },
+        filteredTaskSessionRows() {
+          const keyword = String(this.taskSessionKeyword || '').trim().toLowerCase();
+          const status = String(this.taskSessionStatusFilter || '').trim();
+          const timeFilter = String(this.taskSessionTimeFilter || '').trim();
+          const now = Date.now();
+          const filtered = this.taskSessionRows.filter(item => {
+            const statusOk = !status || item.status === status;
+            if (!statusOk) return false;
+            if (timeFilter === 'recent24h' && item.updatedAtTs && now - item.updatedAtTs > 24 * 60 * 60 * 1000) {
+              return false;
+            }
+            if (!keyword) return true;
+            const haystack = [
+              item.title,
+              item.context?.loopName,
+              item.scenarioLabel,
+              item.controlObjectLabel,
+              item.dataSourceLabel
+            ].filter(Boolean).join(' ').toLowerCase();
+            return haystack.includes(keyword);
+          });
+          const sortOrder = String(this.taskSessionSortOrder || 'updated_desc');
+          return filtered.slice().sort((a, b) => {
+            if (sortOrder === 'updated_asc') return (a.updatedAtTs || 0) - (b.updatedAtTs || 0);
+            if (sortOrder === 'created_asc') return (a.createdAtTs || 0) - (b.createdAtTs || 0);
+            if (sortOrder === 'created_desc') return (b.createdAtTs || 0) - (a.createdAtTs || 0);
+            return (b.updatedAtTs || 0) - (a.updatedAtTs || 0);
+          });
+        },
+        taskSessionOverviewCards() {
+          const rows = this.taskSessionRows;
+          return [
+            {
+              title: '会话总数',
+              value: String(rows.length),
+              helper: '每次整定都会生成独立会话'
+            },
+            {
+              title: '执行中',
+              value: String(rows.filter(item => item.status === 'running').length),
+              helper: '仍在等待结果或继续追加消息'
+            },
+            {
+              title: '已完成',
+              value: String(rows.filter(item => item.status === 'completed').length),
+              helper: '可直接查看结果、解释和报告'
+            },
+            {
+              title: '最近会话',
+              value: rows[0]?.title || '暂无会话',
+              helper: rows[0]?.updatedAt || '发起整定后会自动生成'
+            }
+          ];
+        },
+        selectedTaskSessionStageLabel() {
+          return this.executionOverview.currentStage || '等待启动';
+        },
+        selectedTaskSessionModelLabel() {
+          return this.latestTuningResultData?.model?.modelType || '待生成';
+        },
+        selectedTaskSessionScoreLabel() {
+          return this.latestTuningResultData
+            ? `${this.formatScore100(this.latestTuningResultData.evaluation?.final_rating, 1)}/100`
+            : '待评估';
         }
       },
       watch: {
@@ -3183,7 +3644,7 @@ window: ${this.historyWindow || 1}
         }
       },
       mounted() {
-        this.loadMessages();
+        this.loadTaskSessions();
         this.loadStrategyLabState();
         this.shellSection = this.shellSecondaryItemsFor(this.currentPage)[0]?.id || '';
         this.bindShellSecondaryFallback();

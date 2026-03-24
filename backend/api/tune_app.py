@@ -8,6 +8,7 @@ import tempfile
 import uuid
 from typing import Any, AsyncGenerator, Callable, Dict
 
+import httpx
 from fastapi import FastAPI, File, Form, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -130,6 +131,12 @@ class IntegrationConfigPayload(BaseModel):
 class SystemConfigPayload(BaseModel):
     model: ModelConfigPayload
     integration: IntegrationConfigPayload
+
+
+class ModelConnectivityTestPayload(BaseModel):
+    name: str = Field("", description="模型名称")
+    api_url: str = Field("", description="模型服务地址")
+    api_key: str = Field("", description="模型 API Key")
 
 
 def _normalize_loop_type(loop_type: str) -> str:
@@ -776,6 +783,91 @@ def create_app(
             }
         )
         return JSONResponse({"message": "system_config_updated", "config": config})
+
+    @app.post("/api/system-config/test-model")
+    async def system_config_test_model(payload: ModelConnectivityTestPayload) -> JSONResponse:
+        runtime = get_runtime_system_config()
+        model_name = str(payload.name or runtime["model"]["name"] or "").strip()
+        api_url = str(payload.api_url or runtime["model"]["api_url"] or "").strip().rstrip("/")
+        api_key = str(payload.api_key or runtime["model"]["api_key"] or "").strip()
+
+        if not model_name or not api_url:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error_type": "invalid_config",
+                    "message": "模型名称或模型服务地址为空，请先完善系统配置。",
+                },
+                status_code=400,
+            )
+
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        body = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": "请仅回复：ok"}],
+            "max_tokens": 8,
+            "temperature": 0,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.post(f"{api_url}/chat/completions", headers=headers, json=body)
+            if response.status_code >= 400:
+                detail = response.text[:800]
+                error_type = "upstream_model_bad_gateway" if response.status_code == 502 else (
+                    "upstream_model_unavailable" if response.status_code == 503 else "upstream_model_http_error"
+                )
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error_type": error_type,
+                        "status_code": response.status_code,
+                        "message": f"模型服务测试失败（HTTP {response.status_code}）。",
+                        "detail": detail,
+                        "model": model_name,
+                        "api_url": api_url,
+                    }
+                )
+            payload_json = response.json()
+            content = ""
+            try:
+                content = str(payload_json["choices"][0]["message"]["content"])
+            except Exception:
+                content = ""
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "message": "模型服务连通性正常，可以发起整定任务。",
+                    "model": model_name,
+                    "api_url": api_url,
+                    "reply": content.strip(),
+                }
+            )
+        except httpx.TimeoutException as exc:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error_type": "upstream_model_timeout",
+                    "message": "模型服务响应超时，请稍后重试或切换可用模型。",
+                    "detail": str(exc),
+                    "model": model_name,
+                    "api_url": api_url,
+                }
+            )
+        except Exception as exc:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error_type": "upstream_model_connection",
+                    "message": "模型服务连接异常，请检查服务地址、网关状态或网络连通性。",
+                    "detail": str(exc),
+                    "model": model_name,
+                    "api_url": api_url,
+                }
+            )
 
     @app.get("/api/strategy-lab/cases")
     async def strategy_lab_cases() -> JSONResponse:

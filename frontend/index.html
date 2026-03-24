@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>PID智能整定系统 - 多智能体协同平台</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="./js/vendor/tailwindcdn.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="./css/app.css">
@@ -214,19 +214,15 @@
 
       <nav class="shell-nav-list" aria-label="主菜单">
         <button @click="switchPage('tuning')" class="shell-nav-item" :class="{ 'is-active': currentPage === 'tuning' }" type="button">
-          <span class="shell-nav-icon">智</span>
           <span class="shell-nav-text">智能整定</span>
         </button>
         <button @click="switchPage('experience')" class="shell-nav-item" :class="{ 'is-active': currentPage === 'experience' }" type="button">
-          <span class="shell-nav-icon">经</span>
           <span class="shell-nav-text">经验中心</span>
         </button>
         <button @click="switchPage('strategy-lab')" class="shell-nav-item" :class="{ 'is-active': currentPage === 'strategy-lab' }" type="button">
-          <span class="shell-nav-icon">策</span>
           <span class="shell-nav-text">策略案例</span>
         </button>
         <button @click="switchPage('system-config')" class="shell-nav-item" :class="{ 'is-active': currentPage === 'system-config' }" type="button">
-          <span class="shell-nav-icon">系</span>
           <span class="shell-nav-text">系统配置</span>
         </button>
       </nav>
@@ -242,7 +238,6 @@
 
     <section class="shell-main">
       <aside class="shell-secondary">
-        <div class="shell-secondary-label">二级菜单</div>
         <button
           v-for="item in shellSecondaryItems"
           :key="item.id"
@@ -257,7 +252,7 @@
       </aside>
 
       <div class="shell-workspace">
-    <aside class="legacy-sidebar flex flex-col overflow-y-auto">
+    <aside v-if="false && currentPage === 'tuning'" class="legacy-sidebar flex flex-col overflow-y-auto">
             <div class="p-6 border-b border-slate-200 bg-slate-900 text-white">
         <div class="flex items-center gap-3 mb-2">
           <div class="w-12 h-12 rounded-xl border border-white/15 bg-white/10 flex items-center justify-center text-sm font-semibold tracking-[0.2em]">
@@ -358,97 +353,33 @@
         </template>
 
         <template v-else-if="shellSection === 'tuning-history'">
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">数据来源</label>
-            <div class="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                @click="dataSource = 'upload'"
-                class="rounded-xl border px-4 py-3 text-left transition-all"
-                :class="dataSource === 'upload'
-                  ? 'border-blue-500 bg-blue-50 shadow-sm'
-                  : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'"
-              >
-                <div class="text-sm font-semibold" :class="dataSource === 'upload' ? 'text-blue-700' : 'text-slate-700'">上传 CSV</div>
-                <div class="mt-1 text-xs" :class="dataSource === 'upload' ? 'text-blue-600' : 'text-slate-500'">使用本地文件直接发起整定</div>
-              </button>
-              <button
-                type="button"
-                @click="dataSource = 'history'"
-                class="rounded-xl border px-4 py-3 text-left transition-all"
-                :class="dataSource === 'history'
-                  ? 'border-blue-500 bg-blue-50 shadow-sm'
-                  : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'"
-              >
-                <div class="text-sm font-semibold" :class="dataSource === 'history' ? 'text-blue-700' : 'text-slate-700'">获取历史数据</div>
-                <div class="mt-1 text-xs" :class="dataSource === 'history' ? 'text-blue-600' : 'text-slate-500'">按回路参数从历史系统取数</div>
-              </button>
-            </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 tuning-callout">
+            <div class="font-semibold text-slate-800 mb-2">任务会话</div>
+            <p>每次点击“开始智能整定”都会生成一条独立任务会话。选择某个会话后，再进入执行过程、调参结果、解释详情和专业报告。</p>
           </div>
-          <div v-if="dataSource === 'history'" class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4 tuning-callout">
-            <div class="flex items-start justify-between gap-3">
-              <div class="text-sm font-semibold text-slate-700">历史数据参数</div>
-              <button
-                type="button"
-                @click="historyPanelCollapsed = !historyPanelCollapsed"
-                class="shrink-0 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 transition-all"
-              >
-                <span>{{ historyPanelCollapsed ? '▼' : '▲' }}</span>
-              </button>
-            </div>
-            <div v-if="!historyPanelCollapsed" class="space-y-4">
-              <div>
-                <label class="block text-sm font-semibold text-slate-700 mb-2">Loop URI</label>
-                <input
-                  v-model="loopUri"
-                  type="text"
-                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                >
+          <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+            <div class="text-sm font-semibold text-slate-800">当前选中会话</div>
+            <template v-if="selectedTaskSession">
+              <div class="text-sm text-slate-900 font-medium">{{ selectedTaskSession.title }}</div>
+              <div class="text-xs text-slate-500">创建于 {{ selectedTaskSession.createdAt || '-' }}</div>
+              <div class="flex flex-wrap gap-2 pt-1">
+                <span class="shell-status-pill" :class="taskSessionStatusClass(selectedTaskSession.status)">{{ taskSessionStatusLabel(selectedTaskSession.status) }}</span>
+                <span class="shell-status-pill">{{ selectedTaskSession.context?.dataSourceLabel || '-' }}</span>
               </div>
-              <div>
-                <label class="block text-sm font-semibold text-slate-700 mb-2">开始时间</label>
-                <input
-                  v-model="startTime"
-                  type="text"
-                  placeholder="1772467200000"
-                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                >
-              </div>
-              <div>
-                <label class="block text-sm font-semibold text-slate-700 mb-2">结束时间</label>
-                <input
-                  v-model="endTime"
-                  type="text"
-                  placeholder="1772553600000"
-                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                >
-              </div>
-              <div>
-                <label class="block text-sm font-semibold text-slate-700 mb-2">采样间隔（秒）</label>
-                <select
-                  v-model="historyWindow"
-                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                >
-                  <option :value="1">1 秒</option>
-                  <option :value="2">2 秒</option>
-                  <option :value="5">5 秒</option>
-                  <option :value="10">10 秒</option>
-                </select>
-              </div>
-            </div>
+            </template>
+            <div v-else class="text-xs text-slate-500">当前还没有任务会话，发起一次整定后会自动生成。</div>
           </div>
-          <div v-if="dataSource === 'upload'">
-            <label class="block text-sm font-semibold text-slate-700 mb-2">上传 CSV 数据文件</label>
-            <input id="csv-upload-input" ref="fileInput" type="file" accept=".csv" @change="handleFileUpload" class="hidden">
-            <label
-              for="csv-upload-input"
-              class="flex w-full cursor-pointer items-center justify-center rounded-lg border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3 font-medium text-blue-700 transition-all hover:from-blue-100 hover:to-indigo-100"
-            >
-              <span class="text-xl mr-2">📎</span> 选择 CSV 文件
-            </label>
-            <p v-if="uploadedFile" class="text-xs text-slate-600 mt-2 truncate bg-green-50 px-3 py-2 rounded border border-green-200">
-              已选择：{{ uploadedFile.name }}
-            </p>
+          <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+            <div class="text-sm font-semibold text-slate-800">快速跳转</div>
+            <button type="button" @click="selectedTaskSessionId && openTaskSessionFromWorkbench(selectedTaskSessionId, 'tuning-process')" :disabled="!selectedTaskSessionId" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed">
+              查看执行过程
+            </button>
+            <button type="button" @click="selectedTaskSessionId && openTaskSessionFromWorkbench(selectedTaskSessionId, 'tuning-result')" :disabled="!selectedTaskSessionId" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed">
+              查看调参结果
+            </button>
+            <button type="button" @click="selectedTaskSessionId && openTaskSessionFromWorkbench(selectedTaskSessionId, 'tuning-explain')" :disabled="!selectedTaskSessionId" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed">
+              查看解释详情
+            </button>
           </div>
         </template>
 
@@ -868,17 +799,31 @@
     </aside>
 
     <main ref="chatBox" class="legacy-main overflow-y-auto p-8 custom-scrollbar">
-      <div class="max-w-5xl mx-auto">
+      <div class="max-w-6xl mx-auto">
         <div v-if="currentPage === 'tuning'" class="space-y-6">
-          <div v-if="shellSection === 'tuning-workbench' && messages.length === 0" class="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-            <div class="max-w-3xl">
+          <div v-if="shellSection === 'tuning-workbench'" class="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+            <div class="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+              <div class="max-w-3xl">
               <div class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">工作台</div>
               <h2 class="mt-3 text-3xl font-bold text-slate-900">从这里发起一次新的整定任务</h2>
-              <p class="mt-3 text-base leading-7 text-slate-600">左侧配置回路、工况和数据来源后，点击“开始智能整定”。任务发起后，这里会自动切换成执行摘要，你也可以从二级菜单进入执行过程、调参结果和解释详情。</p>
+              <p class="mt-3 text-base leading-7 text-slate-600">工作台只保留任务入口和任务摘要。参数配置与历史数据参数统一放到“新建整定任务”弹窗里填写，提交后自动生成一条独立任务会话。</p>
+              <div class="mt-4 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-600">
+                <span class="font-semibold text-slate-800">提示：</span>
+                <span>每次整定都会生成独立任务会话，后续执行过程、结果、解释和报告都围绕当前会话展开。</span>
+              </div>
+              </div>
+              <div class="flex shrink-0 flex-wrap items-center gap-3">
+                <button type="button" @click="openTuningTaskModal" class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700">
+                  新建整定任务
+                </button>
+                <button type="button" @click="shellSection = 'tuning-history'" class="shell-inline-action">
+                  查看任务会话
+                </button>
+              </div>
             </div>
             <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div class="rounded-xl border border-slate-200 bg-slate-50 p-5">
-                <div class="text-sm font-semibold text-slate-900">历史数据接入</div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                  <div class="text-sm font-semibold text-slate-900">历史数据接入</div>
                 <p class="mt-2 text-sm leading-6 text-slate-600">支持 CSV 上传和历史接口取数，当前默认采样间隔为 1 秒。</p>
               </div>
               <div class="rounded-xl border border-slate-200 bg-slate-50 p-5">
@@ -886,43 +831,116 @@
                 <p class="mt-2 text-sm leading-6 text-slate-600">数据分析、系统辨识、知识增强、PID 整定和评估反馈会按顺序执行。</p>
               </div>
               <div class="rounded-xl border border-slate-200 bg-slate-50 p-5">
-                <div class="text-sm font-semibold text-slate-900">结果可解释</div>
-                <p class="mt-2 text-sm leading-6 text-slate-600">整定完成后会给出模型、参数、评分和上线建议，支持快速复核。</p>
+                  <div class="text-sm font-semibold text-slate-900">结果可解释</div>
+                  <p class="mt-2 text-sm leading-6 text-slate-600">整定完成后会给出模型、参数、评分和上线建议，支持快速复核。</p>
+                </div>
               </div>
-            </div>
           </div>
 
-          <div v-if="currentPage === 'tuning' && shellSection === 'tuning-workbench' && messages.length > 0" class="space-y-6">
-            <div class="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
-              <div class="flex items-start justify-between gap-4">
+          <div v-if="shellSection === 'tuning-history'" class="space-y-6">
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div v-for="card in taskSessionOverviewCards" :key="card.title" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{{ card.title }}</div>
+                <div class="mt-3 text-2xl font-bold text-slate-900">{{ card.value }}</div>
+                <div class="mt-2 text-sm leading-6 text-slate-500">{{ card.helper }}</div>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
                 <div>
-                  <div class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">执行摘要</div>
-                  <h2 class="mt-2 text-2xl font-bold text-slate-900">当前任务已经进入执行阶段</h2>
-                  <p class="mt-2 text-sm leading-6 text-slate-600">工作台只保留任务入口和阶段摘要。详细执行流、调参结果和解释说明，请切换左侧二级菜单继续查看。</p>
+                  <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">搜索会话</label>
+                  <input v-model="taskSessionKeyword" type="text" placeholder="按回路、工况或控制对象搜索" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
                 </div>
-                <div class="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-semibold text-blue-700">
-                  已累计 {{ messages.length }} 条执行消息
+                <div>
+                  <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">状态筛选</label>
+                  <select v-model="taskSessionStatusFilter" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                    <option value="">全部状态</option>
+                    <option value="running">执行中</option>
+                    <option value="completed">已完成</option>
+                    <option value="failed">失败</option>
+                    <option value="draft">草稿</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">时间范围</label>
+                  <select v-model="taskSessionTimeFilter" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                    <option value="">全部时间</option>
+                    <option value="recent24h">最近 24 小时</option>
+                  </select>
+                </div>
+                <div class="flex items-end">
+                  <div class="flex w-full gap-2">
+                    <select v-model="taskSessionSortOrder" class="flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                      <option value="updated_desc">最近更新优先</option>
+                      <option value="updated_asc">最早更新优先</option>
+                      <option value="created_desc">最新创建优先</option>
+                      <option value="created_asc">最早创建优先</option>
+                    </select>
+                    <button type="button" class="shell-inline-action whitespace-nowrap" @click="taskSessionKeyword=''; taskSessionStatusFilter=''; taskSessionTimeFilter=''; taskSessionSortOrder='updated_desc'">重置筛选</button>
+                  </div>
                 </div>
               </div>
-              <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                <button type="button" @click="shellSection = 'tuning-process'" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-left hover:bg-blue-50 hover:border-blue-200 transition-all">
-                  <div class="text-sm font-semibold text-slate-800">查看执行过程</div>
-                  <div class="mt-1 text-xs text-slate-500">按时间顺序追踪多智能体协同和工具调用。</div>
-                </button>
-                <button type="button" @click="shellSection = 'tuning-result'" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-left hover:bg-emerald-50 hover:border-emerald-200 transition-all">
-                  <div class="text-sm font-semibold text-slate-800">查看调参结果</div>
-                  <div class="mt-1 text-xs text-slate-500">集中查看最终模型、PID 参数和性能评分。</div>
-                </button>
-                <button type="button" @click="shellSection = 'tuning-explain'" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-left hover:bg-purple-50 hover:border-purple-200 transition-all">
-                  <div class="text-sm font-semibold text-slate-800">查看解释详情</div>
-                  <div class="mt-1 text-xs text-slate-500">查看数据分析、辨识理由和上线建议。</div>
-                </button>
+            </div>
+
+            <div v-if="filteredTaskSessionRows.length === 0" class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
+              当前还没有整定会话。请先在“工作台”发起一次新的智能整定任务。
+            </div>
+
+            <div v-else class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
+                <div>
+                  <div class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">任务会话</div>
+                  <div class="mt-1 text-sm text-slate-600">按会话查看每次整定任务，避免不同任务之间的执行流和结果相互干扰。</div>
+                </div>
+                <div class="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600">
+                  共 {{ filteredTaskSessionRows.length }} / {{ taskSessionRows.length }} 条会话
+                </div>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                  <thead class="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th class="px-5 py-4 text-left font-semibold">任务会话</th>
+                      <th class="px-5 py-4 text-left font-semibold">数据来源</th>
+                      <th class="px-5 py-4 text-left font-semibold">状态</th>
+                      <th class="px-5 py-4 text-left font-semibold">评分</th>
+                      <th class="px-5 py-4 text-left font-semibold">最近更新时间</th>
+                      <th class="px-5 py-4 text-right font-semibold">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="item in filteredTaskSessionRows" :key="item.id" class="border-t border-slate-200">
+                      <td class="px-5 py-4 align-top">
+                        <div class="font-semibold text-slate-900">{{ item.title }}</div>
+                        <div class="mt-1 text-xs text-slate-500">回路：{{ item.context?.loopName || '-' }} · 工况：{{ item.scenarioLabel || '-' }}</div>
+                      </td>
+                      <td class="px-5 py-4 text-slate-700">{{ item.dataSourceLabel }}</td>
+                      <td class="px-5 py-4"><span class="shell-status-pill" :class="item.statusClass">{{ item.statusLabel }}</span></td>
+                      <td class="px-5 py-4 text-slate-700">{{ item.scoreLabel }}</td>
+                      <td class="px-5 py-4 text-slate-500">{{ item.updatedAt || item.createdAt || '-' }}</td>
+                      <td class="px-5 py-4">
+                        <div class="flex flex-wrap justify-end gap-2">
+                          <button type="button" class="shell-inline-action" @click="openTaskSessionFromWorkbench(item.id, 'tuning-process')">执行过程</button>
+                          <button type="button" class="shell-inline-action" @click="openTaskSessionFromWorkbench(item.id, 'tuning-result')">调参结果</button>
+                          <button type="button" class="shell-inline-action is-accent" @click="openTaskSessionFromWorkbench(item.id, 'tuning-explain')">解释详情</button>
+                          <button type="button" class="shell-inline-action" @click="renameTaskSession(item.id)">重命名</button>
+                          <button type="button" class="shell-inline-action" @click="deleteTaskSession(item.id)">删除</button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
 
 
           <div v-if="shellSection === 'tuning-process'" class="space-y-6">
+            <div v-if="!selectedTaskSessionId" class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
+              请先在“任务会话”中选择一条整定任务，再查看对应的执行过程。
+            </div>
+            <template v-else>
             <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div class="flex items-center justify-between gap-4">
                 <div>
@@ -1081,21 +1099,27 @@
                 </div>
               </div>
             </div>
+            </template>
           </div>
           <div v-if="currentPage === 'tuning' && shellSection === 'tuning-result'" class="space-y-6">
-            <div v-if="latestTuningResultData" class="space-y-6">
+            <div v-if="!selectedTaskSessionId" class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
+              请先在“任务会话”中选择一条整定任务，再查看对应的调参结果。
+            </div>
+            <div v-else-if="latestTuningResultData" class="space-y-6">
+              <div class="rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm">
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-600">调参结果</div>
+                    <h2 class="mt-2 text-2xl font-bold text-slate-800">当前推荐参数已生成</h2>
+                    <p class="mt-2 text-sm leading-6 text-slate-600">集中查看最终模型、PID 参数、综合评分和是否建议进入上线确认。</p>
+                  </div>
+                  <button @click="copyResult(latestTuningResultData)" class="shell-inline-action is-accent">
+                    复制参数
+                  </button>
+                </div>
+              </div>
               <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <div class="xl:col-span-2 rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm">
-                  <div class="flex items-start justify-between gap-4">
-                    <div>
-                      <div class="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-600">调参结果</div>
-                      <h2 class="mt-2 text-2xl font-bold text-slate-800">当前推荐参数已生成</h2>
-                      <p class="mt-2 text-sm leading-6 text-slate-600">这里集中查看本次整定输出的最终模型、PID 参数和性能评估，避免再从消息流里逐条翻找。</p>
-                    </div>
-                    <button @click="copyResult(latestTuningResultData)" class="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 transition-all">
-                      复制参数
-                    </button>
-                  </div>
                   <div class="mt-6 grid grid-cols-1 md:grid-cols-4 gap-3">
                     <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
                       <div class="text-xs text-slate-500">模型类型</div>
@@ -1142,7 +1166,10 @@
           </div>
 
           <div v-if="currentPage === 'tuning' && shellSection === 'tuning-explain'" class="space-y-6">
-            <div v-if="latestTuningResultData" class="rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 to-cyan-50 p-6 shadow-sm">
+            <div v-if="!selectedTaskSessionId" class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
+              请先在“任务会话”中选择一条整定任务，再查看对应的解释详情和专业报告。
+            </div>
+            <div v-else-if="latestTuningResultData" class="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
               <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div class="space-y-2">
                   <div class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">专业整定报告</div>
@@ -1202,9 +1229,141 @@
             </div>
           </div>
 
-        <!-- 欢迎消息 -->
         </div>
-                  <div v-if="currentPage === 'experience'" class="space-y-6">
+        <div v-if="currentPage === 'system-config'" class="space-y-6">
+          <div v-if="shellSection === 'system-model'" class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">模型配置</h3>
+                <p class="text-xs text-slate-500 mt-1">配置当前整定流程调用的大模型名称、服务地址和 API Key。</p>
+              </div>
+              <div class="p-5 space-y-4">
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">模型名称</label>
+                  <input v-model="systemConfig.model.name" type="text" placeholder="qwen3-235b-a22b-instruct-2507"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">模型服务 URL</label>
+                  <input v-model="systemConfig.model.api_url" type="text" placeholder="http://host:port/v1"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">API Key</label>
+                  <div class="relative">
+                    <input
+                      v-model="systemConfig.model.api_key"
+                      :type="systemConfigShowApiKey ? 'text' : 'password'"
+                      placeholder="请输入模型 API Key"
+                      class="w-full px-4 py-2.5 pr-12 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    >
+                    <button
+                      type="button"
+                      @click="systemConfigShowApiKey = !systemConfigShowApiKey"
+                      class="absolute inset-y-0 right-0 px-3 text-slate-500 hover:text-slate-700"
+                      :title="systemConfigShowApiKey ? '隐藏 API Key' : '查看 API Key'"
+                    >
+                      {{ systemConfigShowApiKey ? '🙈' : '👁️' }}
+                    </button>
+                  </div>
+                </div>
+                <div class="flex flex-wrap gap-3">
+                  <button @click="saveSystemConfig" :disabled="systemConfigSaving" class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:bg-slate-300">
+                    {{ systemConfigSaving ? '保存中...' : '保存配置' }}
+                  </button>
+                  <button @click="testModelConnectivity" :disabled="systemConfigTesting" class="shell-inline-action is-accent">
+                    {{ systemConfigTesting ? '测试中...' : '测试模型连通性' }}
+                  </button>
+                  <button @click="loadSystemConfig" :disabled="systemConfigLoading" class="shell-inline-action">
+                    {{ systemConfigLoading ? '加载中...' : '重新加载' }}
+                  </button>
+                </div>
+                <div v-if="systemConfigMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 whitespace-pre-line">
+                  {{ systemConfigMessage }}
+                </div>
+                <div v-if="systemConfigTestMessage" class="rounded-xl p-4 text-sm whitespace-pre-line" :class="systemConfigTestOk ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-amber-200 bg-amber-50 text-amber-900'">
+                  {{ systemConfigTestMessage }}
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">当前摘要</h3>
+                <p class="text-xs text-slate-500 mt-1">展示当前已加载的模型配置和运行时摘要。</p>
+              </div>
+              <div class="p-5 space-y-4 text-sm text-slate-600">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="text-xs text-slate-500">当前模型</div>
+                  <div class="mt-1 font-semibold text-slate-900">{{ systemConfig.model.name || '-' }}</div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="text-xs text-slate-500">模型服务地址</div>
+                  <div class="mt-1 break-all text-slate-900">{{ systemConfig.model.api_url || '-' }}</div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="text-xs text-slate-500">说明</div>
+                  <div class="mt-1">建议先使用“测试模型连通性”确认当前模型服务可用，再发起新的整定任务。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="shellSection === 'system-service'" class="space-y-6">
+            <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">服务接入</h3>
+                <p class="text-xs text-slate-500 mt-1">配置历史数据获取服务和本体知识图谱服务的运行地址。</p>
+              </div>
+              <div class="p-5 space-y-4">
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">历史数据服务 URL</label>
+                  <input v-model="systemConfig.integration.history_data_api_url" type="text" placeholder="http://host/api/agent/history-data-raw"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-2">本体知识图谱服务 URL</label>
+                  <input v-model="systemConfig.integration.knowledge_graph_api_url" type="text" placeholder="http://host/api/query"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+                <div class="flex flex-wrap gap-3">
+                  <button @click="saveSystemConfig" :disabled="systemConfigSaving" class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:bg-slate-300">
+                    {{ systemConfigSaving ? '保存中...' : '保存配置' }}
+                  </button>
+                  <button @click="loadSystemConfig" :disabled="systemConfigLoading" class="shell-inline-action">
+                    {{ systemConfigLoading ? '加载中...' : '重新加载' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="shellSection === 'system-summary'" class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">模型名称</div>
+                <div class="mt-2 text-lg font-bold text-slate-900">{{ systemConfig.model.name || '-' }}</div>
+              </div>
+              <div class="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">历史数据服务</div>
+                <div class="mt-2 text-lg font-bold text-emerald-700">{{ systemConfig.integration.history_data_api_url ? '已配置' : '未配置' }}</div>
+              </div>
+              <div class="rounded-xl border border-purple-200 bg-white p-4 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">知识图谱服务</div>
+                <div class="mt-2 text-lg font-bold text-purple-700">{{ systemConfig.integration.knowledge_graph_api_url ? '已配置' : '未配置' }}</div>
+              </div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm text-sm text-slate-600">
+              <div class="font-semibold text-slate-800 mb-2">当前配置摘要</div>
+              <div>模型名称：{{ systemConfig.model.name || '-' }}</div>
+              <div class="mt-1">模型服务地址：{{ systemConfig.model.api_url || '-' }}</div>
+              <div class="mt-1">历史数据服务地址：{{ systemConfig.integration.history_data_api_url || '-' }}</div>
+              <div class="mt-1">本体知识图谱服务地址：{{ systemConfig.integration.knowledge_graph_api_url || '-' }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="currentPage === 'experience'" class="space-y-6">
                     <div class="rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-cyan-50 p-6 shadow-sm">
                       <div class="flex items-start justify-between gap-4">
                         <div>
@@ -3237,8 +3396,121 @@
           <span class="font-medium">{{ loadingMessage }}</span>
         </div>
     </main>
+
       </div>
     </section>
+
+    <div v-if="tuningTaskModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" @click.self="closeTuningTaskModal">
+      <div class="w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5">
+          <div>
+            <h3 class="text-xl font-bold text-slate-900">新建整定任务</h3>
+            <p class="mt-1 text-sm text-slate-500">通过弹窗统一配置任务参数和历史数据参数，提交后自动生成一条新的任务会话。</p>
+          </div>
+          <button @click="closeTuningTaskModal" class="shell-drawer-close">关闭</button>
+        </div>
+        <div class="max-h-[80vh] overflow-y-auto p-6 custom-scrollbar">
+          <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <div class="text-sm font-semibold text-slate-900">基本参数</div>
+              <div class="mt-4 space-y-4">
+                <div>
+                  <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">控制回路名称</label>
+                  <input v-model="loopName" type="text" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                </div>
+                <div>
+                  <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">回路类型</label>
+                  <select v-model="loopType" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                    <option value="flow">流量</option>
+                    <option value="temperature">温度</option>
+                    <option value="pressure">压力</option>
+                    <option value="level">液位</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">工况</label>
+                  <select v-model="scenario" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                    <option value="steady_operation">稳态生产</option>
+                    <option value="startup">开车阶段</option>
+                    <option value="grade_switch">切牌工况</option>
+                    <option value="disturbance_rejection">扰动抑制</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">装置类型</label>
+                  <select v-model="plantType" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                    <option value="distillation_column">精馏塔</option>
+                    <option value="heat_exchanger">换热器</option>
+                    <option value="reactor">反应器</option>
+                    <option value="general_process">通用过程</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">控制对象</label>
+                  <input v-model="controlObject" type="text" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                </div>
+              </div>
+            </div>
+            <div class="space-y-4">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                <div class="text-sm font-semibold text-slate-900">数据参数</div>
+                <div class="mt-4 space-y-4">
+                  <div>
+                    <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">数据来源</label>
+                    <select v-model="dataSource" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                      <option value="history">历史接口</option>
+                      <option value="csv">CSV 上传</option>
+                    </select>
+                  </div>
+                  <template v-if="dataSource === 'history'">
+                    <div>
+                      <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Loop URI</label>
+                      <input v-model="loopUri" type="text" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                    </div>
+                    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div>
+                        <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">开始时间</label>
+                        <input v-model="startTime" type="text" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                      </div>
+                      <div>
+                        <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">结束时间</label>
+                        <input v-model="endTime" type="text" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                      </div>
+                    </div>
+                    <div>
+                      <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">采样间隔（秒）</label>
+                      <select v-model="historyWindow" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                        <option :value="1">1 秒</option>
+                        <option :value="2">2 秒</option>
+                        <option :value="5">5 秒</option>
+                        <option :value="10">10 秒</option>
+                      </select>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <div>
+                      <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">上传 CSV 文件</label>
+                      <label class="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-600 hover:border-blue-300 hover:bg-blue-50">
+                        <input type="file" accept=".csv" class="hidden" @change="handleFileUpload">
+                        <span>{{ uploadedFile ? uploadedFile.name : '点击选择 CSV 文件' }}</span>
+                      </label>
+                    </div>
+                  </template>
+                </div>
+              </div>
+              <div class="rounded-2xl border border-blue-100 bg-blue-50 p-5 text-sm text-slate-700">
+                <div class="text-sm font-semibold text-slate-900">提交说明</div>
+                <p class="mt-2 leading-6">提交后会自动创建一条新的任务会话，后续执行过程、调参结果、解释详情和专业报告都只绑定这条会话，不会再串到旧任务。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+          <button @click="closeTuningTaskModal" class="shell-inline-action">取消</button>
+          <button @click="submitTuningTaskModal" class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700">开始整定</button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="experienceDetailDrawerOpen" class="fixed inset-0 z-50 flex justify-end bg-slate-900/30" @click.self="closeExperienceDrawer">
       <div class="h-full w-full max-w-3xl overflow-y-auto bg-white shadow-2xl custom-scrollbar">
@@ -3456,6 +3728,12 @@
           <div>
             <h3 class="text-lg font-bold text-slate-900">PID智能整定专业报告</h3>
             <p class="mt-1 text-sm text-slate-500">汇总本次任务背景、多智能体分析过程、最终整定结果与上线建议。</p>
+            <div class="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-600">
+              <span class="font-semibold text-slate-800">当前会话：</span>
+              <span>{{ selectedTaskSessionLabel }}</span>
+              <span class="text-slate-400">|</span>
+              <span>{{ selectedTaskSessionContextLine }}</span>
+            </div>
           </div>
           <div class="flex items-center gap-2">
             <button @click="exportProfessionalReport('markdown')" class="shell-inline-action">导出 Markdown</button>
@@ -3466,6 +3744,23 @@
           </div>
         </div>
         <div v-if="professionalReportPayload" class="p-6 space-y-6">
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">当前会话</div>
+              <div class="mt-3 text-lg font-semibold text-slate-900">{{ selectedTaskSessionLabel }}</div>
+              <div class="mt-2 text-sm leading-6 text-slate-500">{{ selectedTaskSessionContextLine }}</div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">当前模型</div>
+              <div class="mt-3 text-lg font-semibold text-slate-900">{{ selectedTaskSessionModelLabel }}</div>
+              <div class="mt-2 text-sm leading-6 text-slate-500">本报告会围绕当前会话的最终模型和参数展开。</div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">当前评分</div>
+              <div class="mt-3 text-lg font-semibold text-slate-900">{{ selectedTaskSessionScoreLabel }}</div>
+              <div class="mt-2 text-sm leading-6 text-slate-500">{{ professionalReportPayload.executive_summary.recommendation }}</div>
+            </div>
+          </div>
           <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
             <div class="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">报告头</div>

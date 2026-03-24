@@ -144,6 +144,47 @@ def _build_tuning_advice(final_result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _classify_workflow_exception(exc: Exception) -> Dict[str, Any]:
+    error_text = str(exc or "").strip()
+    lowered = error_text.lower()
+
+    if "apitimeouterror" in lowered or "request timed out" in lowered or "connecttimeout" in lowered or "timeout" in lowered:
+        return {
+            "error_code": 10024,
+            "error_type": "upstream_model_timeout",
+            "message": "上游模型服务响应超时，请稍后重试或在系统配置中切换可用模型。",
+            "detail": error_text,
+        }
+    if "bad gateway" in lowered or "502" in lowered:
+        return {
+            "error_code": 10025,
+            "error_type": "upstream_model_bad_gateway",
+            "message": "上游模型网关返回 502，当前模型服务暂时不可用，请稍后重试或切换模型。",
+            "detail": error_text,
+        }
+    if "service unavailable" in lowered or "503" in lowered:
+        return {
+            "error_code": 10026,
+            "error_type": "upstream_model_unavailable",
+            "message": "上游模型服务当前不可用（503），请稍后重试或切换模型。",
+            "detail": error_text,
+        }
+    if "connection error" in lowered or "apiconnectionerror" in lowered:
+        return {
+            "error_code": 10022,
+            "error_type": "upstream_model_connection",
+            "message": "上游模型网关连接异常，请检查模型服务地址和网络连通性。",
+            "detail": error_text,
+        }
+
+    return {
+        "error_code": 10020,
+        "error_type": "workflow_execution_error",
+        "message": f"多智能体协作失败：{error_text or '未知异常'}",
+        "detail": error_text,
+    }
+
+
 async def run_multi_agent_collaboration(
     *,
     csv_path: str,
@@ -422,11 +463,11 @@ async def run_multi_agent_collaboration(
     except asyncio.CancelledError:
         yield {"type": "error", "message": "任务已取消"}
     except Exception as exc:
-        import traceback
-
-        error_text = str(exc)
-        if "APIConnectionError" in error_text or "Connection error" in error_text:
-            message = "多智能体协作失败：上游模型网关连接异常。请稍后重试，或检查模型网关服务是否可达。"
-        else:
-            message = f"多智能体协作失败: {error_text}"
-        yield {"type": "error", "message": f"{message}\n{traceback.format_exc()}"}
+        mapped_error = _classify_workflow_exception(exc)
+        yield {
+            "type": "error",
+            "message": mapped_error["message"],
+            "error_code": mapped_error["error_code"],
+            "error_type": mapped_error["error_type"],
+            "error_detail": mapped_error["detail"],
+        }

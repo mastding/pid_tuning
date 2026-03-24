@@ -93,30 +93,27 @@
 
     .app-shell {
       display: grid;
-      grid-template-columns: 64px minmax(0, 1fr) 320px;
+      grid-template-rows: 72px minmax(0, 1fr);
       min-height: 100vh;
       background: var(--shell-bg);
     }
     .shell-primary-nav {
-      border-right: 1px solid var(--shell-border);
+      border-bottom: 1px solid var(--shell-border);
       background: rgba(255,255,255,.96);
       backdrop-filter: blur(12px);
-      padding: 18px 10px;
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      gap: 18px;
-      overflow: hidden;
-      transition: width .22s ease;
-      width: 64px;
-    }
-    .shell-primary-nav:hover {
-      width: 200px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      overflow: visible;
     }
     .shell-brand, .shell-env {
       display: flex;
       align-items: center;
       gap: 12px;
-      min-width: 176px;
+      min-width: 0;
+      flex: 0 0 auto;
     }
     .shell-brand-mark {
       width: 40px;
@@ -144,20 +141,22 @@
       color: #64748b;
     }
     .shell-nav-list {
-      display: grid;
-      gap: 8px;
-      align-content: start;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
     }
     .shell-nav-item {
-      width: 100%;
-      min-height: 48px;
+      width: auto;
+      min-height: 42px;
       border: 1px solid transparent;
-      border-radius: 14px;
+      border-radius: 12px;
       background: transparent;
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 0 10px;
+      gap: 10px;
+      padding: 0 14px;
       color: #475569;
       transition: all .2s ease;
       text-align: left;
@@ -171,12 +170,12 @@
       color: #fff;
     }
     .shell-nav-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 10px;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
       display: grid;
       place-items: center;
-      font-size: 15px;
+      font-size: 13px;
       font-weight: 700;
       flex: 0 0 auto;
     }
@@ -201,6 +200,7 @@
       grid-template-columns: 220px minmax(0, 1fr);
       gap: 24px;
       padding: 20px 24px;
+      align-items: start;
     }
     .shell-secondary {
       border: 1px solid var(--shell-border);
@@ -241,12 +241,31 @@
       color: #1677ff;
       border-color: #bfdbfe;
     }
+    .shell-page-bar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 24px 28px;
+      border: 1px solid var(--shell-border);
+      border-radius: 24px;
+      background: var(--shell-panel);
+      box-shadow: var(--shell-shadow-soft);
+    }
+    .shell-page-context {
+      min-width: 0;
+      flex: 1;
+    }
+    .shell-page-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
     .shell-workspace {
       min-width: 0;
-      display: flex;
-      gap: 24px;
-      min-height: calc(100vh - 48px);
-      align-items: stretch;
+      min-height: calc(100vh - 116px);
     }
     .legacy-sidebar {
       width: 360px;
@@ -265,12 +284,7 @@
       box-shadow: var(--shell-shadow-soft);
     }
     .shell-status {
-      border-left: 1px solid var(--shell-border);
-      background: rgba(255,255,255,.96);
-      padding: 20px;
-      display: grid;
-      align-content: start;
-      gap: 14px;
+      display: none;
     }
     .shell-status-card {
       border: 1px solid var(--shell-border);
@@ -701,9 +715,14 @@
       color: #6b21a8 !important;
     }
     .shell-status {
+      position: sticky;
+      top: 20px;
       gap: 16px;
       padding: 24px 20px;
       background: #f8fafc;
+      border: 1px solid var(--shell-border);
+      border-radius: 20px;
+      box-shadow: var(--shell-shadow-soft);
     }
     .shell-status-card {
       border-radius: 18px;
@@ -726,19 +745,34 @@
       color: #475569;
     }
     @media (max-width: 1680px) {
-      .app-shell {
-        grid-template-columns: 64px minmax(0, 1fr);
-      }
-      .shell-status {
-        display: none;
+      .shell-main {
+        grid-template-columns: 220px minmax(0, 1fr);
       }
     }
     @media (max-width: 1280px) {
       .shell-main {
-        grid-template-columns: 200px minmax(0, 1fr);
+        grid-template-columns: 1fr;
+      }
+      .shell-secondary {
+        display: none;
+      }
+      .shell-page-bar {
+        padding: 20px;
+        flex-direction: column;
+      }
+      .shell-page-actions {
+        width: 100%;
+        justify-content: flex-start;
       }
       .legacy-sidebar {
         width: 320px;
+      }
+      .shell-primary-nav {
+        padding: 0 16px;
+      }
+      .shell-nav-list {
+        overflow-x: auto;
+        padding-bottom: 2px;
       }
     }
   
