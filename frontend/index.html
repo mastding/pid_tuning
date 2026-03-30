@@ -414,145 +414,6 @@
           </div>
         </template>
       </div>
-      <div v-else-if="false && currentPage === 'experience'" class="p-6 space-y-4 flex-1">
-        <template v-if="shellSection === 'experience-overview'">
-          <div class="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
-            <div class="font-semibold mb-2">经验中心概览</div>
-            <p>查看历史整定经验的数量、通过情况和策略分布，先判断当前是否值得继续检索或复用。</p>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <button @click="loadExperienceCenter"
-              class="px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold transition-all">
-              刷新数据
-            </button>
-            <button @click="clearExperienceCenter"
-              class="px-4 py-2.5 bg-white border border-rose-300 text-rose-700 rounded-lg hover:bg-rose-50 text-sm font-semibold transition-all">
-              清除经验
-            </button>
-          </div>
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            <div class="font-semibold text-slate-800 mb-2">当前摘要</div>
-            <div>经验总数：{{ experienceStats.total_count ?? 0 }}</div>
-            <div class="mt-1">已通过经验：{{ experienceStats.passed_count ?? 0 }}</div>
-            <div class="mt-1">最常用策略：{{ experienceStats.top_strategy || '-' }}</div>
-          </div>
-        </template>
-
-        <template v-else-if="shellSection === 'experience-search'">
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">回路类型</label>
-            <select v-model="experienceSearchForm.loop_type" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-              <option value="flow">流量</option>
-              <option value="temperature">温度</option>
-              <option value="pressure">压力</option>
-              <option value="level">液位</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">模型类型</label>
-            <select v-model="experienceSearchForm.model_type" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-              <option value="FO">FO</option>
-              <option value="FOPDT">FOPDT</option>
-              <option value="SOPDT">SOPDT</option>
-              <option value="IPDT">IPDT</option>
-            </select>
-          </div>
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="block text-sm font-semibold text-slate-700 mb-2">K</label>
-              <input v-model="experienceSearchForm.K" type="number" step="any" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-            </div>
-            <div>
-              <label class="block text-sm font-semibold text-slate-700 mb-2">T</label>
-              <input v-model="experienceSearchForm.T" type="number" step="any" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-            </div>
-            <div>
-              <label class="block text-sm font-semibold text-slate-700 mb-2">L</label>
-              <input v-model="experienceSearchForm.L" type="number" step="any" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-            </div>
-          </div>
-          <button @click="searchSimilarExperiences"
-            class="w-full px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold transition-all">
-            检索相似经验
-          </button>
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            <div class="font-semibold text-slate-800 mb-2">检索说明</div>
-            <p>输入回路类型和模型参数后，可检索最相似的历史整定经验，并进一步查看其参数和评估结果。</p>
-          </div>
-        </template>
-
-        <template v-else-if="shellSection === 'experience-list'">
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">关键词搜索</label>
-            <input v-model="experienceFilters.keyword" type="text" placeholder="回路名称 / loop_uri / experience_id"
-              class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-          </div>
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">回路类型</label>
-            <select v-model="experienceFilters.loop_type" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-              <option value="">全部</option>
-              <option value="flow">流量</option>
-              <option value="temperature">温度</option>
-              <option value="pressure">压力</option>
-              <option value="level">液位</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">是否通过</label>
-            <select v-model="experienceFilters.passed" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-              <option value="">全部</option>
-              <option value="true">已通过</option>
-              <option value="false">未通过</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">最终策略</label>
-            <select v-model="experienceFilters.strategy" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-              <option value="">全部</option>
-              <option value="IMC">IMC</option>
-              <option value="LAMBDA">LAMBDA</option>
-              <option value="ZN">ZN</option>
-              <option value="CHR">CHR</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">模型类型</label>
-            <select v-model="experienceFilters.model_type" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
-              <option value="">全部</option>
-              <option value="FO">FO</option>
-              <option value="FOPDT">FOPDT</option>
-              <option value="SOPDT">SOPDT</option>
-              <option value="IPDT">IPDT</option>
-            </select>
-          </div>
-          <div class="grid grid-cols-2 gap-2 pt-4 border-t border-slate-200">
-            <button @click="loadExperienceCenter"
-              class="px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold transition-all">
-              刷新经验
-            </button>
-            <button @click="resetExperienceFilters"
-              class="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-semibold transition-all">
-              重置筛选
-            </button>
-          </div>
-        </template>
-
-        <template v-else-if="shellSection === 'experience-detail'">
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            <div class="font-semibold text-slate-800 mb-2">经验详情</div>
-            <template v-if="selectedExperience">
-              <div>当前记录：{{ selectedExperience.loop_name || selectedExperience.experience_id }}</div>
-              <div class="mt-1">模型类型：{{ selectedExperience.model?.model_type || '-' }}</div>
-              <div class="mt-1">最终策略：{{ selectedExperience.strategy?.final || '-' }}</div>
-            </template>
-            <p v-else>请先在“经验列表”或“相似检索”中选择一条经验记录。</p>
-          </div>
-          <button @click="shellSection = 'experience-list'"
-            class="w-full px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-semibold transition-all">
-            返回经验列表
-          </button>
-        </template>
-      </div>
       <div v-else-if="false && currentPage === 'case-library'" class="p-6 space-y-4 flex-1">
         <template v-if="shellSection === 'case-overview'">
           <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
@@ -640,130 +501,6 @@
           </button>
         </template>
       </div>
-      <div v-if="false && currentPage === 'strategy-lab'" class="p-6 space-y-4 flex-1">
-        <template v-if="shellSection === 'strategy-overview'">
-          <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            <div class="font-semibold mb-2">实验概览</div>
-            <p>这里汇总基准案例数、候选数量和当前基线案例，用于快速判断实验室当前的活跃情况。</p>
-          </div>
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            <div class="font-semibold text-slate-800 mb-2">当前摘要</div>
-            <div>基准案例数：{{ strategyLabCases.length }}</div>
-            <div class="mt-1">候选策略总数：{{ strategyLabCandidates.length }}</div>
-            <div class="mt-1">当前基线案例：{{ strategyLabCaseName(strategyLabForm.caseId) }}</div>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <button @click="shellSection = 'strategy-generate'"
-              class="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-600 transition-all">
-              去生成候选
-            </button>
-            <button @click="shellSection = 'strategy-candidates'"
-              class="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all">
-              查看候选列表
-            </button>
-          </div>
-        </template>
-
-        <template v-else-if="shellSection === 'strategy-generate'">
-          <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            <div class="font-semibold mb-2">候选生成向导</div>
-            <p>为了减少左侧长表单带来的阅读负担，候选生成已改成弹层向导。点击下方按钮后，再分步填写策略画像、插件和优化目标。</p>
-          </div>
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            <div class="font-semibold text-slate-800 mb-2">当前默认配置</div>
-            <div>候选策略：{{ strategyLabCandidateIdDisplayValue() }}</div>
-            <div class="mt-1">策略画像：{{ strategyLabProfileLabel(strategyLabForm.profileId) }}</div>
-            <div class="mt-1">插件列表：{{ strategyLabPluginIdsDisplayValue() }}</div>
-            <div class="mt-1">基线案例：{{ strategyLabCaseName(strategyLabForm.caseId) }}</div>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <button @click="openStrategyLabGenerateModal"
-              class="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-600 transition-all">
-              打开生成向导
-            </button>
-            <button @click="resetStrategyLabForm"
-              class="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all">
-              重置默认配置
-            </button>
-          </div>
-          <div v-if="false" class="space-y-4">
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">候选策略 ID</label>
-            <input :value="strategyLabCandidateIdDisplayValue()" @input="updateStrategyLabCandidateIdDisplay($event.target.value)" type="text" placeholder="精馏塔双向候选策略 V1"
-              class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all">
-          </div>
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">策略画像</label>
-            <select v-model="strategyLabForm.profileId"
-              class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all">
-              <option value="default">默认策略</option>
-              <option value="distillation">精馏塔策略</option>
-              <option value="regulatory">抗扰策略</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">插件列表</label>
-            <input :value="strategyLabPluginIdsDisplayValue()" @input="updateStrategyLabPluginIdsDisplay($event.target.value)" type="text" placeholder="激励质量，双向配对"
-              class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all">
-          </div>
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">优化目标</label>
-            <textarea v-model="strategyLabForm.objective" rows="4"
-              class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"></textarea>
-          </div>
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">基线案例</label>
-            <select v-model="strategyLabForm.caseId"
-              class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all">
-              <option v-for="item in strategyLabCases" :key="item.id" :value="item.id">{{ item.name }}</option>
-            </select>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <button @click="generateStrategyLabCandidate"
-              class="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-600 transition-all">
-              生成候选策略
-            </button>
-            <button @click="resetStrategyLabForm"
-              class="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all">
-              重置配置
-            </button>
-          </div>
-          </div>
-        </template>
-
-        <template v-else-if="shellSection === 'strategy-candidates'">
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            <div class="font-semibold text-slate-800 mb-2">候选列表说明</div>
-            <p>候选生成后，请在右侧列表中比较平均分、发布闸门和优化目标，再决定是否进入详情或继续派生版本。</p>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <button @click="loadStrategyLabCandidates"
-              class="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-600 transition-all">
-              刷新候选列表
-            </button>
-            <button @click="shellSection = 'strategy-detail'"
-              class="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all">
-              查看当前详情
-            </button>
-          </div>
-        </template>
-
-        <template v-else-if="shellSection === 'strategy-detail'">
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            <div class="font-semibold text-slate-800 mb-2">候选详情</div>
-            <template v-if="selectedStrategyLabCandidate">
-              <div>当前候选：{{ strategyLabCandidateLabel(selectedStrategyLabCandidate.id) }}</div>
-              <div class="mt-1">平均分：{{ formatNumber(selectedStrategyLabCandidate.averageScore, 2) }}</div>
-              <div class="mt-1">发布闸门：{{ selectedStrategyLabCandidate.releaseGatePassed ? '通过' : '未通过' }}</div>
-            </template>
-            <p v-else>请先在候选列表中选择一版候选策略。</p>
-          </div>
-          <button @click="shellSection = 'strategy-candidates'"
-            class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all">
-            返回候选列表
-          </button>
-        </template>
-      </div>
       <div v-else-if="false && currentPage === 'system-config'" class="p-6 space-y-4 flex-1">
         <div class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
           <div class="font-semibold mb-2">系统配置</div>
@@ -806,7 +543,6 @@
               <div class="max-w-3xl">
               <div class="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">工作台</div>
               <h2 class="mt-3 text-3xl font-bold text-slate-900">从这里发起一次新的整定任务</h2>
-              <p class="mt-3 text-base leading-7 text-slate-600">工作台只保留任务入口和任务摘要。参数配置与历史数据参数统一放到“新建整定任务”弹窗里填写，提交后自动生成一条独立任务会话。</p>
               <div class="mt-4 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-600">
                 <span class="font-semibold text-slate-800">提示：</span>
                 <span>每次整定都会生成独立任务会话，后续执行过程、结果、解释和报告都围绕当前会话展开。</span>
@@ -815,9 +551,6 @@
               <div class="flex shrink-0 flex-wrap items-center gap-3">
                 <button type="button" @click="openTuningTaskModal" class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700">
                   新建整定任务
-                </button>
-                <button type="button" @click="shellSection = 'tuning-history'" class="shell-inline-action">
-                  查看任务会话
                 </button>
               </div>
             </div>
@@ -1022,13 +755,18 @@
                 </div>
               </div>
 
-              <div v-for="group in executionVisibleGroups" :key="'exec-group-' + group.id" class="shell-process-card">
+              <div
+                v-for="group in executionVisibleGroups"
+                :key="'exec-group-' + group.id"
+                class="shell-process-card"
+                :style="executionGroupStyle(group.agent)"
+              >
                 <div class="shell-process-card-header">
                   <div class="flex items-start gap-3 min-w-0">
-                    <div class="h-11 w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-sm font-bold text-slate-700 shrink-0">{{ getAgentIcon(group.agent) }}</div>
+                    <div class="h-11 w-11 rounded-2xl flex items-center justify-center text-sm font-bold shrink-0" :style="executionAgentIconStyle(group.agent)">{{ getAgentIcon(group.agent) }}</div>
                     <div class="min-w-0">
                       <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{{ group.stage }}</div>
-                      <div class="mt-1 text-lg font-semibold text-slate-900 truncate">{{ group.agent }}</div>
+                      <div class="mt-1 text-lg font-semibold truncate" :style="executionAgentTitleStyle(group.agent)">{{ group.agent }}</div>
                       <div class="mt-2 shell-process-meta">
                         <span class="shell-process-meta-chip">&#24037;&#20855; {{ group.toolCount }} &#20010;</span>
                         <span class="shell-process-meta-chip">{{ group.statusLabel }}</span>
@@ -1037,7 +775,7 @@
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="shell-status-pill" :class="group.status === 'running' ? 'is-warning' : 'is-success'">{{ group.statusLabel }}</span>
-                    <button type="button" @click="toggleCollapse(group.id)" class="shell-inline-action" :title="group.collapsed ? '&#23637;&#24320;&#26234;&#33021;&#20307;&#21345;&#29255;' : '&#25240;&#21472;&#26234;&#33021;&#20307;&#21345;&#29255;'">{{ group.collapsed ? '&#23637;&#24320;' : '&#25240;&#21472;' }}</button>
+                    <button type="button" @click="toggleCollapse(group.id)" class="shell-icon-action" :title="group.collapsed ? '&#23637;&#24320;&#26234;&#33021;&#20307;&#21345;&#29255;' : '&#25240;&#21472;&#26234;&#33021;&#20307;&#21345;&#29255;'" :aria-label="group.collapsed ? '&#23637;&#24320;&#26234;&#33021;&#20307;&#21345;&#29255;' : '&#25240;&#21472;&#26234;&#33021;&#20307;&#21345;&#29255;'">{{ group.collapsed ? '&#9656;' : '&#9662;' }}</button>
                   </div>
                 </div>
                 <div v-if="!group.collapsed" class="shell-process-card-body">
@@ -1058,7 +796,7 @@
                         </div>
                         <div class="flex items-center gap-2 shrink-0">
                           <span class="shell-status-pill" :class="toolStatusClass(tool)">{{ toolStatusLabel(tool) }}</span>
-                          <button type="button" @click="toggleToolCollapse(group.id, idx)" class="shell-inline-action" :title="tool.collapsed ? '&#23637;&#24320;&#24037;&#20855;&#35814;&#24773;' : '&#25240;&#21472;&#24037;&#20855;&#35814;&#24773;'">{{ tool.collapsed ? '&#23637;&#24320;' : '&#25240;&#21472;' }}</button>
+                          <button type="button" @click="toggleToolCollapse(group.id, idx)" class="shell-icon-action" :title="tool.collapsed ? '&#23637;&#24320;&#24037;&#20855;&#35814;&#24773;' : '&#25240;&#21472;&#24037;&#20855;&#35814;&#24773;'" :aria-label="tool.collapsed ? '&#23637;&#24320;&#24037;&#20855;&#35814;&#24773;' : '&#25240;&#21472;&#24037;&#20855;&#35814;&#24773;'">{{ tool.collapsed ? '&#9656;' : '&#9662;' }}</button>
                         </div>
                       </div>
                       <div v-if="!tool.collapsed" class="shell-process-tool-body">
@@ -1096,6 +834,11 @@
                 </div>
                 <div class="shell-process-card-body">
                   <div class="shell-process-summary">{{ latestTuningResultMessage.content || latestTuningResultMessage.summary || '&#24050;&#29983;&#25104;&#32467;&#26524;&#65292;&#21487;&#20999;&#25442;&#21040;&#8220;&#35843;&#21442;&#32467;&#26524;&#8221;&#25110;&#8220;&#35299;&#37322;&#35814;&#24773;&#8221;&#32487;&#32493;&#26597;&#30475;&#12290;' }}</div>
+                  <div class="mt-3 flex flex-wrap gap-3">
+                    <button type="button" class="shell-inline-action is-accent" @click="shellSection = 'tuning-result'">跳转到调参结果</button>
+                    <button type="button" class="shell-inline-action" @click="shellSection = 'tuning-explain'">跳转到解释详情</button>
+                    <button type="button" class="shell-inline-action" @click="openProfessionalReportDrawer">查看专业报告</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1139,6 +882,38 @@
                         {{ latestTuningResultData.evaluation?.passed ? '通过' : '待优化' }}
                       </div>
                     </div>
+                  </div>
+                  <div v-if="pidAnalysisChartPayload" class="mt-6 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="text-xs text-slate-500">IAE</div>
+                        <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.iae, 3) }}</div>
+                      </div>
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="text-xs text-slate-500">最大偏差</div>
+                        <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.maxError, 3) }}</div>
+                      </div>
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="text-xs text-slate-500">稳态误差</div>
+                        <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.steadyStateError, 3) }}</div>
+                      </div>
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="text-xs text-slate-500">MV 峰值</div>
+                        <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.mvPeak, 2) }}%</div>
+                      </div>
+                    </div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div class="flex items-center justify-between gap-3">
+                        <div>
+                          <div class="text-sm font-semibold text-slate-900">PID 回路分析图</div>
+                          <div class="mt-1 text-xs text-slate-500">PV / SV 采用左轴，MV 采用右轴；浅蓝填充用于辅助观察偏差面积趋势。</div>
+                        </div>
+                      </div>
+                      <div id="pid-analysis-chart" class="mt-4 h-[420px] w-full"></div>
+                    </div>
+                  </div>
+                  <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                    当前结果还没有足够的 PV / SV / MV 时序数据，暂时无法生成 PID 回路分析图。
                   </div>
                 </div>
                 <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -1364,23 +1139,6 @@
         </div>
 
         <div v-if="currentPage === 'experience'" class="space-y-6">
-                    <div class="rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-cyan-50 p-6 shadow-sm">
-                      <div class="flex items-start justify-between gap-4">
-                        <div>
-                          <h2 class="text-2xl font-bold text-slate-800">&#x7ecf;&#x9a8c;&#x4e2d;&#x5fc3;</h2>
-                          <p class="mt-2 text-sm text-slate-600">&#x67e5;&#x770b;&#x5386;&#x53f2;&#x6574;&#x5b9a;&#x7ecf;&#x9a8c;&#xff0c;&#x68c0;&#x7d22;&#x76f8;&#x4f3c;&#x56de;&#x8def;&#x5e76;&#x590d;&#x7528;&#x77e5;&#x8bc6;&#x3002;</p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                          <button @click="loadExperienceCenter" class="rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 transition-all">
-                            &#x5237;&#x65b0;&#x6570;&#x636e;
-                          </button>
-                          <button @click="clearExperienceCenter" class="rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 transition-all">
-                            &#x6e05;&#x9664;&#x5386;&#x53f2;&#x7ecf;&#x9a8c;
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
                     <div v-if="shellSection === 'experience-overview'" class="space-y-6">
                       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1438,29 +1196,37 @@
                       </div>
                     </div>
 
-                    <div v-else-if="shellSection === 'experience-search'" class="space-y-6">
+                    <div v-else-if="shellSection === 'experience-list'" class="space-y-6">
                       <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-                        <div class="flex items-center justify-between gap-4">
+                        <div class="flex flex-wrap items-start justify-between gap-4">
                           <div>
-                            <h3 class="text-lg font-bold text-slate-800">&#x76f8;&#x4f3c;&#x7ecf;&#x9a8c;&#x68c0;&#x7d22;</h3>
-                            <p class="mt-1 text-xs text-slate-500">&#x8f93;&#x5165;&#x56de;&#x8def;&#x7c7b;&#x578b;&#x548c;&#x6a21;&#x578b;&#x53c2;&#x6570;&#xff0c;&#x68c0;&#x7d22;&#x6700;&#x76f8;&#x4f3c;&#x7684;&#x5386;&#x53f2;&#x6574;&#x5b9a;&#x7ecf;&#x9a8c;&#x3002;</p>
+                            <h3 class="text-lg font-bold text-slate-800">相似经验检索</h3>
+                            <p class="mt-1 text-xs text-slate-500">在经验列表页直接输入模型参数，检索最相似的历史整定经验。</p>
                           </div>
-                          <button @click="searchSimilarExperiences" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-all">
-                            &#x5f00;&#x59cb;&#x68c0;&#x7d22;
-                          </button>
+                          <div class="flex flex-wrap items-center gap-2">
+                            <button @click="searchSimilarExperiences" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-all">
+                              检索相似经验
+                            </button>
+                            <button @click="loadExperienceCenter" class="shell-inline-action">
+                              刷新数据
+                            </button>
+                            <button @click="clearExperienceCenter" class="shell-inline-action">
+                              清除历史经验
+                            </button>
+                          </div>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
                           <div>
-                            <label class="block text-xs font-semibold text-slate-600 mb-2">&#x56de;&#x8def;&#x7c7b;&#x578b;</label>
+                            <label class="block text-xs font-semibold text-slate-600 mb-2">回路类型</label>
                             <select v-model="experienceSearchForm.loop_type" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                              <option value="flow">&#x6d41;&#x91cf;</option>
-                              <option value="temperature">&#x6e29;&#x5ea6;</option>
-                              <option value="pressure">&#x538b;&#x529b;</option>
-                              <option value="level">&#x6db2;&#x4f4d;</option>
+                              <option value="flow">流量</option>
+                              <option value="temperature">温度</option>
+                              <option value="pressure">压力</option>
+                              <option value="level">液位</option>
                             </select>
                           </div>
                           <div>
-                            <label class="block text-xs font-semibold text-slate-600 mb-2">&#x6a21;&#x578b;&#x7c7b;&#x578b;</label>
+                            <label class="block text-xs font-semibold text-slate-600 mb-2">模型类型</label>
                             <select v-model="experienceSearchForm.model_type" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
                               <option value="FO">FO</option>
                               <option value="FOPDT">FOPDT</option>
@@ -1481,27 +1247,25 @@
                             <input v-model="experienceSearchForm.L" type="number" step="any" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
                           </div>
                         </div>
-                      </div>
-                      <div v-if="experienceSearchLoading" class="rounded-xl border border-slate-200 bg-white px-5 py-8 text-sm text-slate-500 shadow-sm">&#x6b63;&#x5728;&#x68c0;&#x7d22;&#x76f8;&#x4f3c;&#x7ecf;&#x9a8c;...</div>
-                      <div v-else-if="experienceSearchResults" class="space-y-3">
-                        <div class="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 shadow-sm">
-                          {{ experienceSearchResults.guidance || '当前未检索到足够相似的历史经验。' }}
-                        </div>
-                        <div v-if="experienceSearchResults.matches && experienceSearchResults.matches.length" class="space-y-3">
-                          <button v-for="match in experienceSearchResults.matches" :key="match.experience_id" @click="openExperienceDrawer(match.experience_id)" class="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm hover:bg-slate-50 transition-colors">
-                            <div class="flex items-start justify-between gap-4">
-                              <div>
-                                <div class="font-semibold text-slate-900">{{ match.loop_name || match.experience_id }}</div>
-                                <div class="mt-1 text-sm text-slate-600">模型 {{ match.model_type || '-' }} / 策略 {{ match.strategy || '-' }} / 综合评分 {{ formatNumber(match.final_rating, 2) }} / 相似度 {{ formatNumber(match.similarity_score, 2) }}</div>
+                        <div v-if="experienceSearchLoading" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">正在检索相似经验...</div>
+                        <div v-else-if="experienceSearchResults" class="space-y-3">
+                          <div class="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 shadow-sm">
+                            {{ experienceSearchResults.guidance || '当前未检索到足够相似的历史经验。' }}
+                          </div>
+                          <div v-if="experienceSearchResults.matches && experienceSearchResults.matches.length" class="space-y-3">
+                            <button v-for="match in experienceSearchResults.matches" :key="match.experience_id" @click="openExperienceDrawer(match.experience_id)" class="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm hover:bg-slate-50 transition-colors">
+                              <div class="flex items-start justify-between gap-4">
+                                <div>
+                                  <div class="font-semibold text-slate-900">{{ match.loop_name || match.experience_id }}</div>
+                                  <div class="mt-1 text-sm text-slate-600">模型 {{ match.model_type || '-' }} / 策略 {{ match.strategy || '-' }} / 综合评分 {{ formatNumber(match.final_rating, 2) }} / 相似度 {{ formatNumber(match.similarity_score, 2) }}</div>
+                                </div>
+                                <span class="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">查看详情</span>
                               </div>
-                              <span class="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">&#x67e5;&#x770b;&#x8be6;&#x60c5;</span>
-                            </div>
-                          </button>
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div v-else-if="shellSection === 'experience-list'" class="space-y-6">
                       <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                         <div class="shell-toolbar">
                           <div class="shell-toolbar-copy">
@@ -1546,44 +1310,6 @@
                       </div>
                     </div>
 
-                    <div v-else-if="shellSection === 'experience-detail'" class="space-y-6">
-                      <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                        <div class="px-5 py-4 border-b border-slate-200">
-                          <h3 class="text-lg font-bold text-slate-800">&#x7ecf;&#x9a8c;&#x8be6;&#x60c5;</h3>
-                          <p class="text-xs text-slate-500 mt-1">&#x67e5;&#x770b;&#x5355;&#x6761;&#x7ecf;&#x9a8c;&#x7684;&#x6a21;&#x578b;&#x3001;&#x7b56;&#x7565;&#x548c;&#x8bc4;&#x4f30;&#x7ed3;&#x679c;&#x3002;</p>
-                        </div>
-                        <div v-if="experienceDetailLoading" class="px-5 py-8 text-sm text-slate-500">&#x6b63;&#x5728;&#x52a0;&#x8f7d;&#x7ecf;&#x9a8c;&#x8be6;&#x60c5;...</div>
-                        <div v-else-if="!selectedExperience" class="px-5 py-8 text-sm text-slate-500">&#x5c1a;&#x672a;&#x9009;&#x62e9;&#x7ecf;&#x9a8c;&#x8bb0;&#x5f55;&#x3002;</div>
-                        <div v-else class="p-5 space-y-4">
-                          <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                            <div class="font-semibold text-slate-800 mb-2">&#x5f53;&#x524d;&#x4e3b;&#x89c6;&#x56fe;&#x5df2;&#x6539;&#x6210;&#x6458;&#x8981;&#x6a21;&#x5f0f;</div>
-                            <p>&#x5b8c;&#x6574;&#x7684;&#x7ecf;&#x9a8c;&#x8bb0;&#x5f55;&#x4f18;&#x5148;&#x5728;&#x53f3;&#x4fa7;&#x62bd;&#x5c49;&#x4e2d;&#x67e5;&#x770b;&#x3002;&#x8fd9;&#x91cc;&#x4fdd;&#x7559;&#x5173;&#x952e;&#x6458;&#x8981;&#x4e0e;&#x64cd;&#x4f5c;&#x5165;&#x53e3;&#x3002;</p>
-                            <div class="mt-4 flex flex-wrap gap-2">
-                              <button @click="openExperienceDrawer(selectedExperience.experience_id)" class="shell-inline-action is-accent">&#x5728;&#x62bd;&#x5c49;&#x4e2d;&#x67e5;&#x770b;&#x5b8c;&#x6574;&#x8be6;&#x60c5;</button>
-                              <button @click="shellSection = 'experience-list'" class="shell-inline-action">&#x8fd4;&#x56de;&#x7ecf;&#x9a8c;&#x5217;&#x8868;</button>
-                            </div>
-                          </div>
-                          <div class="grid grid-cols-2 gap-3 text-sm">
-                            <div class="rounded-lg bg-slate-50 p-3">
-                              <div class="text-xs text-slate-500">&#x56de;&#x8def;&#x540d;&#x79f0;</div>
-                              <div class="mt-1 font-semibold text-slate-800">{{ selectedExperience.loop_name || '-' }}</div>
-                            </div>
-                            <div class="rounded-lg bg-slate-50 p-3">
-                              <div class="text-xs text-slate-500">&#x56de;&#x8def;&#x7c7b;&#x578b;</div>
-                              <div class="mt-1 font-semibold text-slate-800">{{ selectedExperience.loop_type || '-' }}</div>
-                            </div>
-                            <div class="rounded-lg bg-slate-50 p-3">
-                              <div class="text-xs text-slate-500">&#x6a21;&#x578b;&#x7c7b;&#x578b;</div>
-                              <div class="mt-1 font-semibold text-slate-800">{{ selectedExperience.model?.model_type || '-' }}</div>
-                            </div>
-                            <div class="rounded-lg bg-slate-50 p-3">
-                              <div class="text-xs text-slate-500">&#x6700;&#x7ec8;&#x7b56;&#x7565;</div>
-                              <div class="mt-1 font-semibold text-slate-800">{{ selectedExperience.strategy?.final || '-' }}</div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
                   <div v-if="false && currentPage === 'experience'" class="space-y-6">
@@ -2099,17 +1825,17 @@
         </div>
 
         <div v-if="currentPage === 'strategy-lab'" class="space-y-6">
-          <div class="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-6 shadow-sm">
+          <div v-if="shellSection === 'strategy-overview'" class="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-6 shadow-sm">
             <div class="flex items-start justify-between gap-4">
               <div>
                 <h2 class="text-2xl font-bold text-slate-800">策略实验室</h2>
                 <p class="mt-2 text-sm text-slate-600">管理基准评测案例、生成候选策略，以及查看评估结果。</p>
               </div>
               <button
-                @click="resetStrategyLabForm"
+                @click="openStrategyLabGenerateModal"
                 class="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 transition-all"
               >
-                新建实验
+                新建候选
               </button>
             </div>
           </div>
@@ -2135,81 +1861,10 @@
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm text-sm text-slate-600">
               <div class="font-semibold text-slate-800 mb-2">建议流程</div>
-              <p>先查看概览判断实验规模，再切到“候选生成”配置新候选；生成后到“候选列表”筛选，再进入“候选详情”查看 Prompt、评测报告与插件源码。</p>
+              <p>先查看概览判断实验规模，再直接点击“新建候选”打开生成向导；生成后统一在“候选列表”里筛选、评测、派生，并通过抽屉查看详情。</p>
             </div>
           </div>
 
-          <div v-else-if="shellSection === 'strategy-generate'" class="space-y-6">
-            <div class="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <h3 class="text-lg font-bold text-slate-800">候选生成区</h3>
-                  <p class="mt-2 text-sm text-slate-600">候选生成已改成弹层向导。首屏只保留当前默认目标和打开入口，避免把完整大表单长期堆在主工作区里。</p>
-                </div>
-                <button @click="openStrategyLabGenerateModal" class="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 transition-all">
-                  新建候选
-                </button>
-              </div>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div class="text-xs font-semibold text-slate-500">候选策略</div>
-                <div class="mt-2 text-base font-semibold text-slate-900">{{ strategyLabCandidateIdDisplayValue() }}</div>
-              </div>
-              <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div class="text-xs font-semibold text-slate-500">策略画像</div>
-                <div class="mt-2 text-base font-semibold text-slate-900">{{ strategyLabProfileLabel(strategyLabForm.profileId) }}</div>
-              </div>
-              <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div class="text-xs font-semibold text-slate-500">基线案例</div>
-                <div class="mt-2 text-base font-semibold text-slate-900">{{ strategyLabCaseName(strategyLabForm.caseId) }}</div>
-              </div>
-            </div>
-            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div class="text-sm font-semibold text-slate-800">当前生成目标</div>
-              <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 leading-7">
-                {{ strategyLabForm.objective }}
-              </div>
-            </div>
-            <div v-if="false">
-            <div class="rounded-2xl border border-amber-200 bg-white p-6 shadow-sm">
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <h3 class="text-lg font-bold text-slate-800">候选生成工作区</h3>
-                  <p class="mt-2 text-sm leading-7 text-slate-600">右侧集中展示当前即将生成的策略摘要和建议动作，左侧负责录入候选参数。</p>
-                </div>
-                <button
-                  @click="resetStrategyLabForm"
-                  class="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 transition-all"
-                >
-                  重置表单
-                </button>
-              </div>
-              <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div class="text-xs font-semibold text-slate-500">候选策略 ID</div>
-                  <div class="mt-2 text-base font-semibold text-slate-800">{{ strategyLabCandidateIdDisplayValue() }}</div>
-                </div>
-                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div class="text-xs font-semibold text-slate-500">策略画像</div>
-                  <div class="mt-2 text-base font-semibold text-slate-800">{{ strategyLabProfileLabel(strategyLabForm.profileId) }}</div>
-                </div>
-                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div class="text-xs font-semibold text-slate-500">目标插件</div>
-                  <div class="mt-2 text-base font-semibold text-slate-800">{{ strategyLabPluginIdsDisplayValue() || '-' }}</div>
-                </div>
-                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div class="text-xs font-semibold text-slate-500">基线案例</div>
-                  <div class="mt-2 text-base font-semibold text-slate-800">{{ strategyLabCaseName(strategyLabForm.caseId) }}</div>
-                </div>
-              </div>
-              <div class="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                当前建议流程：先在左侧完成候选配置，再切到“候选列表”查看生成结果，最后进入“候选详情”查看 Prompt、评测报告与插件源码。
-              </div>
-            </div>
-          </div>
-
-          </div>
           <div v-else-if="shellSection === 'strategy-candidates'" class="space-y-6">
             <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
               <div class="shell-toolbar">
@@ -2231,19 +1886,21 @@
                       <th>候选策略</th>
                       <th>策略画像</th>
                       <th>插件</th>
+                      <th>创建时间</th>
                       <th>平均分</th>
                       <th>发布闸门</th>
                       <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="item in strategyLabCandidates" :key="item.id">
+                    <tr v-for="item in strategyLabCandidatesForDisplay" :key="item.id">
                       <td>
                         <button @click="openStrategyLabCandidateDrawer(item.id)" class="text-left text-sm font-semibold text-blue-700 hover:text-blue-800">{{ strategyLabCandidateLabel(item.id) }}</button>
                         <div class="mt-1 text-xs text-slate-500">{{ item.objective }}</div>
                       </td>
                       <td class="text-slate-700">{{ strategyLabProfileLabel(item.profileId) }}</td>
                       <td><div class="flex flex-wrap gap-1.5"><span v-for="plugin in item.pluginIds" :key="plugin + '-' + item.id" class="shell-status-pill is-warning">{{ strategyLabPluginLabel(plugin) }}</span></div></td>
+                      <td class="text-slate-500">{{ strategyLabCandidateCreatedAtLabel(item) }}</td>
                       <td class="font-mono text-slate-900">{{ formatNumber(item.averageScore, 2) }}</td>
                       <td><span class="shell-status-pill" :class="item.releaseGatePassed ? 'is-success' : 'is-warning'">{{ item.releaseGatePassed ? '通过' : '未通过' }}</span></td>
                       <td><div class="flex flex-wrap gap-2"><button @click="openStrategyLabCandidateDrawer(item.id)" class="shell-inline-action">查看</button><button @click="evaluateStrategyLabCandidate(item.id)" class="shell-inline-action is-accent">评测</button><button @click="cloneStrategyLabCandidate(item.id)" class="shell-inline-action">派生</button></div></td>
@@ -2264,71 +1921,6 @@
               </div>
             </div>
 
-          <div v-if="shellSection === 'strategy-detail'" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div class="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-3">
-              <div>
-                <h3 class="text-lg font-bold text-slate-800">??</h3>
-                <p class="text-xs text-slate-500 mt-1">??</p>
-              </div>
-              <div v-if="selectedStrategyLabCandidate" class="flex items-center gap-2">
-                <button
-                  @click="openStrategyLabCandidateDrawer(selectedStrategyLabCandidate.id)"
-                  class="shell-inline-action"
-                >
-                  ??
-                </button>
-                <button
-                  @click="evaluateStrategyLabCandidate(selectedStrategyLabCandidate.id)"
-                  class="shell-inline-action is-accent"
-                >
-                  ??
-                </button>
-                <button
-                  @click="cloneStrategyLabCandidate(selectedStrategyLabCandidate.id)"
-                  class="shell-inline-action"
-                >
-                  ??
-                </button>
-              </div>
-            </div>
-            <div v-if="!selectedStrategyLabCandidate" class="px-5 py-10 text-sm text-slate-500">
-              ??
-            </div>
-            <div v-else class="p-5 space-y-4">
-              <div class="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
-                <div class="rounded-lg bg-slate-50 p-3">
-                  <div class="text-xs text-slate-500">?? ID</div>
-                  <div class="mt-1 font-semibold text-slate-800">{{ strategyLabCandidateLabel(selectedStrategyLabCandidate.id) }}</div>
-                  <div class="mt-1 text-[11px] text-slate-500">??</div>
-                </div>
-                <div class="rounded-lg bg-slate-50 p-3">
-                  <div class="text-xs text-slate-500">??</div>
-                  <div class="mt-1 font-semibold text-slate-800">{{ strategyLabCaseName(selectedStrategyLabCandidate.caseId) }}</div>
-                </div>
-                <div class="rounded-lg bg-slate-50 p-3">
-                  <div class="text-xs text-slate-500">??</div>
-                  <div class="mt-1 font-mono text-slate-800">{{ formatNumber(selectedStrategyLabCandidate.averageScore, 2) }}</div>
-                </div>
-                <div class="rounded-lg bg-slate-50 p-3">
-                  <div class="text-xs text-slate-500">??</div>
-                  <div class="mt-1 font-semibold" :class="selectedStrategyLabCandidate.releaseGatePassed ? 'text-emerald-700' : 'text-amber-700'">{{ selectedStrategyLabCandidate.releaseGatePassed ? '??' : '??' }}</div>
-                </div>
-              </div>
-
-              <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                <div class="font-semibold text-slate-800 mb-2">??</div>
-                <p>??Prompt?Benchmark ??</p>
-                <div class="mt-4 flex flex-wrap gap-2">
-                  <button @click="openStrategyLabCandidateDrawer(selectedStrategyLabCandidate.id)" class="shell-inline-action is-accent">
-                    ??
-                  </button>
-                  <button @click="shellSection = 'strategy-candidates'" class="shell-inline-action">
-                    ??
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
 
           <div v-if="shellSection === 'system-model'" class="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <div v-if="false" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -3717,7 +3309,6 @@
           <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="mb-2 text-sm font-semibold text-slate-800">&#x63D0;&#x793A;&#x8BCD;&#x6458;&#x8981;</div><div class="whitespace-pre-line text-sm leading-7 text-slate-700">{{ formatStrategyLabPrompt(selectedStrategyLabCandidate.prompt) }}</div></div>
           <div class="rounded-xl border border-blue-100 bg-blue-50 p-4"><div class="mb-2 text-sm font-semibold text-slate-800">&#x8BC4;&#x6D4B;&#x6458;&#x8981;</div><div class="grid grid-cols-1 gap-3 md:grid-cols-3 text-sm"><div class="rounded-lg border border-blue-100 bg-white/80 p-3"><div class="text-xs text-slate-500">&#x6848;&#x4F8B;&#x901A;&#x8FC7;&#x6570;</div><div class="mt-1 font-semibold text-slate-800">{{ selectedStrategyLabCandidate.benchmarkReport?.passedCases ?? 0 }} / {{ selectedStrategyLabCandidate.benchmarkReport?.totalCases ?? 0 }}</div></div><div class="rounded-lg border border-blue-100 bg-white/80 p-3"><div class="text-xs text-slate-500">&#x6700;&#x4F73;&#x6848;&#x4F8B;</div><div class="mt-1 font-semibold text-slate-800">{{ selectedStrategyLabCandidate.benchmarkReport?.bestCase || '-' }}</div></div><div class="rounded-lg border border-blue-100 bg-white/80 p-3"><div class="text-xs text-slate-500">&#x4E3B;&#x8981;&#x77ED;&#x677F;</div><div class="mt-1 font-semibold text-slate-800">{{ selectedStrategyLabCandidate.benchmarkReport?.mainGap || '-' }}</div></div></div></div>
           <div class="rounded-xl border border-slate-200 bg-slate-950 p-4"><div class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">&#x63D2;&#x4EF6;&#x6E90;&#x7801;&#x9884;&#x89C8;</div><pre class="overflow-x-auto whitespace-pre-wrap break-words text-xs leading-6 text-slate-100">{{ selectedStrategyLabCandidate.codeArtifact?.sourceCode || '# ??' }}</pre></div>
-          <div><button @click="shellSection = 'strategy-detail'" class="shell-inline-action">&#x5207;&#x5230;&#x8BE6;&#x60C5;&#x4E3B;&#x89C6;&#x56FE;</button></div>
         </div>
       </div>
     </div>
@@ -3921,6 +3512,8 @@
       </div>
     </div>
   </div>
+  <script src="./js/vendor/plotly-2.35.2.min.js"></script>
+  <script src="./js/modules/pid-analysis-chart.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>

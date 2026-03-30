@@ -332,6 +332,26 @@
       color: #1d4ed8;
       background: #eff6ff;
     }
+    .shell-icon-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #334155;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1;
+      transition: all .18s ease;
+    }
+    .shell-icon-action:hover {
+      background: #f8fafc;
+      border-color: #94a3b8;
+      color: #1d4ed8;
+    }
     .shell-drawer-close {
       border: 1px solid #cbd5e1;
       border-radius: 999px;

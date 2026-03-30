@@ -136,6 +136,9 @@ def _candidate_summary(candidate_dir: Path) -> Dict[str, Any]:
     report = _report_from_manifest(manifest, candidate_id)
     summary = manifest.get("benchmark_summary") or {}
     release_gate = report.get("release_gate") or {}
+    created_at = str(manifest.get("created_at") or "").strip()
+    if not created_at:
+        created_at = datetime.fromtimestamp(candidate_dir.stat().st_ctime).isoformat(timespec="seconds")
     return {
         "id": candidate_id,
         "profile_id": manifest.get("profile_id") or "default",
@@ -149,6 +152,7 @@ def _candidate_summary(candidate_dir: Path) -> Dict[str, Any]:
         "benchmark_report_path": manifest.get("benchmark_report_path") or "",
         "source_candidate": _source_candidate(manifest),
         "notes": str(manifest.get("notes") or ""),
+        "created_at": created_at,
         "updated_at": datetime.fromtimestamp(candidate_dir.stat().st_mtime).isoformat(timespec="seconds"),
     }
 
@@ -198,6 +202,7 @@ def get_candidate_detail(candidate_id: str) -> Dict[str, Any]:
 def generate_candidate(payload: Dict[str, Any]) -> Dict[str, Any]:
     _ensure_dirs()
     candidate_id = str(payload.get("candidate_id") or f"candidate_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    created_at = datetime.now().isoformat(timespec="seconds")
     profile_id = str(payload.get("profile_id") or "default")
     plugin_ids = [item.strip() for item in (payload.get("plugin_ids") or []) if str(item).strip()]
     if not plugin_ids:
@@ -214,6 +219,7 @@ def generate_candidate(payload: Dict[str, Any]) -> Dict[str, Any]:
         "candidate_id": candidate_id,
         "profile_id": profile_id,
         "plugin_ids": plugin_ids,
+        "created_at": created_at,
         "benchmark_summary": {
             "case_count": 1,
             "passed_count": 0,
@@ -244,6 +250,7 @@ def generate_candidate(payload: Dict[str, Any]) -> Dict[str, Any]:
         "case_id": case_id,
         "notes": notes,
         "source_candidate": source_candidate,
+        "created_at": created_at,
     }
     profile = {
         "profile_id": profile_id,
@@ -364,10 +371,12 @@ def clone_candidate(candidate_id: str) -> Dict[str, Any]:
     target_dir = _candidate_dir(clone_id)
     shutil.copytree(source_dir, target_dir)
     cloned_manifest = _manifest(target_dir)
+    created_at = datetime.now().isoformat(timespec="seconds")
     cloned_manifest["candidate_id"] = clone_id
     cloned_manifest["status"] = "draft"
     cloned_manifest["source_candidate"] = candidate_id
     cloned_manifest["notes"] = f"Cloned from {candidate_id}"
+    cloned_manifest["created_at"] = created_at
     _write_json(target_dir / "manifest.json", cloned_manifest)
     prompt_path = target_dir / "prompt.md"
     prompt = _read_text(prompt_path)
@@ -376,5 +385,6 @@ def clone_candidate(candidate_id: str) -> Dict[str, Any]:
     generation_request = _read_json(generation_request_path, {})
     generation_request["candidate_id"] = clone_id
     generation_request["source_candidate"] = candidate_id
+    generation_request["created_at"] = created_at
     _write_json(generation_request_path, generation_request)
     return _candidate_summary(target_dir)

@@ -212,6 +212,7 @@ def build_fit_preview(
 
     pv = window_df["PV"].to_numpy(dtype=float)
     mv = window_df["MV"].to_numpy(dtype=float)
+    sv = window_df["SV"].to_numpy(dtype=float) if "SV" in window_df.columns else None
     n = len(window_df)
     step = max(1, n // max_points)
     indices = list(range(0, n, step))
@@ -234,6 +235,8 @@ def build_fit_preview(
             "pv_fit": float(pv_fit[i]),
             "mv": float(mv[i]),
         }
+        if sv is not None:
+            point["sv"] = float(sv[i])
         if timestamp_strings is not None:
             point["time"] = timestamp_strings[i]
         points.append(point)

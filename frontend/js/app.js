@@ -152,11 +152,13 @@ createApp({
             '插件列表：激励质量，双向配对',
             '请围绕候选窗口生成、排序与诊断可解释性进行优化。'
           ].join('\n'),
-          createdAt: new Date().toLocaleString()
+          createdAt: new Date().toISOString()
         }
       ],
       selectedStrategyLabCandidateId: 'distillation_candidate_demo',
       strategyLabCompareCandidateId: '',
+      pidAnalysisRemotePayload: null,
+      pidAnalysisRemoteLoading: false,
       experienceDetailDrawerOpen: false,
       strategyLabCandidateDrawerOpen: false,
       strategyLabGenerateModalOpen: false,
@@ -302,6 +304,17 @@ createApp({
             ? JSON.parse(JSON.stringify(session.messages))
             : [];
           this.messageIdCounter = Number(session.messageIdCounter) || this.messages.reduce((maxId, msg) => Math.max(maxId, msg.id || 0), 0);
+          const context = session.context || {};
+          this.loopName = context.loopName || this.loopName;
+          this.loopUri = context.loopUri || this.loopUri;
+          this.loopType = context.loopType || this.loopType;
+          this.scenario = context.scenario || this.scenario;
+          this.plantType = context.plantType || this.plantType;
+          this.controlObject = context.controlObject || this.controlObject;
+          this.dataSource = context.dataSource || this.dataSource;
+          this.startTime = context.startTime || this.startTime;
+          this.endTime = context.endTime || this.endTime;
+          this.historyWindow = Number(context.historyWindow || this.historyWindow || 1) || 1;
         },
 
         saveTaskSessions() {
@@ -341,11 +354,12 @@ createApp({
           if (!this.messages.length) return;
           const legacySessionId = `task_legacy_${Date.now()}`;
           const legacyContext = this.currentTaskContextSnapshot();
+          const now = new Date().toISOString();
           this.taskSessions = [{
             id: legacySessionId,
             title: this.buildTaskSessionTitle(legacyContext),
-            createdAt: new Date().toLocaleString(),
-            updatedAt: new Date().toLocaleString(),
+            createdAt: now,
+            updatedAt: now,
             status: this.latestTuningResultData ? 'completed' : 'draft',
             context: legacyContext,
             messages: JSON.parse(JSON.stringify(this.messages)),
@@ -389,7 +403,7 @@ createApp({
         },
 
         createTaskSession() {
-          const now = new Date().toLocaleString();
+          const now = new Date().toISOString();
           const context = this.currentTaskContextSnapshot();
           const id = `task_${Date.now()}_${++this.taskSessionCounter}`;
           const session = {
@@ -531,11 +545,13 @@ createApp({
           if (!raw) return;
           try {
             const parsed = JSON.parse(raw);
-            if (parsed.selectedId) {
-              this.selectedStrategyLabCandidateId = parsed.selectedId;
-            }
-            if (parsed.compareId) {
-              this.strategyLabCompareCandidateId = parsed.compareId;
+            if (this.currentPage === 'strategy-lab') {
+              if (parsed.selectedId) {
+                this.selectedStrategyLabCandidateId = parsed.selectedId;
+              }
+              if (parsed.compareId) {
+                this.strategyLabCompareCandidateId = parsed.compareId;
+              }
             }
           } catch (error) {
             console.warn('Failed to restore strategy lab state:', error);
@@ -560,9 +576,7 @@ createApp({
             ],
             experience: [
               { id: 'experience-overview', label: '\u4e2d\u5fc3\u6982\u89c8' },
-              { id: 'experience-search', label: '\u76f8\u4f3c\u68c0\u7d22' },
-              { id: 'experience-list', label: '\u7ecf\u9a8c\u5217\u8868' },
-              { id: 'experience-detail', label: '\u7ecf\u9a8c\u8be6\u60c5' }
+              { id: 'experience-list', label: '\u7ecf\u9a8c\u5217\u8868' }
             ],
             'case-library': [
               { id: 'case-overview', label: '\u6848\u4f8b\u6982\u89c8' },
@@ -571,9 +585,7 @@ createApp({
             ],
             'strategy-lab': [
               { id: 'strategy-overview', label: '\u5b9e\u9a8c\u6982\u89c8' },
-              { id: 'strategy-generate', label: '\u5019\u9009\u751f\u6210' },
-              { id: 'strategy-candidates', label: '\u5019\u9009\u5217\u8868' },
-              { id: 'strategy-detail', label: '\u5019\u9009\u8be6\u60c5' }
+              { id: 'strategy-candidates', label: '\u5019\u9009\u5217\u8868' }
             ],
             'system-config': [
               { id: 'system-model', label: '\u6a21\u578b\u914d\u7f6e' },
@@ -725,7 +737,8 @@ createApp({
             promotion: detail?.promotion || {},
             sourceCandidate,
             notes,
-            createdAt: summaryPayload.updated_at || ''
+            createdAt: summaryPayload.created_at || summaryPayload.createdAt || summaryPayload.updated_at || summaryPayload.updatedAt || '',
+            updatedAt: summaryPayload.updated_at || summaryPayload.updatedAt || summaryPayload.created_at || summaryPayload.createdAt || ''
           };
         },
 
@@ -783,6 +796,9 @@ createApp({
             await this.loadCaseLibraryCenter();
           }
           if (page === 'strategy-lab') {
+            this.shellSection = 'strategy-overview';
+            this.strategyLabCandidateDrawerOpen = false;
+            this.strategyLabGenerateModalOpen = false;
             await this.loadStrategyLabCases();
             await this.loadStrategyLabCandidates();
           }
@@ -884,9 +900,9 @@ createApp({
         strategyLabCandidateLabel(candidateId) {
           const labels = {
             example: '默认示例候选策略',
+            distillation_candidate_demo: '默认示例候选策略',
             agent_example: '激励质量候选策略',
             agent_example_v2: '激励质量候选策略 V2',
-            distillation_candidate_demo: '精馏塔双向候选策略示例版',
             distillation_candidate_v1: '精馏塔双向候选策略 V1',
             distillation_candidate_v2: '精馏塔双向候选策略 V2',
             distillation_candidate_v3: '精馏塔双向候选策略 V3',
@@ -1262,7 +1278,7 @@ createApp({
             console.error('Failed to load strategy lab candidate detail:', error);
           }
           if (this.currentPage === 'strategy-lab') {
-            this.shellSection = 'strategy-detail';
+            this.shellSection = 'strategy-candidates';
           }
           this.strategyLabCandidateDrawerOpen = true;
           this.saveStrategyLabState();
@@ -1292,7 +1308,7 @@ createApp({
               this.selectedStrategyLabCandidateId = payload.item.id;
               await this.evaluateStrategyLabCandidate(payload.item.id);
               if (this.currentPage === 'strategy-lab') {
-                this.shellSection = 'strategy-detail';
+                this.shellSection = 'strategy-candidates';
               }
               this.strategyLabGenerateModalOpen = false;
               this.strategyLabCandidateDrawerOpen = true;
@@ -1328,7 +1344,7 @@ createApp({
               this.strategyLabCompareCandidateId = candidateId;
               await this.selectStrategyLabCandidate(payload.item.id);
               if (this.currentPage === 'strategy-lab') {
-                this.shellSection = 'strategy-detail';
+                this.shellSection = 'strategy-candidates';
               }
               this.strategyLabCandidateDrawerOpen = true;
             }
@@ -1455,6 +1471,258 @@ createApp({
                   : '-'
             }))
           };
+        },
+
+        isDefaultStrategyLabCandidate(candidate) {
+          const id = String(candidate?.id || '').trim();
+          return id === 'example' || id === 'distillation_candidate_demo';
+        },
+
+        strategyLabCandidateCreatedAtLabel(candidate) {
+          if (this.isDefaultStrategyLabCandidate(candidate)) return '-';
+          const value = candidate?.createdAt || candidate?.updatedAt || '';
+          const ts = Date.parse(value);
+          if (!value || Number.isNaN(ts)) return value || '-';
+          const d = new Date(ts);
+          const pad = (n) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        },
+
+        latestDataAnalysisMessage() {
+          return [...(this.messages || [])]
+            .reverse()
+            .find(msg => msg?.agent === '数据分析智能体' && this.getToolResult(msg, 'tool_load_data')) || null;
+        },
+
+        latestDataAnalysisResult() {
+          const msg = this.latestDataAnalysisMessage();
+          return msg ? this.getToolResult(msg, 'tool_load_data') : null;
+        },
+
+        buildProfessionalDataSummary(result) {
+          const resultDataAnalysis = result?.dataAnalysis || {};
+          const dataAnalysisToolMsg = this.latestDataAnalysisMessage();
+          const dataAnalysisToolResult = this.latestDataAnalysisResult() || {};
+          const dataAnalysisExplain = dataAnalysisToolMsg ? this.buildDataAnalysisExplainPayload(dataAnalysisToolMsg) : null;
+
+          const pointCount =
+            Number(resultDataAnalysis.points)
+            || Number(resultDataAnalysis.data_points)
+            || Number(dataAnalysisToolResult.data_points)
+            || Number(dataAnalysisToolResult.window_overview?.total_points)
+            || 0;
+
+          const validPointCount =
+            Number(resultDataAnalysis.valid_points)
+            || Number(resultDataAnalysis.validPoints)
+            || Number(dataAnalysisToolResult.valid_points)
+            || pointCount
+            || 0;
+
+          const candidateWindowCount =
+            Number(resultDataAnalysis.candidate_window_count)
+            || Number(dataAnalysisToolResult.candidate_windows?.length)
+            || Number(dataAnalysisToolResult.step_events?.length)
+            || 0;
+
+          const selectedWindow = resultDataAnalysis.selectedWindow || dataAnalysisToolResult.selected_window || {};
+          const selectedWindowId =
+            resultDataAnalysis.selected_window_id
+            || (selectedWindow.start_index !== undefined && selectedWindow.end_index !== undefined
+              ? `窗口 ${selectedWindow.start_index} - ${selectedWindow.end_index}`
+              : selectedWindow.event_type
+                ? this.describeStepEventType(selectedWindow.event_type)
+                : '');
+
+          const selectedWindowReason =
+            resultDataAnalysis.selection_reason
+            || resultDataAnalysis.selectedWindowReason
+            || dataAnalysisExplain?.selectionReason
+            || dataAnalysisToolResult.status
+            || '';
+
+          const historyRange = resultDataAnalysis.historyRange || {};
+          const startRaw = historyRange.startTime || dataAnalysisToolResult.window_overview?.start_time || '';
+          const endRaw = historyRange.endTime || dataAnalysisToolResult.window_overview?.end_time || '';
+          const startTime = Number(startRaw);
+          const endTime = Number(endRaw);
+          const durationSec =
+            Number(resultDataAnalysis.duration_sec)
+            || (Number.isFinite(startTime) && Number.isFinite(endTime) && endTime > startTime
+              ? Math.round((endTime - startTime) / 1000)
+              : 0);
+
+          return {
+            point_count: pointCount,
+            duration_sec: durationSec,
+            valid_point_count: validPointCount,
+            sampling_time_sec:
+              Number(resultDataAnalysis.sampling_time_sec)
+              || Number(resultDataAnalysis.samplingTime)
+              || Number(dataAnalysisToolResult.sampling_time)
+              || Number(this.historyWindow || 1),
+            candidate_window_count: candidateWindowCount,
+            selected_window_id: selectedWindowId || '',
+            selected_window_reason: selectedWindowReason || '',
+            step_detected:
+              resultDataAnalysis.step_detected
+              ?? resultDataAnalysis.stepDetected
+              ?? Boolean((dataAnalysisToolResult.step_events || []).length),
+            noise_level: resultDataAnalysis.noise_level || resultDataAnalysis.noiseLevel || '',
+            quality_flags: resultDataAnalysis.quality_flags || resultDataAnalysis.qualityFlags || [],
+            data_risks: resultDataAnalysis.risks || resultDataAnalysis.dataRisks || [],
+            candidate_windows: resultDataAnalysis.candidate_windows || dataAnalysisToolResult.candidate_windows || []
+          };
+        },
+
+        normalizePidAnalysisPoints(rawPoints) {
+          if (!Array.isArray(rawPoints) || !rawPoints.length) return [];
+          return rawPoints
+            .map((point) => {
+              const pv = Number(point?.pv ?? point?.PV);
+              const sv = Number(point?.sv ?? point?.SV);
+              const mv = Number(point?.mv ?? point?.MV);
+              if (!Number.isFinite(pv) || !Number.isFinite(mv) || !Number.isFinite(sv)) return null;
+              return {
+                label: point?.time || point?.timestamp || `索引 ${point?.index ?? 0}`,
+                pv,
+                sv,
+                mv,
+                error: sv - pv
+              };
+            })
+            .filter(Boolean);
+        },
+
+        buildPidAnalysisChartPayload(result) {
+          const overview = result?.model?.windowOverview || {};
+          const fitPreview = result?.model?.fitPreview || {};
+          const latestDataAnalysis = this.latestDataAnalysisResult() || {};
+
+          const sourceCandidates = [
+            {
+              points: overview.points,
+              xAxisTitle: overview.x_axis === 'timestamp' ? '时间' : '采样点'
+            },
+            {
+              points: fitPreview.points,
+              xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点'
+            },
+            {
+              points: latestDataAnalysis.window_overview?.points,
+              xAxisTitle: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? '时间' : '采样点'
+            }
+          ];
+
+          const matchedSource = sourceCandidates
+            .map(source => ({
+              points: this.normalizePidAnalysisPoints(source.points),
+              xAxisTitle: source.xAxisTitle
+            }))
+            .find(source => source.points.length);
+
+          if (!matchedSource) return null;
+
+          return {
+            points: matchedSource.points,
+            xAxisTitle: matchedSource.xAxisTitle || '时间',
+            leftAxisTitle: `PV / SV（${this.strategyLabLoopTypeLabel(this.loopType)}）`,
+            rightAxisTitle: 'MV (%)'
+          };
+        },
+
+        async loadPidAnalysisRemotePayload() {
+          const session = this.selectedTaskSession;
+          const context = session?.context || {};
+          const loopUri = context.loopUri || this.loopUri;
+          const startTime = context.startTime || this.startTime;
+          const endTime = context.endTime || this.endTime;
+          const window = Number(context.historyWindow || this.historyWindow || 1) || 1;
+
+          if (!loopUri || !startTime || !endTime) {
+            this.pidAnalysisRemotePayload = null;
+            return null;
+          }
+
+          this.pidAnalysisRemoteLoading = true;
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/tuning/pid-chart-data`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                loop_uri: loopUri,
+                start_time: startTime,
+                end_time: endTime,
+                window
+              })
+            });
+            if (!response.ok) {
+              this.pidAnalysisRemotePayload = null;
+              return null;
+            }
+            const payload = await response.json();
+            const points = this.normalizePidAnalysisPoints(payload?.points);
+            if (!points.length) {
+              this.pidAnalysisRemotePayload = null;
+              return null;
+            }
+            this.pidAnalysisRemotePayload = {
+              points,
+              xAxisTitle: payload?.x_axis === 'timestamp' ? '时间' : '采样点',
+              leftAxisTitle: `PV / SV（${this.strategyLabLoopTypeLabel(this.loopType)}）`,
+              rightAxisTitle: 'MV (%)'
+            };
+            return this.pidAnalysisRemotePayload;
+          } catch (error) {
+            console.warn('Failed to load remote PID chart payload:', error);
+            this.pidAnalysisRemotePayload = null;
+            return null;
+          } finally {
+            this.pidAnalysisRemoteLoading = false;
+          }
+        },
+
+        buildPidAnalysisMetrics(payload) {
+          if (!payload?.points?.length) {
+            return {
+              iae: 0,
+              maxError: 0,
+              steadyStateError: 0,
+              mvPeak: 0
+            };
+          }
+          const dt = Number(this.latestTuningResultData?.dataAnalysis?.samplingTime || this.latestTuningResultData?.dataAnalysis?.sampling_time_sec || this.historyWindow || 1) || 1;
+          const errors = payload.points.map(item => Math.abs(Number(item.error) || 0));
+          const mvValues = payload.points.map(item => Number(item.mv) || 0);
+          const tailSize = Math.max(3, Math.min(12, Math.floor(payload.points.length * 0.1)));
+          const steadyErrors = payload.points.slice(-tailSize).map(item => Math.abs(Number(item.error) || 0));
+
+          return {
+            iae: errors.reduce((sum, value) => sum + value * dt, 0),
+            maxError: errors.length ? Math.max(...errors) : 0,
+            steadyStateError: steadyErrors.length ? steadyErrors.reduce((sum, value) => sum + value, 0) / steadyErrors.length : 0,
+            mvPeak: mvValues.length ? Math.max(...mvValues) : 0
+          };
+        },
+
+        renderPidAnalysisChart() {
+          const element = document.getElementById('pid-analysis-chart');
+          if (!element || !window.PidAnalysisChart) return;
+          if (this.currentPage !== 'tuning' || this.shellSection !== 'tuning-result' || !this.pidAnalysisChartPayload) {
+            window.PidAnalysisChart.destroy(element);
+            return;
+          }
+          window.PidAnalysisChart.render(element, this.pidAnalysisChartPayload);
+        },
+
+        async schedulePidAnalysisChartRender() {
+          const localPayload = this.buildPidAnalysisChartPayload(this.latestTuningResultData);
+          if (!localPayload && this.currentPage === 'tuning' && this.shellSection === 'tuning-result' && this.selectedTaskSession) {
+            await this.loadPidAnalysisRemotePayload();
+          } else if (localPayload) {
+            this.pidAnalysisRemotePayload = null;
+          }
+          this.$nextTick(() => this.renderPidAnalysisChart());
         },
 
         openDataAnalysisExplain(msg) {
@@ -1694,7 +1962,7 @@ createApp({
             L: Number.isFinite(model.L) ? String(model.L) : ''
           };
           await this.switchPage('experience');
-          this.shellSection = 'experience-search';
+          this.shellSection = 'experience-list';
           if (this.experienceSearchForm.K && this.experienceSearchForm.T) {
             await this.searchSimilarExperiences();
           }
@@ -1888,9 +2156,9 @@ createApp({
             const payload = await response.json();
             this.selectedExperience = payload.item || null;
             if (switchSection && this.currentPage === 'experience') {
-              this.shellSection = 'experience-detail';
-              this.experienceDetailDrawerOpen = true;
+              this.shellSection = 'experience-list';
             }
+            this.experienceDetailDrawerOpen = true;
           } catch (error) {
             console.error('Failed to load experience detail:', error);
             this.selectedExperience = null;
@@ -1940,6 +2208,9 @@ createApp({
               throw new Error(`HTTP error! status: ${response.status}`);
             }
             this.experienceSearchResults = await response.json();
+            if (this.currentPage === 'experience') {
+              this.shellSection = 'experience-list';
+            }
           } catch (error) {
             console.error('Failed to search similar experiences:', error);
             this.experienceSearchResults = {
@@ -2027,6 +2298,29 @@ createApp({
             '\u8bc4\u4f30\u667a\u80fd\u4f53': { bg: '#fff7ed', border: '#f59e0b', text: '#92400e' }
           };
           return colors[agentName] || { bg: '#f8fafc', border: '#cbd5e1', text: '#475569' };
+        },
+
+        executionGroupStyle(agentName) {
+          const color = this.getAgentColor(agentName);
+          return {
+            borderColor: color.border,
+            background: `linear-gradient(180deg, ${color.bg} 0%, #ffffff 160px)`
+          };
+        },
+
+        executionAgentIconStyle(agentName) {
+          const color = this.getAgentColor(agentName);
+          return {
+            backgroundColor: color.bg,
+            border: `1px solid ${color.border}`,
+            color: color.text
+          };
+        },
+
+        executionAgentTitleStyle(agentName) {
+          return {
+            color: this.getAgentColor(agentName).text
+          };
         },
 
         updateProgress(agentName) {
@@ -2777,6 +3071,24 @@ window: ${this.historyWindow || 1}
         },
 
         summarizeTool(tool) {
+          if (tool?.tool_name === 'tool_search_experience') {
+            const parsed = this.parseToolPayload(tool?.result);
+            if (parsed && typeof parsed === 'object') {
+              const matchCount =
+                Number(parsed?.summary?.match_count)
+                || Number(parsed?.match_count)
+                || (Array.isArray(parsed?.matches) ? parsed.matches.length : 0);
+              const preferredStrategy = parsed?.summary?.preferred_strategy || parsed?.preferred_strategy || '';
+              const guidance = parsed?.guidance || parsed?.summary?.guidance || '';
+              if (matchCount > 0) {
+                return `命中 ${matchCount} 条相似经验${preferredStrategy ? `，推荐优先参考 ${this.strategyDisplayLabel(preferredStrategy)}` : ''}。`;
+              }
+              if (guidance) {
+                return this.truncateText(guidance, 96);
+              }
+              return '未检索到可直接复用的相似经验。';
+            }
+          }
           const summary = this.truncateText(tool?.summary || tool?.output_summary, 96);
           if (summary && summary !== '[object Object]') return summary;
           if (tool?.is_error) return '\u5de5\u5177\u6267\u884c\u5931\u8d25\uff0c\u8bf7\u5c55\u5f00\u67e5\u770b\u8fd4\u56de\u4fe1\u606f\u3002';
@@ -2833,6 +3145,24 @@ window: ${this.historyWindow || 1}
         toolOutputSummary(tool) {
           const parsed = this.parseToolPayload(tool?.result);
           if (parsed && typeof parsed === 'object') {
+            if (tool?.tool_name === 'tool_search_experience') {
+              const matchCount =
+                Number(parsed?.summary?.match_count)
+                || Number(parsed?.match_count)
+                || (Array.isArray(parsed?.matches) ? parsed.matches.length : 0);
+              const preferredStrategy = parsed?.summary?.preferred_strategy || parsed?.preferred_strategy || '';
+              const kpScale = parsed?.summary?.recommended_kp_scale;
+              const kiScale = parsed?.summary?.recommended_ki_scale;
+              const guidance = parsed?.guidance || parsed?.summary?.guidance || '';
+              if (matchCount > 0) {
+                const scaleText = (kpScale || kiScale)
+                  ? `，建议比例 Kp×${this.formatNumber(kpScale, 2)} / Ki×${this.formatNumber(kiScale, 2)}`
+                  : '';
+                return `已检索到 ${matchCount} 条相似经验${preferredStrategy ? `，偏好策略为 ${this.strategyDisplayLabel(preferredStrategy)}` : ''}${scaleText}。`;
+              }
+              if (guidance) return this.truncateText(guidance, 120);
+              return '未检索到可直接复用的相似经验。';
+            }
             if (parsed.raw_content) return this.truncateText(parsed.raw_content, 120);
             if (parsed.summary) return this.truncateText(parsed.summary, 120);
             if (parsed.message) return this.truncateText(parsed.message, 120);
@@ -2959,14 +3289,26 @@ window: ${this.historyWindow || 1}
       },
       computed: {
         latestTuningResultMessage() {
-          return [...(this.messages || [])].reverse().find(msg => msg.type === 'result') || null;
+          const messageResult = [...(this.messages || [])].reverse().find(msg => msg.type === 'result') || null;
+          if (messageResult) return messageResult;
+          if (this.selectedTaskSession?.latestResult) {
+            return {
+              id: `${this.selectedTaskSession.id || 'task'}_result_fallback`,
+              type: 'result',
+              data: this.selectedTaskSession.latestResult,
+              collapsed: false,
+              content: '已从当前任务会话恢复整定结果。'
+            };
+          }
+          return null;
         },
         latestTuningResultData() {
-          return this.latestTuningResultMessage?.data || null;
+          return this.latestTuningResultMessage?.data || this.selectedTaskSession?.latestResult || null;
         },
         professionalReportPayload() {
           const result = this.latestTuningResultData;
           const taskInput = this.taskInputMessage?.content || '';
+          const dataSummary = this.buildProfessionalDataSummary(result);
           const stages = this.executionFlowGroups.map(group => {
             const stageLabel = this.reportStageLabel(group.stage);
             return {
@@ -3019,17 +3361,17 @@ window: ${this.historyWindow || 1}
               user_request: taskInput
             },
             data_summary: {
-              point_count: result?.dataAnalysis?.points ?? 0,
-              duration_sec: result?.dataAnalysis?.duration_sec ?? 0,
-              valid_point_count: result?.dataAnalysis?.valid_points ?? 0,
-              sampling_time_sec: result?.dataAnalysis?.sampling_time_sec ?? Number(this.historyWindow || 1),
-              candidate_window_count: result?.dataAnalysis?.candidate_window_count ?? 0,
-              selected_window_id: result?.dataAnalysis?.selected_window_id || '',
-              selected_window_reason: result?.dataAnalysis?.selection_reason || '',
-              step_detected: result?.dataAnalysis?.step_detected ?? true,
-              noise_level: result?.dataAnalysis?.noise_level || '',
-              quality_flags: result?.dataAnalysis?.quality_flags || [],
-              data_risks: result?.dataAnalysis?.risks || []
+              point_count: dataSummary.point_count,
+              duration_sec: dataSummary.duration_sec,
+              valid_point_count: dataSummary.valid_point_count,
+              sampling_time_sec: dataSummary.sampling_time_sec,
+              candidate_window_count: dataSummary.candidate_window_count,
+              selected_window_id: dataSummary.selected_window_id,
+              selected_window_reason: dataSummary.selected_window_reason,
+              step_detected: dataSummary.step_detected,
+              noise_level: dataSummary.noise_level,
+              quality_flags: dataSummary.quality_flags,
+              data_risks: dataSummary.data_risks
             },
             agent_stages: stages,
             model_result: {
@@ -3087,7 +3429,7 @@ window: ${this.historyWindow || 1}
               raw_messages: this.messages || [],
               tool_call_records: stages.flatMap(item => item.tool_calls || []),
               candidate_models: result?.model?.candidate_models || [],
-              candidate_windows: result?.dataAnalysis?.candidate_windows || [],
+              candidate_windows: dataSummary.candidate_windows || [],
               raw_payloads: result || {}
             }
           };
@@ -3466,6 +3808,20 @@ window: ${this.historyWindow || 1}
         comparedStrategyLabCandidate() {
           return this.strategyLabCandidates.find(item => item.id === this.strategyLabCompareCandidateId) || null;
         },
+        strategyLabCandidatesForDisplay() {
+          const items = Array.isArray(this.strategyLabCandidates) ? [...this.strategyLabCandidates] : [];
+          const parseTs = (value) => {
+            const ts = Date.parse(value || '');
+            return Number.isNaN(ts) ? 0 : ts;
+          };
+          return items.sort((a, b) => {
+            if (this.isDefaultStrategyLabCandidate(a) && !this.isDefaultStrategyLabCandidate(b)) return -1;
+            if (!this.isDefaultStrategyLabCandidate(a) && this.isDefaultStrategyLabCandidate(b)) return 1;
+            const aTs = parseTs(a?.createdAt || a?.updatedAt);
+            const bTs = parseTs(b?.createdAt || b?.updatedAt);
+            return bTs - aTs;
+          });
+        },
         selectedTaskSession() {
           return this.taskSessions.find(item => item.id === this.selectedTaskSessionId) || null;
         },
@@ -3633,9 +3989,36 @@ window: ${this.historyWindow || 1}
           return this.latestTuningResultData
             ? `${this.formatScore100(this.latestTuningResultData.evaluation?.final_rating, 1)}/100`
             : '待评估';
+        },
+        pidAnalysisChartPayload() {
+          return this.buildPidAnalysisChartPayload(this.latestTuningResultData) || this.pidAnalysisRemotePayload;
+        },
+        pidAnalysisMetrics() {
+          return this.buildPidAnalysisMetrics(this.pidAnalysisChartPayload);
         }
       },
       watch: {
+        currentPage(newPage) {
+          if (newPage === 'strategy-lab') {
+            this.shellSection = 'strategy-overview';
+            this.strategyLabCandidateDrawerOpen = false;
+            this.strategyLabGenerateModalOpen = false;
+            this.strategyLabCompareCandidateId = '';
+          }
+          this.schedulePidAnalysisChartRender();
+        },
+        shellSection() {
+          this.schedulePidAnalysisChartRender();
+        },
+        selectedTaskSessionId() {
+          this.schedulePidAnalysisChartRender();
+        },
+        latestTuningResultData: {
+          handler() {
+            this.schedulePidAnalysisChartRender();
+          },
+          deep: true
+        },
         selectedStrategyLabCandidateId() {
           this.saveStrategyLabState();
         },
@@ -3648,7 +4031,12 @@ window: ${this.historyWindow || 1}
         this.loadStrategyLabState();
         this.shellSection = this.shellSecondaryItemsFor(this.currentPage)[0]?.id || '';
         this.bindShellSecondaryFallback();
+        this.schedulePidAnalysisChartRender();
       },
       beforeUnmount() {
+        const element = document.getElementById('pid-analysis-chart');
+        if (element && window.PidAnalysisChart) {
+          window.PidAnalysisChart.destroy(element);
+        }
       }
     }).mount('#app');

@@ -36,10 +36,12 @@ from memory.experience_service import (
     rebuild_experience_center_index,
     retrieve_experience_guidance,
 )
+from services.data_service import load_pid_dataset
 from services.system_config_service import (
     get_runtime_system_config,
     update_runtime_system_config,
 )
+from skills.data_analysis_skills import fetch_history_data_csv
 from state.workflow_task_store import WorkflowTaskStore
 
 RunCollaborationFn = Callable[..., AsyncGenerator[Dict[str, Any], None]]
@@ -137,6 +139,13 @@ class ModelConnectivityTestPayload(BaseModel):
     name: str = Field("", description="模型名称")
     api_url: str = Field("", description="模型服务地址")
     api_key: str = Field("", description="模型 API Key")
+
+
+class PidChartDataRequest(BaseModel):
+    loop_uri: str = Field(..., description="回路 URI")
+    start_time: str = Field(..., description="开始时间")
+    end_time: str = Field(..., description="结束时间")
+    window: int = Field(1, description="历史数据时间戳间隔（秒）")
 
 
 def _normalize_loop_type(loop_type: str) -> str:
@@ -514,6 +523,9 @@ def create_app(
                 csv_path="",
                 loop_name=loop_name,
                 loop_type=normalized_loop_type,
+                plant_type=payload.plant_type,
+                scenario=payload.scenario,
+                control_object=payload.control_object,
                 loop_uri=payload.loop_uri,
                 start_time=payload.start_time,
                 end_time=payload.end_time,
@@ -868,6 +880,46 @@ def create_app(
                     "api_url": api_url,
                 }
             )
+
+    @app.post("/api/tuning/pid-chart-data")
+    async def tuning_pid_chart_data(payload: PidChartDataRequest) -> JSONResponse:
+        csv_path = ""
+        try:
+            csv_meta = fetch_history_data_csv(
+                loop_uri=payload.loop_uri,
+                start_time=payload.start_time,
+                end_time=payload.end_time,
+                window=payload.window,
+            )
+            csv_path = str(csv_meta.get("csv_path") or "")
+            dataset = load_pid_dataset(csv_path)
+            overview = dataset.get("window_overview") or {}
+            return JSONResponse(
+                {
+                    "points": overview.get("points") or [],
+                    "x_axis": overview.get("x_axis") or "timestamp",
+                    "total_points": int(overview.get("total_points") or dataset.get("data_points") or 0),
+                    "sampling_time": float(dataset.get("sampling_time") or payload.window or 1),
+                    "window_start": overview.get("window_start"),
+                    "window_end": overview.get("window_end"),
+                    "start_time": overview.get("start_time"),
+                    "end_time": overview.get("end_time"),
+                }
+            )
+        except Exception as exc:
+            return JSONResponse(
+                {
+                    "error": "pid_chart_data_error",
+                    "detail": str(exc),
+                },
+                status_code=400,
+            )
+        finally:
+            if csv_path and os.path.exists(csv_path):
+                try:
+                    os.remove(csv_path)
+                except Exception:
+                    pass
 
     @app.get("/api/strategy-lab/cases")
     async def strategy_lab_cases() -> JSONResponse:

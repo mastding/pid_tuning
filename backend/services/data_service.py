@@ -37,6 +37,7 @@ def build_window_overview(
 
     pv = cleaned_df["PV"].to_numpy(dtype=float)
     mv = cleaned_df["MV"].to_numpy(dtype=float)
+    sv = cleaned_df["SV"].to_numpy(dtype=float) if "SV" in cleaned_df.columns else None
     n = len(cleaned_df)
     step = max(1, n // max_points)
     indices = list(range(0, n, step))
@@ -60,6 +61,8 @@ def build_window_overview(
             "mv": float(mv[i]),
             "in_window": bool(window_start <= i <= window_end),
         }
+        if sv is not None:
+            point["sv"] = float(sv[i])
         if timestamp_strings is not None:
             point["time"] = timestamp_strings[i]
         points.append(point)
