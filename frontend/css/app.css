@@ -282,6 +282,12 @@
       border-radius: 20px;
       background: rgba(255,255,255,.92);
       box-shadow: var(--shell-shadow-soft);
+      padding: clamp(16px, 2.2vw, 32px);
+    }
+    .shell-content-container {
+      width: 100%;
+      max-width: 1600px;
+      margin: 0 auto;
     }
     .shell-status {
       display: none;
