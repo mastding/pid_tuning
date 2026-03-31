@@ -4,13 +4,13 @@ const ensureAppTemplate = async () => {
 
   if (host.childElementCount > 0) return;
 
-  const response = await fetch(`/index.html?v=${Date.now()}`, { cache: 'no-store' });
+  const response = await fetch(`./app-template.html?v=${Date.now()}`, { cache: 'no-store' });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const html = await response.text();
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const source = doc.getElementById('app');
-  if (!source) throw new Error('template #app not found in index.html');
+  if (!source) throw new Error('template #app not found in app-template.html');
 
   host.className = source.className || host.className;
   host.innerHTML = source.innerHTML;
@@ -18,4 +18,3 @@ const ensureAppTemplate = async () => {
 
 await ensureAppTemplate();
 await import('./app.js');
-
