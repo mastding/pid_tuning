@@ -2,7 +2,6 @@ import Plotly from 'plotly.js-dist-min';
 
   const COLORS = {
     pv: '#1d4ed8',
-    pvFit: '#059669',
     pvPred: '#7c3aed',
     sv: '#222222',
     mv: 'rgba(245, 158, 11, 0.78)',
@@ -12,7 +11,7 @@ import Plotly from 'plotly.js-dist-min';
     axis: '#475569'
   };
 
-  const buildHoverText = (item) => {
+  const buildHoverText = (item, showFit) => {
     const time = item.label || '-';
     const pv = Number.isFinite(item.pv) ? item.pv.toFixed(3) : '-';
     const pvFit = Number.isFinite(item.pv_fit) ? item.pv_fit.toFixed(3) : null;
@@ -23,7 +22,7 @@ import Plotly from 'plotly.js-dist-min';
     const lines = [
       `时间：${time}`,
       `PV：${pv}`,
-      ...(pvFit !== null ? [`PV(拟合)：${pvFit}`] : []),
+      ...(showFit && pvFit !== null ? [`PV(拟合)：${pvFit}`] : []),
       `SV：${sv}`,
       ...(svRaw !== null ? [`SV(原始)：${svRaw}`] : []),
       `MV：${mv}`,
@@ -52,6 +51,10 @@ import Plotly from 'plotly.js-dist-min';
       return;
     }
 
+    const showFit = Boolean(payload.showFit);
+    const showSV = payload.showSV !== false;
+    const showMV = payload.showMV !== false;
+
     const labels = payload.points.map(item => item.label);
     const pv = payload.points.map(item => item.pv);
     const pvFit = payload.points.map(item => item.pv_fit ?? item.pvFit);
@@ -59,7 +62,7 @@ import Plotly from 'plotly.js-dist-min';
     const sv = payload.points.map(item => item.sv);
     const mv = payload.points.map(item => item.mv);
     const mvPred = payload.points.map(item => item.mv_pred ?? item.mvPred);
-    const hoverText = payload.points.map(buildHoverText);
+    const hoverText = payload.points.map(item => buildHoverText(item, showFit));
     const predHoverText = payload.points.map(buildPredHoverText);
 
     const traces = [
@@ -75,7 +78,10 @@ import Plotly from 'plotly.js-dist-min';
         hoverinfo: 'text',
         hovertext: hoverText
       },
-      {
+    ];
+
+    if (showSV && sv.some(value => Number.isFinite(value))) {
+      traces.push({
         x: labels,
         y: sv,
         name: 'SV',
@@ -89,31 +95,17 @@ import Plotly from 'plotly.js-dist-min';
         fillcolor: COLORS.fill,
         hoverinfo: 'text',
         hovertext: hoverText
-      },
-      {
-        x: labels,
-        y: mv,
-        name: 'MV',
-        mode: 'lines',
-        yaxis: 'y2',
-        line: {
-          color: COLORS.mv,
-          width: 2.2
-        },
-        opacity: 0.95,
-        hoverinfo: 'text',
-        hovertext: hoverText
-      }
-    ];
+      });
+    }
 
-    if (pvFit.some(value => Number.isFinite(value))) {
-      traces.splice(1, 0, {
+    if (showFit && pvFit.some(value => Number.isFinite(value))) {
+      traces.push({
         x: labels,
         y: pvFit,
         name: 'PV(拟合)',
         mode: 'lines',
         line: {
-          color: COLORS.pvFit,
+          color: '#059669',
           width: 2,
           dash: 'dot'
         },
@@ -123,7 +115,7 @@ import Plotly from 'plotly.js-dist-min';
     }
 
     if (pvPred.some(value => Number.isFinite(value))) {
-      traces.splice(1, 0, {
+      traces.push({
         x: labels,
         y: pvPred,
         name: 'PV(预测)',
@@ -138,7 +130,24 @@ import Plotly from 'plotly.js-dist-min';
       });
     }
 
-    if (mvPred.some(value => Number.isFinite(value))) {
+    if (showMV && mv.some(value => Number.isFinite(value))) {
+      traces.push({
+        x: labels,
+        y: mv,
+        name: 'MV',
+        mode: 'lines',
+        yaxis: 'y2',
+        line: {
+          color: COLORS.mv,
+          width: 2.2
+        },
+        opacity: 0.95,
+        hoverinfo: 'text',
+        hovertext: hoverText
+      });
+    }
+
+    if (showMV && mvPred.some(value => Number.isFinite(value))) {
       traces.push({
         x: labels,
         y: mvPred,
@@ -190,16 +199,19 @@ import Plotly from 'plotly.js-dist-min';
         zerolinecolor: COLORS.grid,
         linecolor: COLORS.grid,
         tickfont: { color: COLORS.axis }
-      },
-      yaxis2: {
+      }
+    };
+
+    if (showMV) {
+      layout.yaxis2 = {
         title: payload.rightAxisTitle || 'MV (%)',
         overlaying: 'y',
         side: 'right',
         range: [0, 100],
         showgrid: false,
         tickfont: { color: COLORS.axis }
-      },
-      shapes: [
+      };
+      layout.shapes = [
         {
           type: 'line',
           xref: 'paper',
@@ -220,8 +232,8 @@ import Plotly from 'plotly.js-dist-min';
           y1: 100,
           line: { color: '#f1f5f9', width: 1 }
         }
-      ]
-    };
+      ];
+    }
 
     const config = {
       displaylogo: false,

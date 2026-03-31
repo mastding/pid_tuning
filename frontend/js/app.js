@@ -1600,16 +1600,34 @@ createApp({
               const sv = Number(point?.sv ?? point?.SV);
               const mv = Number(point?.mv ?? point?.MV);
               if (!Number.isFinite(pv) || !Number.isFinite(mv) || !Number.isFinite(sv)) return null;
-              const pvFitRaw = Number(point?.pv_fit ?? point?.pvFit);
               const rawIndex = Number(point?.index);
               return {
                 label: point?.time || point?.timestamp || `索引 ${point?.index ?? 0}`,
                 index: Number.isFinite(rawIndex) ? rawIndex : null,
                 pv,
-                ...(Number.isFinite(pvFitRaw) ? { pv_fit: pvFitRaw } : {}),
                 sv,
                 mv,
                 error: sv - pv
+              };
+            })
+            .filter(Boolean);
+        },
+
+        normalizePidFitPoints(rawPoints) {
+          if (!Array.isArray(rawPoints) || !rawPoints.length) return [];
+          return rawPoints
+            .map((point) => {
+              const pv = Number(point?.pv ?? point?.PV);
+              const mv = Number(point?.mv ?? point?.MV);
+              const pvFit = Number(point?.pv_fit ?? point?.pvFit);
+              if (!Number.isFinite(pv) || !Number.isFinite(pvFit)) return null;
+              const rawIndex = Number(point?.index);
+              return {
+                label: point?.time || point?.timestamp || `索引 ${point?.index ?? 0}`,
+                index: Number.isFinite(rawIndex) ? rawIndex : null,
+                pv,
+                pv_fit: pvFit,
+                mv: Number.isFinite(mv) ? mv : null
               };
             })
             .filter(Boolean);
@@ -1620,40 +1638,20 @@ createApp({
           const fitPreview = result?.model?.fitPreview || {};
           const latestDataAnalysis = this.latestDataAnalysisResult() || {};
 
-          const preferFitPreview =
-            this.shellSection === 'tuning-loop-analysis'
-            && Array.isArray(fitPreview.points)
-            && fitPreview.points.some(item => Number.isFinite(Number(item?.pv_fit ?? item?.pvFit)));
-
-          const sourceCandidates = preferFitPreview
-            ? [
-              {
-                points: fitPreview.points,
-                xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点'
-              },
-              {
-                points: overview.points,
-                xAxisTitle: overview.x_axis === 'timestamp' ? '时间' : '采样点'
-              },
-              {
-                points: latestDataAnalysis.window_overview?.points,
-                xAxisTitle: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? '时间' : '采样点'
-              }
-            ]
-            : [
-              {
-                points: overview.points,
-                xAxisTitle: overview.x_axis === 'timestamp' ? '时间' : '采样点'
-              },
-              {
-                points: fitPreview.points,
-                xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点'
-              },
-              {
-                points: latestDataAnalysis.window_overview?.points,
-                xAxisTitle: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? '时间' : '采样点'
-              }
-            ];
+          const sourceCandidates = [
+            {
+              points: overview.points,
+              xAxisTitle: overview.x_axis === 'timestamp' ? '时间' : '采样点'
+            },
+            {
+              points: fitPreview.points,
+              xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点'
+            },
+            {
+              points: latestDataAnalysis.window_overview?.points,
+              xAxisTitle: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? '时间' : '采样点'
+            }
+          ];
 
           const matchedSource = sourceCandidates
             .map(source => ({
@@ -1669,6 +1667,21 @@ createApp({
             xAxisTitle: matchedSource.xAxisTitle || '时间',
             leftAxisTitle: `PV / SV（${this.strategyLabLoopTypeLabel(this.loopType)}）`,
             rightAxisTitle: 'MV (%)'
+          };
+        },
+
+        buildPidFitChartPayload(result) {
+          const fitPreview = result?.model?.fitPreview || {};
+          const points = this.normalizePidFitPoints(fitPreview.points);
+          if (!points.length) return null;
+          return {
+            points,
+            xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点',
+            leftAxisTitle: `PV（拟合窗口，${this.strategyLabLoopTypeLabel(this.loopType)}）`,
+            rightAxisTitle: '',
+            showFit: true,
+            showSV: false,
+            showMV: false
           };
         },
 
@@ -1853,11 +1866,13 @@ createApp({
           if (!window.PidAnalysisChart) return;
           const historyElement = document.getElementById('pid-analysis-chart-history') || document.getElementById('pid-analysis-chart');
           const replayElement = document.getElementById('pid-analysis-chart-replay');
+          const fitElement = document.getElementById('pid-analysis-chart-fit');
           const allowed = this.currentPage === 'tuning' && this.shellSection === 'tuning-loop-analysis';
 
           if (!allowed) {
             destroyPidAnalysisChart(historyElement);
             destroyPidAnalysisChart(replayElement);
+            destroyPidAnalysisChart(fitElement);
             return;
           }
 
@@ -1871,6 +1886,12 @@ createApp({
             renderPidAnalysisChart(replayElement, this.pidReplayChartPayload);
           } else if (replayElement) {
             destroyPidAnalysisChart(replayElement);
+          }
+
+          if (fitElement && this.pidFitChartPayload) {
+            renderPidAnalysisChart(fitElement, this.pidFitChartPayload);
+          } else if (fitElement) {
+            destroyPidAnalysisChart(fitElement);
           }
         },
 
@@ -4088,6 +4109,9 @@ window: ${this.historyWindow || 1}
         },
         pidAnalysisChartPayload() {
           return this.buildPidAnalysisChartPayload(this.latestTuningResultData) || this.pidAnalysisRemotePayload;
+        },
+        pidFitChartPayload() {
+          return this.buildPidFitChartPayload(this.latestTuningResultData);
         },
         pidAnalysisChartPayloadWithPrediction() {
           const base = this.pidAnalysisChartPayload;
