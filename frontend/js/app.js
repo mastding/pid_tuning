@@ -23,6 +23,7 @@ import {
 import { fetchPidChartData, fetchPidPredictionCurve, startTuneStream } from './api/tuning.js';
 import { createRafScheduler, destroyPidAnalysisChart, renderPidAnalysisChart } from './charts/index.js';
 import { loadHelpCenterMarkdown } from './content/help-center.js';
+import { buildHelpCenterRenderModel } from './content/help-center-render.js';
 import { loadTaskSessionsPayload, saveTaskSessionsPayload } from './state/task-sessions.js';
 
 const { createApp } = Vue;
@@ -1971,50 +1972,12 @@ createApp({
         },
 
         renderHelpMarkdown(markdown) {
-          const rawHtml = marked.parse(markdown);
-          const wrapper = document.createElement('div');
-          wrapper.innerHTML = rawHtml;
-
-          const toc = [];
-          let headingIndex = 0;
-          wrapper.querySelectorAll('h1, h2, h3').forEach(node => {
-            headingIndex += 1;
-            const id = `help-section-${headingIndex}`;
-            node.id = id;
-            toc.push({
-              id,
-              text: (node.textContent || '').trim(),
-              level: Number(node.tagName.substring(1)),
-            });
-          });
-
-          const expandedSections = {};
-          toc.forEach((item, index) => {
-            const next = toc[index + 1];
-            item.hasChildren = Boolean(next && next.level > item.level);
-            if (item.level === 1) {
-              expandedSections[item.id] = true;
-            }
-          });
-
-          const shortcutLabels = {
-            '系统定位': '系统定位',
-            '多智能体协作流程': '协作流程',
-            '当前评分机制': '评分机制',
-            '经验机制': '经验机制',
-            '当前后端代码结构': '代码结构',
-            '主要接口': '接口说明',
-          };
-          const shortcuts = toc
-            .filter(item => item.level <= 2)
-            .filter(item => shortcutLabels[item.text])
-            .map(item => ({ id: item.id, label: shortcutLabels[item.text] }));
-
-          this.helpCenterHtml = wrapper.innerHTML;
-          this.helpCenterToc = toc;
-          this.helpCenterExpandedSections = expandedSections;
-          this.helpCenterShortcuts = shortcuts;
-          this.helpCenterActiveSection = toc[0]?.id || '';
+          const model = buildHelpCenterRenderModel(markdown, marked);
+          this.helpCenterHtml = model.html;
+          this.helpCenterToc = model.toc;
+          this.helpCenterExpandedSections = model.expandedSections;
+          this.helpCenterShortcuts = model.shortcuts;
+          this.helpCenterActiveSection = model.activeSectionId;
           this.$nextTick(() => this.onHelpScroll());
         },
 
