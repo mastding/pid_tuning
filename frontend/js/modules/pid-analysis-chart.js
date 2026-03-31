@@ -1,4 +1,5 @@
-(function () {
+import Plotly from 'plotly.js-dist-min';
+
   const COLORS = {
     pv: '#1d4ed8',
     pvPred: '#7c3aed',
@@ -43,8 +44,8 @@
     ].join('<br>');
   };
 
-  const render = (element, payload) => {
-    if (!element || !window.Plotly || !payload || !Array.isArray(payload.points) || !payload.points.length) {
+  export const render = (element, payload) => {
+    if (!element || !payload || !Array.isArray(payload.points) || !payload.points.length) {
       return;
     }
 
@@ -208,14 +209,13 @@
       modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d']
     };
 
-    window.Plotly.react(element, traces, layout, config);
+    Plotly.react(element, traces, layout, config);
   };
 
-  const destroy = (element) => {
-    if (element && window.Plotly) {
-      window.Plotly.purge(element);
-    }
+  export const destroy = (element) => {
+    if (element) Plotly.purge(element);
   };
 
-  window.PidAnalysisChart = { render, destroy };
-})();
+  if (typeof window !== 'undefined') {
+    window.PidAnalysisChart = { render, destroy };
+  }

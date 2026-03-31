@@ -1,5 +1,6 @@
 import { resolveApiBase } from './api/client.js';
 import { fetchSystemConfig, saveSystemConfig, testModelConnectivity } from './api/system-config.js';
+import './modules/pid-analysis-chart.js';
 import {
   fetchStrategyLabCandidateDetail,
   fetchStrategyLabCandidates,
@@ -24,6 +25,7 @@ import { fetchPidChartData, fetchPidPredictionCurve, startTuneStream } from './a
 import { createRafScheduler, destroyPidAnalysisChart, renderPidAnalysisChart } from './charts/index.js';
 import { loadHelpCenterMarkdown } from './content/help-center.js';
 import { buildHelpCenterRenderModel } from './content/help-center-render.js';
+import { findHelpTocParent, isHelpTocExpanded, isHelpTocVisible, pickActiveSectionId } from './content/help-center-toc.js';
 import { loadTaskSessionsPayload, saveTaskSessionsPayload } from './state/task-sessions.js';
 
 const { createApp } = Vue;
@@ -2001,12 +2003,9 @@ createApp({
             }))
             .filter(item => Number.isFinite(item.top));
 
-          const current = headings
-            .filter(item => item.top <= 140)
-            .sort((a, b) => b.top - a.top)[0] || headings[0];
-
-          if (current?.id) {
-            this.helpCenterActiveSection = current.id;
+          const active = pickActiveSectionId(headings, 140);
+          if (active) {
+            this.helpCenterActiveSection = active;
           }
         },
 
@@ -2018,25 +2017,15 @@ createApp({
         },
 
         isHelpTocExpanded(sectionId) {
-          return Boolean(this.helpCenterExpandedSections[sectionId]);
+          return isHelpTocExpanded(this.helpCenterExpandedSections, sectionId);
         },
 
         isHelpTocVisible(item) {
-          if (item.level === 1) return true;
-          const parent = this.findHelpTocParent(item);
-          if (!parent) return true;
-          return this.isHelpTocExpanded(parent.id);
+          return isHelpTocVisible(this.helpCenterToc, this.helpCenterExpandedSections, item);
         },
 
         findHelpTocParent(targetItem) {
-          const idx = this.helpCenterToc.findIndex(item => item.id === targetItem.id);
-          if (idx <= 0) return null;
-          for (let i = idx - 1; i >= 0; i -= 1) {
-            if (this.helpCenterToc[i].level < targetItem.level) {
-              return this.helpCenterToc[i];
-            }
-          }
-          return null;
+          return findHelpTocParent(this.helpCenterToc, targetItem);
         },
 
         async openExperienceCenterFromResult(result) {
