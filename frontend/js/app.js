@@ -27,16 +27,34 @@ import { loadHelpCenterMarkdown } from './content/help-center.js';
 import { buildHelpCenterRenderModel } from './content/help-center-render.js';
 import { findHelpTocParent, isHelpTocExpanded, isHelpTocVisible, pickActiveSectionId } from './content/help-center-toc.js';
 import { loadTaskSessionsPayload, saveTaskSessionsPayload } from './state/task-sessions.js';
-
-const { createApp } = Vue;
+import { marked } from 'marked';
+import { createApp } from 'vue/dist/vue.esm-browser.js';
 
 const FRONTEND_SEEDS = window.PID_FRONTEND_SEEDS || {};
+
+const resolveInitialRoute = () => {
+  const seededPage = FRONTEND_SEEDS.initialPage || window.PID_INITIAL_PAGE;
+  const seededSection = FRONTEND_SEEDS.initialShellSection || window.PID_INITIAL_SHELL_SECTION;
+
+  const params = new URLSearchParams(window.location.search || '');
+  const urlPage = params.get('page');
+
+  const requested = (seededPage || urlPage || '').trim();
+  if (requested === 'experience') return { page: 'experience', shellSection: seededSection || '' };
+  if (requested === 'case-library') return { page: 'case-library', shellSection: seededSection || '' };
+  if (requested === 'loop-analysis') return { page: 'tuning', shellSection: seededSection || 'tuning-loop-analysis' };
+  if (requested === 'tuning') return { page: 'tuning', shellSection: seededSection || 'tuning-workbench' };
+  return { page: 'tuning', shellSection: seededSection || 'tuning-workbench' };
+};
+
+const INITIAL_ROUTE = resolveInitialRoute();
 
 createApp({
   data() {
     return {
-      currentPage: 'tuning',
-      shellSection: 'tuning-workbench',
+      currentPage: INITIAL_ROUTE.page,
+      shellSection: INITIAL_ROUTE.shellSection,
+      initialShellSection: INITIAL_ROUTE.shellSection,
       taskSessions: [],
       selectedTaskSessionId: '',
       taskSessionCounter: 0,
@@ -4145,7 +4163,11 @@ window: ${this.historyWindow || 1}
         this.chartRenderScheduler = createRafScheduler();
         await this.loadTaskSessions();
         this.loadStrategyLabState();
-        this.shellSection = this.shellSecondaryItemsFor(this.currentPage)[0]?.id || '';
+        const available = this.shellSecondaryItemsFor(this.currentPage).map(item => item.id);
+        const requested = this.initialShellSection;
+        this.shellSection = (requested && available.includes(requested))
+          ? requested
+          : (available[0] || '');
         this.bindShellSecondaryFallback();
         this.schedulePidAnalysisChartRender();
       },
