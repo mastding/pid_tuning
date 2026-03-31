@@ -1678,10 +1678,10 @@ createApp({
             points,
             xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点',
             leftAxisTitle: `PV（拟合窗口，${this.strategyLabLoopTypeLabel(this.loopType)}）`,
-            rightAxisTitle: '',
+            rightAxisTitle: 'MV (%)',
             showFit: true,
             showSV: false,
-            showMV: false
+            showMV: true
           };
         },
 
