@@ -1,4 +1,13 @@
 import { resolveApiBase } from './api/client.js';
+import { fetchSystemConfig, saveSystemConfig, testModelConnectivity } from './api/system-config.js';
+import {
+  fetchStrategyLabCandidateDetail,
+  fetchStrategyLabCandidates,
+  fetchStrategyLabCases,
+  generateStrategyLabCandidate as generateStrategyLabCandidateApi,
+  evaluateStrategyLabCandidate as evaluateStrategyLabCandidateApi,
+  cloneStrategyLabCandidate as cloneStrategyLabCandidateApi
+} from './api/strategy-lab.js';
 import { loadTaskSessionsPayload, saveTaskSessionsPayload } from './state/task-sessions.js';
 
 const { createApp } = Vue;
@@ -604,9 +613,7 @@ createApp({
           this.systemConfigLoading = true;
           this.systemConfigMessage = '';
           try {
-            const response = await fetch(`${resolveApiBase()}/api/system-config`);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const payload = await response.json();
+            const payload = await fetchSystemConfig();
             this.systemConfig = {
               model: {
                 name: payload?.model?.name || '',
@@ -630,13 +637,7 @@ createApp({
           this.systemConfigSaving = true;
           this.systemConfigMessage = '';
           try {
-            const response = await fetch(`${resolveApiBase()}/api/system-config`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(this.systemConfig)
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const payload = await response.json();
+            const payload = await saveSystemConfig(this.systemConfig);
             if (payload?.config) {
               this.systemConfig = payload.config;
             }
@@ -654,13 +655,7 @@ createApp({
           this.systemConfigTestMessage = '';
           this.systemConfigTestOk = false;
           try {
-            const response = await fetch(`${resolveApiBase()}/api/system-config/test-model`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(this.systemConfig.model)
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const payload = await response.json();
+            const payload = await testModelConnectivity(this.systemConfig.model);
             this.systemConfigTestOk = Boolean(payload?.ok);
             const parts = [payload?.message || '模型连通性测试已完成。'];
             if (payload?.error_type) {
@@ -748,9 +743,7 @@ createApp({
 
         async loadStrategyLabCases() {
           try {
-            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/cases`);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const payload = await response.json();
+            const payload = await fetchStrategyLabCases();
             this.strategyLabCases = (payload.items || []).map(item => ({
               id: item.id,
               name: item.name,
@@ -766,9 +759,7 @@ createApp({
 
         async loadStrategyLabCandidates() {
           try {
-            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates`);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const payload = await response.json();
+            const payload = await fetchStrategyLabCandidates();
             this.strategyLabCandidates = (payload.items || []).map(item => this.normalizeStrategyLabCandidate(item));
             if (
               this.strategyLabCandidates.length &&
@@ -1270,9 +1261,7 @@ createApp({
             this.strategyLabCompareCandidateId = '';
           }
           try {
-            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates/${encodeURIComponent(candidateId)}`);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const payload = await response.json();
+            const payload = await fetchStrategyLabCandidateDetail(candidateId);
             const normalized = this.normalizeStrategyLabCandidate(
               this.strategyLabCandidates.find(item => item.id === candidateId) || { id: candidateId },
               payload
@@ -1294,19 +1283,13 @@ createApp({
             .map(item => item.trim())
             .filter(Boolean);
           try {
-            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates/generate`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                candidate_id: this.strategyLabForm.candidateId || `candidate_${Date.now()}`,
-                profile_id: this.strategyLabForm.profileId,
-                plugin_ids: pluginIds,
-                objective: this.strategyLabForm.objective,
-                case_id: this.strategyLabForm.caseId
-              })
+            const payload = await generateStrategyLabCandidateApi({
+              candidate_id: this.strategyLabForm.candidateId || `candidate_${Date.now()}`,
+              profile_id: this.strategyLabForm.profileId,
+              plugin_ids: pluginIds,
+              objective: this.strategyLabForm.objective,
+              case_id: this.strategyLabForm.caseId
             });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const payload = await response.json();
             await this.loadStrategyLabCandidates();
             if (payload.item?.id) {
               this.selectedStrategyLabCandidateId = payload.item.id;
@@ -1324,10 +1307,7 @@ createApp({
 
         async evaluateStrategyLabCandidate(candidateId) {
           try {
-            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates/${encodeURIComponent(candidateId)}/evaluate`, {
-              method: 'POST'
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            await evaluateStrategyLabCandidateApi(candidateId);
             await this.loadStrategyLabCandidates();
             await this.selectStrategyLabCandidate(candidateId);
           } catch (error) {
@@ -1337,11 +1317,7 @@ createApp({
 
         async cloneStrategyLabCandidate(candidateId) {
           try {
-            const response = await fetch(`${resolveApiBase()}/api/strategy-lab/candidates/${encodeURIComponent(candidateId)}/clone`, {
-              method: 'POST'
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const payload = await response.json();
+            const payload = await cloneStrategyLabCandidateApi(candidateId);
             await this.loadStrategyLabCandidates();
             if (payload.item?.id) {
               this.selectedStrategyLabCandidateId = payload.item.id;
