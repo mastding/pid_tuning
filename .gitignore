@@ -34,10 +34,14 @@ backup/
 .DS_Store
 
 # Local UI / recording tooling
-node_modules/
-package.json
-package-lock.json
-scripts/
+/node_modules/
+/package.json
+/package-lock.json
+/scripts/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
 
 # Local persisted task sessions
 backend/state/frontend_sessions.json
