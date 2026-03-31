@@ -22,6 +22,7 @@ import {
 } from './api/case-library.js';
 import { fetchPidChartData, fetchPidPredictionCurve, startTuneStream } from './api/tuning.js';
 import { createRafScheduler, destroyPidAnalysisChart, renderPidAnalysisChart } from './charts/index.js';
+import { loadHelpCenterMarkdown } from './content/help-center.js';
 import { loadTaskSessionsPayload, saveTaskSessionsPayload } from './state/task-sessions.js';
 
 const { createApp } = Vue;
@@ -1955,11 +1956,7 @@ createApp({
           this.helpCenterLoading = true;
           this.helpCenterError = '';
           try {
-            const response = await fetch(`./help-center.md?v=${Date.now()}`, { cache: 'no-store' });
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const markdown = await response.text();
+            const markdown = await loadHelpCenterMarkdown();
             this.renderHelpMarkdown(markdown);
           } catch (error) {
             console.error('Failed to load help center:', error);
