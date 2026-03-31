@@ -1,9 +1,7 @@
-const { createApp } = Vue;
+import { resolveApiBase } from './api/client.js';
+import { loadTaskSessionsPayload, saveTaskSessionsPayload } from './state/task-sessions.js';
 
-const resolveApiBase = () => {
-  const { protocol, hostname } = window.location;
-  return `${protocol}//${hostname}:3443`;
-};
+const { createApp } = Vue;
 
 const FRONTEND_SEEDS = window.PID_FRONTEND_SEEDS || {};
 
@@ -328,16 +326,7 @@ createApp({
             selectedTaskSessionId: this.selectedTaskSessionId,
             taskSessionCounter: this.taskSessionCounter
           };
-          localStorage.setItem(this.taskSessionStorageKey(), JSON.stringify(payload));
-          try {
-            await fetch(`${resolveApiBase()}/api/task-sessions`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-          } catch (e) {
-            console.error('Failed to sync task sessions to backend', e);
-          }
+          await saveTaskSessionsPayload(this.taskSessionStorageKey(), payload);
         },
 
         syncCurrentTaskSession(overrides = {}) {
@@ -387,25 +376,8 @@ createApp({
         },
 
         async loadTaskSessions() {
-          let raw = null;
-          try {
-            const res = await fetch(`${resolveApiBase()}/api/task-sessions`);
-            if (res.ok) {
-              const data = await res.json();
-              if (data && Array.isArray(data.items)) {
-                raw = JSON.stringify(data);
-                localStorage.setItem(this.taskSessionStorageKey(), raw);
-              }
-            }
-          } catch (e) {
-            console.warn('Failed to load task sessions from backend, falling back to local', e);
-          }
-
-          if (!raw) {
-            raw = localStorage.getItem(this.taskSessionStorageKey());
-          }
-
-          if (!raw || raw === '{}') {
+          const parsed = await loadTaskSessionsPayload(this.taskSessionStorageKey());
+          if (!parsed) {
             this.migrateLegacyMessagesToSession();
             if (this.taskSessions.length) {
               this.hydrateTaskSession(this.taskSessions[0]);
@@ -413,7 +385,6 @@ createApp({
             return;
           }
           try {
-            const parsed = JSON.parse(raw);
             this.taskSessions = Array.isArray(parsed.items) ? parsed.items : [];
             this.selectedTaskSessionId = parsed.selectedTaskSessionId || (this.taskSessions[0]?.id || '');
             this.taskSessionCounter = Number(parsed.taskSessionCounter) || this.taskSessions.length;
