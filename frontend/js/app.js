@@ -8,6 +8,18 @@ import {
   evaluateStrategyLabCandidate as evaluateStrategyLabCandidateApi,
   cloneStrategyLabCandidate as cloneStrategyLabCandidateApi
 } from './api/strategy-lab.js';
+import {
+  clearExperiences as clearExperiencesApi,
+  fetchExperienceDetail as fetchExperienceDetailApi,
+  fetchExperiences as fetchExperiencesApi,
+  fetchExperienceStats as fetchExperienceStatsApi,
+  searchExperiences as searchExperiencesApi
+} from './api/experiences.js';
+import {
+  fetchCaseLibraryDetail as fetchCaseLibraryDetailApi,
+  fetchCaseLibraryItems as fetchCaseLibraryItemsApi,
+  fetchCaseLibraryStats as fetchCaseLibraryStatsApi
+} from './api/case-library.js';
 import { loadTaskSessionsPayload, saveTaskSessionsPayload } from './state/task-sessions.js';
 
 const { createApp } = Vue;
@@ -2110,11 +2122,7 @@ createApp({
 
         async loadCaseLibraryStats() {
           try {
-            const response = await fetch(`${resolveApiBase()}/api/case-library/stats`);
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            this.caseLibraryStats = await response.json();
+            this.caseLibraryStats = await fetchCaseLibraryStatsApi();
           } catch (error) {
             console.error('Failed to load case library stats:', error);
             this.caseLibraryStats = {};
@@ -2133,11 +2141,7 @@ createApp({
             if (this.caseFilters.keyword) params.set('keyword', this.caseFilters.keyword);
             params.set('limit', '100');
 
-            const response = await fetch(`${resolveApiBase()}/api/case-library?${params.toString()}`);
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const payload = await response.json();
+            const payload = await fetchCaseLibraryItemsApi(params);
             this.caseLibraryItems = Array.isArray(payload.items) ? payload.items : [];
             if (this.selectedCase) {
               const stillExists = this.caseLibraryItems.some(item => item.case_id === this.selectedCase.case_id);
@@ -2160,11 +2164,7 @@ createApp({
           if (!caseId) return;
           this.caseLibraryDetailLoading = true;
           try {
-            const response = await fetch(`${resolveApiBase()}/api/case-library/${encodeURIComponent(caseId)}`);
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const payload = await response.json();
+            const payload = await fetchCaseLibraryDetailApi(caseId);
             this.selectedCase = payload.item || null;
             if (switchSection && this.currentPage === 'case-library') {
               this.shellSection = 'case-detail';
@@ -2195,14 +2195,9 @@ createApp({
           if (!confirmed) return;
 
           try {
-            const response = await fetch(`${resolveApiBase()}/api/experiences/actions/clear`, {
-              method: 'POST'
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
             this.selectedExperience = null;
             this.experienceSearchResults = null;
+            await clearExperiencesApi();
             await this.loadExperienceCenter();
           } catch (error) {
             console.error('Failed to clear experiences:', error);
@@ -2212,11 +2207,7 @@ createApp({
 
         async loadExperienceStats() {
           try {
-            const response = await fetch(`${resolveApiBase()}/api/experiences/stats`);
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const payload = await response.json();
+            const payload = await fetchExperienceStatsApi();
             this.experienceStats = {
               ...payload,
               top_strategy: payload.top_strategy || payload.top_strategies?.[0]?.strategy || ''
@@ -2238,11 +2229,7 @@ createApp({
             if (this.experienceFilters.keyword) params.set('keyword', this.experienceFilters.keyword);
             params.set('limit', '100');
 
-            const response = await fetch(`${resolveApiBase()}/api/experiences?${params.toString()}`);
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const payload = await response.json();
+            const payload = await fetchExperiencesApi(params);
             this.experienceItems = Array.isArray(payload.items) ? payload.items.map(item => ({
               ...item,
               final_strategy: item.final_strategy || item.strategy?.final || '',
@@ -2275,11 +2262,7 @@ createApp({
           if (!experienceId) return;
           this.experienceDetailLoading = true;
           try {
-            const response = await fetch(`${resolveApiBase()}/api/experiences/${experienceId}`);
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const payload = await response.json();
+            const payload = await fetchExperienceDetailApi(experienceId);
             this.selectedExperience = payload.item || null;
             if (switchSection && this.currentPage === 'experience') {
               this.shellSection = 'experience-list';
@@ -2326,14 +2309,7 @@ createApp({
             formData.append('L', String(Number.isFinite(L) ? L : 0));
             formData.append('limit', '3');
 
-            const response = await fetch(`${resolveApiBase()}/api/experiences/search`, {
-              method: 'POST',
-              body: formData
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            this.experienceSearchResults = await response.json();
+            this.experienceSearchResults = await searchExperiencesApi(formData);
             if (this.currentPage === 'experience') {
               this.shellSection = 'experience-list';
             }
