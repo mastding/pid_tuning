@@ -246,6 +246,7 @@ class ServiceRefactorSmokeTests(unittest.TestCase):
                         start_time="1",
                         end_time="2",
                         data_type="interpolated",
+                        window=1,
                         llm_config={"api_key": "k", "base_url": "u", "model": "m"},
                         shared_data_store=shared_store,
                         create_model_client=lambda **kwargs: object(),

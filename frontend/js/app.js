@@ -1,4 +1,4 @@
-﻿const { createApp } = Vue;
+const { createApp } = Vue;
 
 const resolveApiBase = () => {
   const { protocol, hostname } = window.location;
@@ -159,6 +159,11 @@ createApp({
       strategyLabCompareCandidateId: '',
       pidAnalysisRemotePayload: null,
       pidAnalysisRemoteLoading: false,
+      pidAnalysisPrediction: null,
+      pidAnalysisPredictionKey: '',
+      pidAnalysisPredictionLoading: false,
+      pidAnalysisPredictionError: '',
+      pidAnalysisShowPrediction: true,
       experienceDetailDrawerOpen: false,
       strategyLabCandidateDrawerOpen: false,
       strategyLabGenerateModalOpen: false,
@@ -317,12 +322,22 @@ createApp({
           this.historyWindow = Number(context.historyWindow || this.historyWindow || 1) || 1;
         },
 
-        saveTaskSessions() {
-          localStorage.setItem(this.taskSessionStorageKey(), JSON.stringify({
+        async saveTaskSessions() {
+          const payload = {
             items: this.taskSessions,
             selectedTaskSessionId: this.selectedTaskSessionId,
             taskSessionCounter: this.taskSessionCounter
-          }));
+          };
+          localStorage.setItem(this.taskSessionStorageKey(), JSON.stringify(payload));
+          try {
+            await fetch(`${resolveApiBase()}/api/task-sessions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+          } catch (e) {
+            console.error('Failed to sync task sessions to backend', e);
+          }
         },
 
         syncCurrentTaskSession(overrides = {}) {
@@ -371,9 +386,26 @@ createApp({
           this.saveTaskSessions();
         },
 
-        loadTaskSessions() {
-          const raw = localStorage.getItem(this.taskSessionStorageKey());
+        async loadTaskSessions() {
+          let raw = null;
+          try {
+            const res = await fetch(`${resolveApiBase()}/api/task-sessions`);
+            if (res.ok) {
+              const data = await res.json();
+              if (data && Array.isArray(data.items)) {
+                raw = JSON.stringify(data);
+                localStorage.setItem(this.taskSessionStorageKey(), raw);
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to load task sessions from backend, falling back to local', e);
+          }
+
           if (!raw) {
+            raw = localStorage.getItem(this.taskSessionStorageKey());
+          }
+
+          if (!raw || raw === '{}') {
             this.migrateLegacyMessagesToSession();
             if (this.taskSessions.length) {
               this.hydrateTaskSession(this.taskSessions[0]);
@@ -572,6 +604,7 @@ createApp({
               { id: 'tuning-history', label: '\u4efb\u52a1\u4f1a\u8bdd' },
               { id: 'tuning-process', label: '\u6267\u884c\u8fc7\u7a0b' },
               { id: 'tuning-result', label: '\u8c03\u53c2\u7ed3\u679c' },
+              { id: 'tuning-loop-analysis', label: '\u56de\u8def\u5206\u6790' },
               { id: 'tuning-explain', label: '\u89e3\u91ca\u8be6\u60c5' }
             ],
             experience: [
@@ -1583,8 +1616,10 @@ createApp({
               const sv = Number(point?.sv ?? point?.SV);
               const mv = Number(point?.mv ?? point?.MV);
               if (!Number.isFinite(pv) || !Number.isFinite(mv) || !Number.isFinite(sv)) return null;
+              const rawIndex = Number(point?.index);
               return {
                 label: point?.time || point?.timestamp || `索引 ${point?.index ?? 0}`,
+                index: Number.isFinite(rawIndex) ? rawIndex : null,
                 pv,
                 sv,
                 mv,
@@ -1682,6 +1717,129 @@ createApp({
           }
         },
 
+        buildPidAnalysisPredictionKey(payload) {
+          const pid = this.latestTuningResultData?.pidParams || {};
+          const model = this.latestTuningResultData?.model || {};
+          const pidKey = [
+            Number(pid?.Kp || 0).toFixed(6),
+            Number(pid?.Ki || 0).toFixed(6),
+            Number(pid?.Kd || 0).toFixed(6),
+          ].join('|');
+          const modelKey = [
+            String(model?.modelType || ''),
+            Number(model?.K || 0).toFixed(6),
+            Number(model?.T || 0).toFixed(6),
+            Number(model?.L || 0).toFixed(6),
+          ].join('|');
+          const sessionKey = String(this.selectedTaskSessionId || '');
+          const n = Number(payload?.points?.length || 0);
+          return [sessionKey, pidKey, modelKey, String(n)].join('::');
+        },
+
+        estimatePidAnalysisSimulationDt(points, baseDt) {
+          const dtBase = Number(baseDt) || 1;
+          if (!Array.isArray(points) || points.length < 2) return dtBase;
+          const diffs = [];
+          for (let i = 1; i < points.length; i += 1) {
+            const prev = Number(points[i - 1]?.index);
+            const next = Number(points[i]?.index);
+            if (!Number.isFinite(prev) || !Number.isFinite(next)) continue;
+            const diff = next - prev;
+            if (diff > 0) diffs.push(diff);
+          }
+          if (!diffs.length) return dtBase;
+          diffs.sort((a, b) => a - b);
+          const mid = Math.floor(diffs.length / 2);
+          const stride = diffs.length % 2 ? diffs[mid] : (diffs[mid - 1] + diffs[mid]) / 2;
+          return dtBase * Math.max(1, Number(stride) || 1);
+        },
+
+        async loadPidAnalysisPrediction(payload) {
+          const basePayload = payload;
+          if (!basePayload?.points?.length) return null;
+          const allowedSections = new Set(['tuning-result', 'tuning-loop-analysis']);
+          if (this.currentPage !== 'tuning' || !allowedSections.has(this.shellSection)) return null;
+
+          const result = this.latestTuningResultData;
+          const pid = result?.pidParams;
+          const model = result?.model;
+          if (!pid || !model) return null;
+          if (!Number.isFinite(Number(pid?.Kp)) || !Number.isFinite(Number(pid?.Ki)) || !Number.isFinite(Number(pid?.Kd))) return null;
+
+          const key = this.buildPidAnalysisPredictionKey(basePayload);
+          if (key && key === this.pidAnalysisPredictionKey && this.pidAnalysisPrediction?.pv?.length === basePayload.points.length) {
+            return this.pidAnalysisPrediction;
+          }
+
+          const dtBase =
+            Number(result?.dataAnalysis?.samplingTime)
+            || Number(result?.dataAnalysis?.sampling_time_sec)
+            || Number(this.historyWindow || 1)
+            || 1;
+          const dt = this.estimatePidAnalysisSimulationDt(basePayload.points, dtBase);
+
+          this.pidAnalysisPredictionLoading = true;
+          this.pidAnalysisPredictionError = '';
+          try {
+            const response = await fetch(`${resolveApiBase()}/api/tuning/pid-prediction-curve`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                points: basePayload.points.map(item => ({
+                  sv: item.sv,
+                  pv: item.pv,
+                  mv: item.mv,
+                  index: item.index
+                })),
+                dt,
+                loop_type: pid.loopType || this.loopType || 'flow',
+                pid_params: {
+                  Kp: Number(pid.Kp),
+                  Ki: Number(pid.Ki),
+                  Kd: Number(pid.Kd)
+                },
+                model_type: model.modelType || 'FOPDT',
+                selected_model_params: model.selectedModelParams || {},
+                K: Number(model.K || 0),
+                T: Number(model.T || 0),
+                L: Number(model.L || 0)
+              })
+            });
+            if (!response.ok) {
+              this.pidAnalysisPrediction = null;
+              this.pidAnalysisPredictionKey = '';
+              this.pidAnalysisPredictionError = `HTTP ${response.status}`;
+              return null;
+            }
+            const prediction = await response.json();
+            const pvPred = Array.isArray(prediction?.pv_pred) ? prediction.pv_pred.map(Number) : [];
+            const mvPred = Array.isArray(prediction?.mv_pred) ? prediction.mv_pred.map(Number) : [];
+            const spPred = Array.isArray(prediction?.sp_pred) ? prediction.sp_pred.map(Number) : [];
+            if (pvPred.length !== basePayload.points.length) {
+              this.pidAnalysisPrediction = null;
+              this.pidAnalysisPredictionKey = '';
+              this.pidAnalysisPredictionError = 'prediction_length_mismatch';
+              return null;
+            }
+            const normalized = {
+              pv: pvPred.map(value => (Number.isFinite(value) ? value : null)),
+              mv: mvPred.length === pvPred.length ? mvPred.map(value => (Number.isFinite(value) ? value : null)) : [],
+              sp: spPred.length === pvPred.length ? spPred.map(value => (Number.isFinite(value) ? value : null)) : [],
+              spAlignOffset: Number.isFinite(Number(prediction?.sp_align_offset)) ? Number(prediction.sp_align_offset) : 0
+            };
+            this.pidAnalysisPrediction = normalized;
+            this.pidAnalysisPredictionKey = key;
+            return normalized;
+          } catch (error) {
+            this.pidAnalysisPrediction = null;
+            this.pidAnalysisPredictionKey = '';
+            this.pidAnalysisPredictionError = error?.message ? String(error.message) : 'fetch_failed';
+            return null;
+          } finally {
+            this.pidAnalysisPredictionLoading = false;
+          }
+        },
+
         buildPidAnalysisMetrics(payload) {
           if (!payload?.points?.length) {
             return {
@@ -1706,21 +1864,42 @@ createApp({
         },
 
         renderPidAnalysisChart() {
-          const element = document.getElementById('pid-analysis-chart');
-          if (!element || !window.PidAnalysisChart) return;
-          if (this.currentPage !== 'tuning' || this.shellSection !== 'tuning-result' || !this.pidAnalysisChartPayload) {
-            window.PidAnalysisChart.destroy(element);
+          if (!window.PidAnalysisChart) return;
+          const historyElement = document.getElementById('pid-analysis-chart-history') || document.getElementById('pid-analysis-chart');
+          const replayElement = document.getElementById('pid-analysis-chart-replay');
+          const allowed = this.currentPage === 'tuning' && this.shellSection === 'tuning-loop-analysis';
+
+          if (!allowed) {
+            if (historyElement) window.PidAnalysisChart.destroy(historyElement);
+            if (replayElement) window.PidAnalysisChart.destroy(replayElement);
             return;
           }
-          window.PidAnalysisChart.render(element, this.pidAnalysisChartPayload);
+
+          if (historyElement && this.pidAnalysisChartPayload) {
+            window.PidAnalysisChart.render(historyElement, this.pidAnalysisChartPayload);
+          } else if (historyElement) {
+            window.PidAnalysisChart.destroy(historyElement);
+          }
+
+          if (replayElement && this.pidReplayChartPayload) {
+            window.PidAnalysisChart.render(replayElement, this.pidReplayChartPayload);
+          } else if (replayElement) {
+            window.PidAnalysisChart.destroy(replayElement);
+          }
         },
 
         async schedulePidAnalysisChartRender() {
           const localPayload = this.buildPidAnalysisChartPayload(this.latestTuningResultData);
-          if (!localPayload && this.currentPage === 'tuning' && this.shellSection === 'tuning-result' && this.selectedTaskSession) {
+          const shouldLoadRemote = this.currentPage === 'tuning'
+            && this.shellSection === 'tuning-loop-analysis'
+            && this.selectedTaskSession;
+          if (!localPayload && shouldLoadRemote) {
             await this.loadPidAnalysisRemotePayload();
           } else if (localPayload) {
             this.pidAnalysisRemotePayload = null;
+          }
+          if (this.currentPage === 'tuning' && this.shellSection === 'tuning-loop-analysis' && this.pidAnalysisChartPayload) {
+            await this.loadPidAnalysisPrediction(this.pidAnalysisChartPayload);
           }
           this.$nextTick(() => this.renderPidAnalysisChart());
         },
@@ -2343,6 +2522,8 @@ createApp({
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = '';
+          let sawResult = false;
+          let sawError = false;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -2361,6 +2542,8 @@ createApp({
               if (dataLines.length) {
                 const payload = dataLines.join('\n');
                 const data = JSON.parse(payload);
+                if (data?.type === 'result') sawResult = true;
+                if (data?.type === 'error') sawError = true;
                 this.handleSSEMessage(data);
               }
 
@@ -2377,8 +2560,26 @@ createApp({
                 if (dataLines.length) {
                   const payload = dataLines.join('\n');
                   const data = JSON.parse(payload);
+                  if (data?.type === 'result') sawResult = true;
+                  if (data?.type === 'error') sawError = true;
                   this.handleSSEMessage(data);
                 }
+              }
+              if (!sawResult && !sawError) {
+                const message = '连接已结束，但未收到结果或错误事件。可能原因：后端重启/崩溃、网络中断、上游接口异常导致流提前断开。请刷新后重试，或查看后端日志定位原因。';
+                this.addMessage({
+                  type: 'assistant',
+                  content: `❌ 错误：${message}`
+                });
+                this.syncCurrentTaskSession({
+                  status: 'failed',
+                  error: {
+                    message: 'stream_ended_without_result',
+                    code: 'stream_ended',
+                    type: 'stream_ended_without_result',
+                    detail: message
+                  }
+                });
               }
               break;
             }
@@ -3993,8 +4194,67 @@ window: ${this.historyWindow || 1}
         pidAnalysisChartPayload() {
           return this.buildPidAnalysisChartPayload(this.latestTuningResultData) || this.pidAnalysisRemotePayload;
         },
+        pidAnalysisChartPayloadWithPrediction() {
+          const base = this.pidAnalysisChartPayload;
+          if (!base?.points?.length || !this.pidAnalysisShowPrediction) return base;
+          const key = this.buildPidAnalysisPredictionKey(base);
+          const prediction = this.pidAnalysisPrediction;
+          if (!key || key !== this.pidAnalysisPredictionKey || !prediction?.pv?.length) return base;
+          if (prediction.pv.length !== base.points.length) return base;
+          const mvPred = Array.isArray(prediction.mv) && prediction.mv.length === base.points.length ? prediction.mv : null;
+          return {
+            ...base,
+            points: base.points.map((point, idx) => ({
+              ...point,
+              pv_pred: prediction.pv[idx],
+              mv_pred: mvPred ? mvPred[idx] : null
+            }))
+          };
+        },
         pidAnalysisMetrics() {
           return this.buildPidAnalysisMetrics(this.pidAnalysisChartPayload);
+        },
+        pidReplayChartPayload() {
+          const base = this.pidAnalysisChartPayload;
+          if (!base?.points?.length) return null;
+          const key = this.buildPidAnalysisPredictionKey(base);
+          const prediction = this.pidAnalysisPrediction;
+          if (!key || key !== this.pidAnalysisPredictionKey || !prediction?.pv?.length) return null;
+          if (prediction.pv.length !== base.points.length) return null;
+          const mvPred = Array.isArray(prediction.mv) && prediction.mv.length === base.points.length ? prediction.mv : null;
+          const spPred = Array.isArray(prediction.sp) && prediction.sp.length === base.points.length ? prediction.sp : null;
+          const points = base.points
+            .map((point, idx) => {
+              const pvRaw = prediction.pv[idx];
+              const mvRaw = mvPred ? mvPred[idx] : null;
+              const svRaw = spPred ? spPred[idx] : point.sv;
+              const pv = typeof pvRaw === 'number' ? pvRaw : Number(pvRaw);
+              const sv = typeof svRaw === 'number' ? svRaw : Number(svRaw);
+              const mv = mvRaw === null || mvRaw === undefined
+                ? null
+                : (typeof mvRaw === 'number' ? mvRaw : Number(mvRaw));
+              if (!Number.isFinite(pv) || !Number.isFinite(sv)) return null;
+              return {
+                ...point,
+                pv,
+                sv,
+                sv_raw: point.sv,
+                mv: Number.isFinite(mv) ? mv : null,
+                error: sv - pv
+              };
+            })
+            .filter(Boolean);
+
+          if (!points.length) return null;
+          return {
+            ...base,
+            points,
+            leftAxisTitle: `PV(回放) / SV（${this.strategyLabLoopTypeLabel(this.loopType)}）`,
+            rightAxisTitle: 'MV(回放) (%)'
+          };
+        },
+        pidReplayMetrics() {
+          return this.buildPidAnalysisMetrics(this.pidReplayChartPayload);
         }
       },
       watch: {
@@ -4026,8 +4286,8 @@ window: ${this.historyWindow || 1}
           this.saveStrategyLabState();
         }
       },
-      mounted() {
-        this.loadTaskSessions();
+      async mounted() {
+        await this.loadTaskSessions();
         this.loadStrategyLabState();
         this.shellSection = this.shellSecondaryItemsFor(this.currentPage)[0]?.id || '';
         this.bindShellSecondaryFallback();

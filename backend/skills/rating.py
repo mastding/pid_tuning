@@ -920,6 +920,226 @@ class ModelRating:
             'mv_history': mv_hist.tolist(),
             'sp_history': sp_hist.tolist(),
         }
+
+    @staticmethod
+    def simulate_setpoint_trajectory(
+        model_params: Dict,
+        pid_params: Dict,
+        sp_series: List[float],
+        *,
+        pv_initial: float | None = None,
+        mv_initial: float | None = None,
+        dt: float = 1.0,
+        loop_type: str = "flow",
+    ) -> Dict:
+        eps = 1e-10
+
+        model_type = str(model_params.get("model_type", "FOPDT")).upper()
+        K = float(model_params.get("K", 1.0))
+        T1 = float(model_params.get("T1", 10.0))
+        T2 = float(model_params.get("T2", 0.0))
+        L = float(model_params.get("L", 0.0))
+        T1 = max(T1, eps)
+        T2 = max(T2, 0.0)
+        L = max(L, 0.0)
+
+        if "Kp" in pid_params:
+            Kp = float(pid_params["Kp"])
+            Ki = float(pid_params.get("Ki", 0.0) or 0.0)
+            Kd = float(pid_params.get("Kd", 0.0) or 0.0)
+        elif "kp" in pid_params:
+            Kp = float(pid_params["kp"])
+            Ki = float(pid_params.get("ki", 0.0) or 0.0)
+            Kd = float(pid_params.get("kd", 0.0) or 0.0)
+        else:
+            pb = float(pid_params.get("pb", 100.0) or 100.0)
+            ti = float(pid_params.get("ti", 0.0) or 0.0)
+            td = float(pid_params.get("td", 0.0) or 0.0)
+            Kp = 100.0 / pb if pb > 0 else 1.0
+            Ki = Kp / ti if ti > 0 else 0.0
+            Kd = Kp * td
+
+        sp_series = [float(x) for x in (sp_series or [])]
+        if not sp_series:
+            return {
+                "pv_history": [],
+                "mv_history": [],
+                "sp_history": [],
+                "dt": float(dt),
+                "model_type": model_type,
+            }
+
+        if pv_initial is None:
+            pv_initial = sp_series[0]
+        if mv_initial is None:
+            mv_initial = 50.0
+
+        n_steps = len(sp_series)
+        pv_hist = np.zeros(n_steps)
+        mv_hist = np.zeros(n_steps)
+        sp_hist = np.zeros(n_steps)
+
+        delta_pv = 0.0
+        delta_x2 = 0.0
+        integral = 0.0
+        prev_error = 0.0
+
+        from collections import deque
+
+        delay_steps = int(L / max(float(dt), eps))
+        delta_mv_buf = deque([0.0] * (delay_steps + 1))
+
+        mv0 = float(np.clip(mv_initial, 0.0, 100.0))
+
+        for t in range(n_steps):
+            sp = sp_series[t]
+            sp_hist[t] = sp
+
+            pv = float(pv_initial) + float(delta_pv)
+            pv_hist[t] = pv
+
+            error = sp - pv
+            integral += error * float(dt)
+            integral_limit = 100.0 / (abs(Ki) + eps)
+            integral = float(np.clip(integral, -integral_limit, integral_limit))
+            derivative = (error - prev_error) / float(dt) if t > 0 else 0.0
+
+            mv = mv0 + Kp * error + Ki * integral + Kd * derivative
+            mv = float(np.clip(mv, 0.0, 100.0))
+            delta_mv = mv - mv0
+
+            mv_hist[t] = mv
+            prev_error = error
+
+            delta_mv_buf.append(delta_mv)
+            delta_mv_delayed = float(delta_mv_buf.popleft())
+
+            if model_type == "IPDT":
+                delta_pv = float(delta_pv) + K * delta_mv_delayed * float(dt)
+                continue
+
+            alpha1 = float(dt) / float(T1)
+            if T2 > eps:
+                alpha2 = float(dt) / max(float(T2), float(T1) * 0.1)
+                delta_pv_new = float(delta_pv) + alpha1 * (K * delta_mv_delayed - float(delta_pv))
+                delta_x2 = float(delta_x2) + alpha2 * (delta_pv_new - float(delta_x2))
+                delta_pv = float(delta_x2)
+            else:
+                delta_pv = float(delta_pv) + alpha1 * (K * delta_mv_delayed - float(delta_pv))
+
+        return {
+            "pv_history": pv_hist.tolist(),
+            "mv_history": mv_hist.tolist(),
+            "sp_history": sp_hist.tolist(),
+            "dt": float(dt),
+            "model_type": model_type,
+        }
+
+    @staticmethod
+    def evaluate_replay(
+        model_params: Dict,
+        pid_params: Dict,
+        sp_series: List[float],
+        *,
+        pv_initial: float | None = None,
+        mv_initial: float | None = None,
+        dt: float = 1.0,
+        loop_type: str = "flow",
+        preview_points: int = 480,
+    ) -> Dict:
+        sim = ModelRating.simulate_setpoint_trajectory(
+            model_params=model_params,
+            pid_params=pid_params,
+            sp_series=sp_series,
+            pv_initial=pv_initial,
+            mv_initial=mv_initial,
+            dt=dt,
+            loop_type=loop_type,
+        )
+
+        pv = np.asarray(sim.get("pv_history") or [], dtype=float)
+        mv = np.asarray(sim.get("mv_history") or [], dtype=float)
+        sp = np.asarray(sim.get("sp_history") or [], dtype=float)
+        n = int(min(len(pv), len(mv), len(sp)))
+        if n <= 1:
+            return {
+                "tracking_score": 0.0,
+                "metrics": {"points": n},
+                "simulation_preview": {
+                    "pv": pv.tolist(),
+                    "mv": mv.tolist(),
+                    "sp": sp.tolist(),
+                    "dt": float(dt),
+                    "model_type": str(sim.get("model_type", "")),
+                },
+            }
+
+        pv = pv[:n]
+        mv = mv[:n]
+        sp = sp[:n]
+        err = sp - pv
+        abs_err = np.abs(err)
+
+        sp_range = float(np.max(sp) - np.min(sp))
+        denom = sp_range if sp_range > 1e-9 else max(float(np.mean(np.abs(sp))), 1.0)
+
+        mae = float(np.mean(abs_err))
+        rmse = float(np.sqrt(np.mean(err**2)))
+        max_abs_err = float(np.max(abs_err))
+        iae = float(np.sum(abs_err) * float(dt))
+        ise = float(np.sum(err**2) * float(dt))
+
+        eps = 1e-9
+        sat_mask = (mv <= (0.0 + eps)) | (mv >= (100.0 - eps))
+        saturation_pct = float(np.mean(sat_mask) * 100.0)
+        mv_total_variation = float(np.sum(np.abs(np.diff(mv))))
+
+        zero_cross = np.where(np.diff(np.signbit(err)))[0]
+        oscillation_count = int(len(zero_cross) // 2)
+
+        mae_pct = mae / denom * 100.0
+        rmse_pct = rmse / denom * 100.0
+        max_err_pct = max_abs_err / denom * 100.0
+
+        tracking_base = 10.0 * float(np.exp(-rmse_pct / 12.0))
+        peak_penalty = min(3.5, max_err_pct / 25.0)
+        sat_penalty = min(4.0, saturation_pct / 20.0)
+        osc_penalty = min(2.0, oscillation_count / 6.0)
+        tracking_score = float(np.clip(tracking_base - peak_penalty - sat_penalty - osc_penalty, 0.0, 10.0))
+        tracking_score = float(round(tracking_score, 2))
+
+        preview_points = int(preview_points or 0)
+        if preview_points <= 0 or n <= preview_points:
+            preview_idx = np.arange(n, dtype=int)
+        else:
+            preview_idx = np.linspace(0, n - 1, preview_points, dtype=int)
+
+        return {
+            "tracking_score": tracking_score,
+            "metrics": {
+                "points": n,
+                "dt": float(dt),
+                "sp_range": float(sp_range),
+                "mae": mae,
+                "rmse": rmse,
+                "max_abs_error": max_abs_err,
+                "iae": iae,
+                "ise": ise,
+                "mae_pct": float(round(mae_pct, 4)),
+                "rmse_pct": float(round(rmse_pct, 4)),
+                "max_abs_error_pct": float(round(max_err_pct, 4)),
+                "saturation_pct": float(round(saturation_pct, 4)),
+                "mv_total_variation": float(round(mv_total_variation, 6)),
+                "oscillation_count": oscillation_count,
+            },
+            "simulation_preview": {
+                "pv": pv[preview_idx].tolist(),
+                "mv": mv[preview_idx].tolist(),
+                "sp": sp[preview_idx].tolist(),
+                "dt": float(dt),
+                "model_type": str(sim.get("model_type", "")),
+            },
+        }
     
     @staticmethod
     def evaluate(model_params: Dict, pid_params: Dict,

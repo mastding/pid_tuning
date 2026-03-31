@@ -52,7 +52,10 @@ from orchestration.event_mapper import (
 )
 from orchestration.agent_factory import create_pid_agents as orchestration_create_pid_agents
 from orchestration.constants import DISPLAY_AGENT_NAMES
-from orchestration.workflow_runner import run_multi_agent_collaboration as orchestration_run_multi_agent_collaboration
+from orchestration.workflow_runner import (
+    _build_tuning_advice,
+    run_multi_agent_collaboration as orchestration_run_multi_agent_collaboration,
+)
 from api.tune_app import create_app
 from memory.experience_service import build_experience_record, persist_experience_record, register_experience_reuse
 from state.session_store import SessionStore
@@ -353,6 +356,171 @@ async def run_multi_agent_collaboration(
     window: int,
     llm_config: Dict[str, Any],
 ) -> AsyncGenerator[Dict[str, Any], None]:
+    async def _fallback_without_llm() -> AsyncGenerator[Dict[str, Any], None]:
+        shared_data: Dict[str, Any] = {}
+        _shared_data_store.clear()
+        _shared_data_store["loop_name"] = loop_name
+        _shared_data_store["loop_type"] = loop_type
+        _shared_data_store["plant_type"] = plant_type
+        _shared_data_store["scenario"] = scenario
+        _shared_data_store["control_object"] = control_object
+
+        effective_csv_path = csv_path
+        if not effective_csv_path:
+            fetch_result = await tool_fetch_history_data(
+                loop_uri=loop_uri,
+                start_time=start_time,
+                end_time=end_time,
+                data_type=data_type,
+                window=int(window or 1),
+            )
+            shared_data.update(fetch_result)
+            effective_csv_path = str(fetch_result.get("csv_path") or "")
+
+        load_result = await tool_load_data(effective_csv_path)
+        shared_data.update(load_result)
+        dt = float(_shared_data_store.get("dt", 1.0) or 1.0)
+
+        id_result = await tool_fit_fopdt(dt=dt)
+        shared_data.update(id_result)
+
+        knowledge_result = await tool_query_expert_knowledge(
+            loop_type=loop_type,
+            loop_name=loop_name,
+            plant_type=plant_type,
+            scenario=scenario,
+            control_object=control_object,
+        )
+        shared_data.update({"knowledge_guidance": knowledge_result})
+
+        model_type_value = str(_shared_data_store.get("model_type", "FOPDT"))
+        selected_model_params = _shared_data_store.get("selected_model_params") or {}
+        tune_result = await tool_tune_pid(
+            loop_type=loop_type,
+            model_type=model_type_value,
+            selected_model_params=selected_model_params,
+        )
+        shared_data.update(tune_result)
+
+        evaluation_result = await tool_evaluate_pid(
+            model_type=model_type_value,
+            selected_model_params=selected_model_params,
+            method="auto",
+        )
+        shared_data.update(evaluation_result)
+
+        quality_metrics = shared_data.get("quality_metrics") or {}
+        effective_pid_params = _shared_data_store.get("selected_pid_params") or {}
+        final_result: Dict[str, Any] = {
+            "dataAnalysis": {
+                "dataPoints": shared_data.get("data_points", 0),
+                "windowPoints": shared_data.get("window_points", 0),
+                "stepEvents": len(shared_data.get("step_events") or []),
+                "stepEventDetails": shared_data.get("step_events") or [],
+                "currentIAE": quality_metrics.get("IAE", 0.0),
+                "samplingTime": shared_data.get("sampling_time", 1.0),
+                "selectedWindow": shared_data.get("selected_window", {}),
+                "historyRange": {
+                    "startTime": shared_data.get("start_time", start_time),
+                    "endTime": shared_data.get("end_time", end_time),
+                },
+                "qualityMetrics": quality_metrics,
+            },
+            "model": {
+                "modelType": _shared_data_store.get("model_type", "FOPDT"),
+                "selectedModelParams": _shared_data_store.get("selected_model_params", {}),
+                "modelSelectionReason": _shared_data_store.get("model_selection_reason", ""),
+                "K": _shared_data_store.get("K", 0.0),
+                "T": _shared_data_store.get("T", 0.0),
+                "L": _shared_data_store.get("L", 0.0),
+                "confidence": (_shared_data_store.get("model_confidence") or {}).get("confidence", 0.0),
+                "residue": _shared_data_store.get("residue", 0.0),
+                "normalizedRmse": _shared_data_store.get("normalized_rmse", _shared_data_store.get("residue", 0.0)),
+                "rawRmse": _shared_data_store.get("raw_rmse", 0.0),
+                "r2Score": _shared_data_store.get("r2_score", 0.0),
+                "confidenceQuality": (_shared_data_store.get("model_confidence") or {}).get("quality", ""),
+                "confidenceRecommendation": (_shared_data_store.get("model_confidence") or {}).get("recommendation", ""),
+                "reasonCodes": _shared_data_store.get("model_reason_codes", []),
+                "nextActions": _shared_data_store.get("model_next_actions", []),
+                "selectedWindowSource": _shared_data_store.get("model_selected_source", ""),
+                "attempts": _shared_data_store.get("model_attempts", []),
+                "fitPreview": _shared_data_store.get("fit_preview", {"points": []}),
+                "windowOverview": _shared_data_store.get("window_overview", {"points": []}),
+            },
+            "pidParams": {
+                "Kp": effective_pid_params.get("Kp", shared_data.get("Kp", 0.0)),
+                "Ki": effective_pid_params.get("Ki", shared_data.get("Ki", 0.0)),
+                "Kd": effective_pid_params.get("Kd", shared_data.get("Kd", 0.0)),
+                "Ti": effective_pid_params.get("Ti", shared_data.get("Ti", 0.0)),
+                "Td": effective_pid_params.get("Td", shared_data.get("Td", 0.0)),
+                "strategy": effective_pid_params.get("strategy", _shared_data_store.get("strategy_used", "")),
+                "strategyRequested": _shared_data_store.get("strategy_requested", "AUTO"),
+                "strategyUsed": _shared_data_store.get("strategy_used", ""),
+                "loopType": loop_type,
+                "selectionReason": _shared_data_store.get("selection_reason", ""),
+                "selectionInputs": _shared_data_store.get("selection_inputs", {}),
+                "experienceGuidance": _shared_data_store.get("experience_guidance", {}),
+                "candidateStrategies": _shared_data_store.get("pid_candidate_results", []),
+                "description": effective_pid_params.get("description", ""),
+            },
+            "knowledge": {
+                "guidance": _shared_data_store.get("expert_knowledge_guidance", {}),
+            },
+        }
+
+        if "final_rating" in shared_data:
+            final_result["evaluation"] = {
+                "performance_score": shared_data.get("performance_score", 0.0),
+                "method_confidence": shared_data.get("method_confidence", 0.0),
+                "final_rating": shared_data.get("final_rating", 0.0),
+                "strategy_used": _shared_data_store.get("strategy_used", ""),
+                "passed": shared_data.get("passed", False),
+                "pass_threshold": shared_data.get("pass_threshold", 7.0),
+                "failure_reason": shared_data.get("failure_reason", ""),
+                "feedback_target": shared_data.get("feedback_target", ""),
+                "feedback_target_display": shared_data.get("feedback_target_display", ""),
+                "feedback_action": shared_data.get("feedback_action", ""),
+                "initial_assessment": shared_data.get("initial_assessment", {}),
+                "auto_refine_result": shared_data.get("auto_refine_result", {}),
+                "model_retry_result": shared_data.get("model_retry_result", {}),
+                "performance_details": shared_data.get("performance_details", {}),
+                "final_details": shared_data.get("final_details", {}),
+            }
+
+        final_result["tuningAdvice"] = _build_tuning_advice(final_result)
+        experience_record = build_experience_record(
+            loop_name=loop_name,
+            loop_type=loop_type,
+            loop_uri=loop_uri,
+            data_source="csv" if csv_path else "history",
+            start_time=shared_data.get("start_time", start_time),
+            end_time=shared_data.get("end_time", end_time),
+            shared_data=shared_data,
+            final_result=final_result,
+        )
+        experience_id = persist_experience_record(experience_record)
+        referenced_experience_ids = experience_record.get("referenced_experience_ids") or []
+        reuse_summary = {}
+        if referenced_experience_ids:
+            reuse_summary = register_experience_reuse(
+                referenced_experience_ids,
+                follow_up_passed=bool(final_result.get("evaluation", {}).get("passed", False)),
+                follow_up_final_rating=float(final_result.get("evaluation", {}).get("final_rating", 0.0) or 0.0),
+            )
+        final_result["memory"] = {
+            "experienceId": experience_id,
+            "experienceGuidance": _shared_data_store.get("experience_guidance", {}),
+            "referenceReuse": reuse_summary,
+        }
+
+        yield {
+            "type": "thought",
+            "agent": "系统",
+            "content": "检测到上游模型服务不可用，已自动切换为本地整定流程。",
+        }
+        yield {"type": "result", "data": final_result}
+        yield {"type": "done", "status": "succeeded"}
+
     async for event in orchestration_run_multi_agent_collaboration(
         csv_path=csv_path,
         loop_name=loop_name,
@@ -376,7 +544,19 @@ async def run_multi_agent_collaboration(
         register_experience_reuse=register_experience_reuse,
         to_jsonable=_to_jsonable,
     ):
+        if event.get("type") != "error":
+            yield event
+            continue
+
+        detail = str(event.get("error_detail") or event.get("message") or "")
+        lowered = detail.lower()
+        if "insufficient balance" in lowered or "error code: 402" in lowered:
+            async for fallback_event in _fallback_without_llm():
+                yield fallback_event
+            return
+
         yield event
+        return
 
 
 # ============ FastAPI Web服务 ============

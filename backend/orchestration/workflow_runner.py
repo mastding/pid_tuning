@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import ast
 import asyncio
@@ -429,6 +429,7 @@ async def run_multi_agent_collaboration(
                 "model_retry_result": shared_data.get("model_retry_result", {}),
                 "performance_details": shared_data.get("performance_details", {}),
                 "final_details": shared_data.get("final_details", {}),
+                "replay_evaluation": shared_data.get("replay_evaluation", {}),
             }
 
         final_result["tuningAdvice"] = _build_tuning_advice(final_result)

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -377,6 +377,9 @@
             <button type="button" @click="selectedTaskSessionId && openTaskSessionFromWorkbench(selectedTaskSessionId, 'tuning-result')" :disabled="!selectedTaskSessionId" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed">
               查看调参结果
             </button>
+            <button type="button" @click="selectedTaskSessionId && openTaskSessionFromWorkbench(selectedTaskSessionId, 'tuning-loop-analysis')" :disabled="!selectedTaskSessionId" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed">
+              查看回路分析
+            </button>
             <button type="button" @click="selectedTaskSessionId && openTaskSessionFromWorkbench(selectedTaskSessionId, 'tuning-explain')" :disabled="!selectedTaskSessionId" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed">
               查看解释详情
             </button>
@@ -634,6 +637,7 @@
                 <table class="min-w-full text-sm">
                   <thead class="bg-slate-50 text-slate-600">
                     <tr>
+                      <th class="px-5 py-4 text-left font-semibold">任务ID</th>
                       <th class="px-5 py-4 text-left font-semibold">任务会话</th>
                       <th class="px-5 py-4 text-left font-semibold">数据来源</th>
                       <th class="px-5 py-4 text-left font-semibold">状态</th>
@@ -644,6 +648,9 @@
                   </thead>
                   <tbody>
                     <tr v-for="item in filteredTaskSessionRows" :key="item.id" class="border-t border-slate-200">
+                      <td class="px-5 py-4 text-slate-700">
+                        <div class="font-mono text-xs text-slate-600 break-all">{{ item.id }}</div>
+                      </td>
                       <td class="px-5 py-4 align-top">
                         <div class="font-semibold text-slate-900">{{ item.title }}</div>
                         <div class="mt-1 text-xs text-slate-500">回路：{{ item.context?.loopName || '-' }} · 工况：{{ item.scenarioLabel || '-' }}</div>
@@ -883,37 +890,14 @@
                       </div>
                     </div>
                   </div>
-                  <div v-if="pidAnalysisChartPayload" class="mt-6 space-y-4">
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-                      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <div class="text-xs text-slate-500">IAE</div>
-                        <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.iae, 3) }}</div>
+                  <div class="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                    <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div class="font-semibold text-slate-900">PID 回路分析趋势图</div>
+                        <div class="mt-1 text-xs text-slate-500">历史回路趋势与整定参数回放趋势已移动到“回路分析”子菜单中查看。</div>
                       </div>
-                      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <div class="text-xs text-slate-500">最大偏差</div>
-                        <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.maxError, 3) }}</div>
-                      </div>
-                      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <div class="text-xs text-slate-500">稳态误差</div>
-                        <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.steadyStateError, 3) }}</div>
-                      </div>
-                      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <div class="text-xs text-slate-500">MV 峰值</div>
-                        <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.mvPeak, 2) }}%</div>
-                      </div>
+                      <button type="button" class="shell-inline-action is-accent" @click="shellSection = 'tuning-loop-analysis'">打开回路分析</button>
                     </div>
-                    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div class="flex items-center justify-between gap-3">
-                        <div>
-                          <div class="text-sm font-semibold text-slate-900">PID 回路分析图</div>
-                          <div class="mt-1 text-xs text-slate-500">PV / SV 采用左轴，MV 采用右轴；浅蓝填充用于辅助观察偏差面积趋势。</div>
-                        </div>
-                      </div>
-                      <div id="pid-analysis-chart" class="mt-4 h-[420px] w-full"></div>
-                    </div>
-                  </div>
-                  <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-                    当前结果还没有足够的 PV / SV / MV 时序数据，暂时无法生成 PID 回路分析图。
                   </div>
                 </div>
                 <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -937,6 +921,127 @@
             </div>
             <div v-else class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
               还没有生成可查看的调参结果。请先在“工作台”发起整定，或切换到“执行过程”查看智能体运行状态。
+            </div>
+          </div>
+
+          <div v-if="currentPage === 'tuning' && shellSection === 'tuning-loop-analysis'" class="space-y-6">
+            <div v-if="!selectedTaskSessionId" class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
+              请先在“任务会话”中选择一条整定任务，再查看对应的回路分析趋势图。
+            </div>
+            <div v-else-if="latestTuningResultData" class="space-y-6">
+              <div class="rounded-2xl border border-indigo-200 bg-white p-6 shadow-sm">
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-semibold uppercase tracking-[0.12em] text-indigo-600">回路分析</div>
+                    <h2 class="mt-2 text-2xl font-bold text-slate-800">历史趋势与整定回放趋势对比</h2>
+                    <p class="mt-2 text-sm leading-6 text-slate-600">历史趋势展示原始 PV / SV / MV；回放趋势使用整定 PID 参数与辨识模型，在相同 SV 序列下进行闭环回放仿真。</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div class="flex items-center justify-between gap-3">
+                    <div>
+                      <div class="text-sm font-semibold text-slate-900">历史数据回路分析图</div>
+                      <div class="mt-1 text-xs text-slate-500">PV / SV 采用左轴，MV 采用右轴；浅蓝填充用于辅助观察偏差面积趋势。</div>
+                    </div>
+                  </div>
+                  <div v-if="pidAnalysisChartPayload" class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div class="text-xs text-slate-500">IAE</div>
+                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.iae, 3) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div class="text-xs text-slate-500">最大偏差</div>
+                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.maxError, 3) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div class="text-xs text-slate-500">稳态误差</div>
+                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.steadyStateError, 3) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div class="text-xs text-slate-500">MV 峰值</div>
+                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.mvPeak, 2) }}%</div>
+                    </div>
+                  </div>
+                  <div v-if="pidAnalysisChartPayload" id="pid-analysis-chart-history" class="mt-4 h-[420px] w-full"></div>
+                  <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                    当前会话还没有足够的 PV / SV / MV 时序数据，暂时无法生成历史回路分析图。
+                  </div>
+                </div>
+
+                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div class="flex items-center justify-between gap-3">
+                    <div>
+                      <div class="text-sm font-semibold text-slate-900">整定参数回放分析图</div>
+                      <div class="mt-1 text-xs text-slate-500">使用整定后的 PID 参数与辨识模型，在历史 SV 序列下进行闭环回放仿真。</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span v-if="pidAnalysisPredictionLoading" class="text-[11px] text-slate-400">回放加载中</span>
+                      <span v-else-if="pidAnalysisPredictionError" class="text-[11px] text-rose-500">生成失败</span>
+                      <span v-else-if="!pidReplayChartPayload" class="text-[11px] text-slate-400">未生成</span>
+                      <button type="button" class="shell-inline-action" @click="schedulePidAnalysisChartRender()">重新生成</button>
+                    </div>
+                  </div>
+                  <div v-if="pidAnalysisPrediction?.spAlignOffset" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <div class="font-semibold">提示：已自动对齐 SV</div>
+                    <div class="mt-1 text-xs text-amber-800">检测到历史 SV 与 PV 量纲差异较大，本次回放仿真将 SV 整体平移 {{ formatNumber(pidAnalysisPrediction.spAlignOffset, 3) }} 以与初始 PV 对齐，避免控制量长期饱和。</div>
+                  </div>
+                  <div v-if="pidAnalysisPredictionError" class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                    回放仿真生成失败：{{ pidAnalysisPredictionError }}
+                  </div>
+
+                  <div v-if="pidReplayChartPayload" class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div class="text-xs text-slate-500">IAE</div>
+                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.iae, 3) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div class="text-xs text-slate-500">最大偏差</div>
+                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.maxError, 3) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div class="text-xs text-slate-500">稳态误差</div>
+                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.steadyStateError, 3) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div class="text-xs text-slate-500">MV 峰值</div>
+                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.mvPeak, 2) }}%</div>
+                    </div>
+                  </div>
+
+                  <div v-if="latestTuningResultData.evaluation?.replay_evaluation?.metrics" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                    <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">回放指标</div>
+                    <div class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <div class="text-xs text-slate-500">RMSE%</div>
+                        <div class="mt-1 font-semibold text-slate-900">{{ formatNumber(latestTuningResultData.evaluation.replay_evaluation.metrics.rmse_pct, 3) }}</div>
+                      </div>
+                      <div>
+                        <div class="text-xs text-slate-500">MAE%</div>
+                        <div class="mt-1 font-semibold text-slate-900">{{ formatNumber(latestTuningResultData.evaluation.replay_evaluation.metrics.mae_pct, 3) }}</div>
+                      </div>
+                      <div>
+                        <div class="text-xs text-slate-500">饱和占比</div>
+                        <div class="mt-1 font-semibold text-slate-900">{{ formatNumber(latestTuningResultData.evaluation.replay_evaluation.metrics.saturation_pct, 2) }}%</div>
+                      </div>
+                      <div>
+                        <div class="text-xs text-slate-500">振荡次数</div>
+                        <div class="mt-1 font-semibold text-slate-900">{{ latestTuningResultData.evaluation.replay_evaluation.metrics.oscillation_count ?? '-' }}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="pidReplayChartPayload" id="pid-analysis-chart-replay" class="mt-4 h-[420px] w-full"></div>
+                  <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                    暂时无法生成回放分析图：需要可用的 SV 序列与整定后的 PID 参数。
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
+              还没有生成可查看的回路分析数据。请先在“工作台”发起整定，或切换到“执行过程”查看智能体运行状态。
             </div>
           </div>
 

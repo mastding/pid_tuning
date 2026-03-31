@@ -3,13 +3,14 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import math
 import os
 import tempfile
 import uuid
 from typing import Any, AsyncGenerator, Callable, Dict
 
 import httpx
-from fastapi import FastAPI, File, Form, Header, UploadFile
+from fastapi import FastAPI, File, Form, Header, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -37,11 +38,13 @@ from memory.experience_service import (
     retrieve_experience_guidance,
 )
 from services.data_service import load_pid_dataset
+from services.pid_tuning_service import _build_model_params_for_evaluation
 from services.system_config_service import (
     get_runtime_system_config,
     update_runtime_system_config,
 )
 from skills.data_analysis_skills import fetch_history_data_csv
+from skills.rating import ModelRating
 from state.workflow_task_store import WorkflowTaskStore
 
 RunCollaborationFn = Callable[..., AsyncGenerator[Dict[str, Any], None]]
@@ -146,6 +149,31 @@ class PidChartDataRequest(BaseModel):
     start_time: str = Field(..., description="开始时间")
     end_time: str = Field(..., description="结束时间")
     window: int = Field(1, description="历史数据时间戳间隔（秒）")
+
+
+class PidPredictionPointPayload(BaseModel):
+    sv: float = Field(..., description="SV")
+    pv: float = Field(..., description="PV")
+    mv: float = Field(..., description="MV")
+    index: int | None = Field(None, description="采样索引")
+
+
+class PidPredictionPidPayload(BaseModel):
+    Kp: float = Field(..., description="Kp")
+    Ki: float = Field(..., description="Ki")
+    Kd: float = Field(..., description="Kd")
+
+
+class PidPredictionCurveRequest(BaseModel):
+    points: list[PidPredictionPointPayload] = Field(..., description="回路分析图点序列")
+    dt: float = Field(1.0, description="点间隔（秒）")
+    loop_type: str = Field("flow", description="回路类型")
+    pid_params: PidPredictionPidPayload
+    model_type: str = Field("FOPDT", description="模型类型")
+    selected_model_params: Dict[str, Any] = Field(default_factory=dict, description="模型参数")
+    K: float = Field(0.0, description="过程增益K")
+    T: float = Field(0.0, description="时间常数T")
+    L: float = Field(0.0, description="纯滞后L")
 
 
 def _normalize_loop_type(loop_type: str) -> str:
@@ -779,6 +807,18 @@ def create_app(
     async def case_library_similar(case_id: str, limit: int = 5) -> JSONResponse:
         return JSONResponse({"items": list_similar_case_library_items(case_id, limit=limit)})
 
+    @app.get("/api/task-sessions")
+    async def get_task_sessions() -> JSONResponse:
+        from state.frontend_sessions import get_frontend_sessions
+        return JSONResponse(get_frontend_sessions())
+
+    @app.post("/api/task-sessions")
+    async def save_task_sessions(request: Request) -> JSONResponse:
+        from state.frontend_sessions import save_frontend_sessions
+        payload = await request.json()
+        save_frontend_sessions(payload)
+        return JSONResponse({"status": "ok"})
+
     @app.get("/api/system-config")
     async def system_config_get() -> JSONResponse:
         return JSONResponse(get_runtime_system_config())
@@ -920,6 +960,84 @@ def create_app(
                     os.remove(csv_path)
                 except Exception:
                     pass
+
+    @app.post("/api/tuning/pid-prediction-curve")
+    async def tuning_pid_prediction_curve(payload: PidPredictionCurveRequest) -> JSONResponse:
+        try:
+            points = payload.points or []
+            if not points:
+                return JSONResponse({"pv_pred": [], "mv_pred": [], "sp_pred": [], "dt": float(payload.dt or 1.0)})
+
+            dt = float(payload.dt or 1.0)
+            dt = max(dt, 1e-6)
+            loop_type = _normalize_loop_type(payload.loop_type)
+
+            sp_series = [float(item.sv) for item in points]
+            pv_initial = float(points[0].pv)
+            mv_initial = float(points[0].mv)
+            sp_align_offset = 0.0
+            try:
+                if sp_series:
+                    sp0 = float(sp_series[0])
+                    sp_min = float(min(sp_series))
+                    sp_max = float(max(sp_series))
+                    sp_range = sp_max - sp_min
+                    candidate_offset = pv_initial - sp0
+                    if abs(candidate_offset) > max(3.0 * max(sp_range, 1e-6), 1.0):
+                        sp_series = [float(value) + float(candidate_offset) for value in sp_series]
+                        sp_align_offset = float(candidate_offset)
+            except Exception:
+                sp_align_offset = 0.0
+
+            model_params = _build_model_params_for_evaluation(
+                model_type=payload.model_type,
+                selected_model_params=payload.selected_model_params,
+                K=float(payload.K or 0.0),
+                T=float(payload.T or 0.0),
+                L=float(payload.L or 0.0),
+            )
+
+            sim = ModelRating.simulate_setpoint_trajectory(
+                model_params=model_params,
+                pid_params={"Kp": float(payload.pid_params.Kp), "Ki": float(payload.pid_params.Ki), "Kd": float(payload.pid_params.Kd)},
+                sp_series=sp_series,
+                pv_initial=pv_initial,
+                mv_initial=mv_initial,
+                dt=dt,
+                loop_type=loop_type,
+            )
+
+            def _json_safe_series(values: Any) -> list[float | None]:
+                if not isinstance(values, list):
+                    return []
+                safe: list[float | None] = []
+                for item in values:
+                    try:
+                        value = float(item)
+                    except Exception:
+                        safe.append(None)
+                        continue
+                    safe.append(value if math.isfinite(value) else None)
+                return safe
+
+            return JSONResponse(
+                {
+                    "pv_pred": _json_safe_series(sim.get("pv_history")),
+                    "mv_pred": _json_safe_series(sim.get("mv_history")),
+                    "sp_pred": _json_safe_series(sim.get("sp_history")),
+                    "dt": float(sim.get("dt", dt)),
+                    "model_type": sim.get("model_type") or str(model_params.get("model_type") or payload.model_type or ""),
+                    "sp_align_offset": sp_align_offset,
+                }
+            )
+        except Exception as exc:
+            return JSONResponse(
+                {
+                    "error": "pid_prediction_curve_error",
+                    "detail": str(exc),
+                },
+                status_code=400,
+            )
 
     @app.get("/api/strategy-lab/cases")
     async def strategy_lab_cases() -> JSONResponse:

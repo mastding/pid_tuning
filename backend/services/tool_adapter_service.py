@@ -657,6 +657,103 @@ def evaluate_pid_tool(
                     "Kd": Kd,
                 }
 
+    replay_evaluation: Dict[str, Any] | None = None
+    try:
+        sp_series: list[float] = []
+        pv_initial: float | None = None
+        mv_initial: float | None = None
+        replay_source = ""
+        window_df = session_store.get("window_df")
+        if window_df is not None and hasattr(window_df, "columns") and "SV" in getattr(window_df, "columns", []):
+            sp_series = [float(x) for x in window_df["SV"].tolist()]
+            replay_source = "window_df"
+            if "PV" in window_df.columns:
+                try:
+                    pv_initial = float(window_df["PV"].iloc[0])
+                except Exception:
+                    pv_initial = None
+            if "MV" in window_df.columns:
+                try:
+                    mv_initial = float(window_df["MV"].iloc[0])
+                except Exception:
+                    mv_initial = None
+
+        if not sp_series:
+            overview = session_store.get("window_overview") or {}
+            points = overview.get("points") or []
+            sp_series = [float(p.get("sv")) for p in points if p.get("sv") is not None]
+            replay_source = "window_overview" if sp_series else ""
+            if points:
+                first = points[0] or {}
+                pv_value = first.get("pv")
+                mv_value = first.get("mv")
+                pv_initial = float(pv_value) if pv_value is not None else pv_initial
+                mv_initial = float(mv_value) if mv_value is not None else mv_initial
+
+        if sp_series:
+            sp_align_offset = 0.0
+            try:
+                sp0 = float(sp_series[0])
+                sp_min = float(min(sp_series))
+                sp_max = float(max(sp_series))
+                sp_range = sp_max - sp_min
+                if pv_initial is not None:
+                    candidate_offset = float(pv_initial) - sp0
+                    if abs(candidate_offset) > max(3.0 * max(sp_range, 1e-6), 1.0):
+                        sp_series = [float(value) + float(candidate_offset) for value in sp_series]
+                        sp_align_offset = float(candidate_offset)
+            except Exception:
+                sp_align_offset = 0.0
+
+            if active_model_type == "SOPDT":
+                replay_model_params = {
+                    "model_type": "SOPDT",
+                    "K": float(selected_model_params.get("K", K)),
+                    "T1": float(selected_model_params.get("T1", T)),
+                    "T2": float(selected_model_params.get("T2", 0.0)),
+                    "L": float(selected_model_params.get("L", L)),
+                }
+            elif active_model_type == "IPDT":
+                replay_model_params = {
+                    "model_type": "IPDT",
+                    "K": float(selected_model_params.get("K", K)),
+                    "T1": 1.0,
+                    "T2": 0.0,
+                    "L": max(float(selected_model_params.get("L", L)), 1e-3),
+                }
+            elif active_model_type == "FO":
+                replay_model_params = {
+                    "model_type": "FO",
+                    "K": float(selected_model_params.get("K", K)),
+                    "T1": float(selected_model_params.get("T", T)),
+                    "T2": 0.0,
+                    "L": 0.0,
+                }
+            else:
+                replay_model_params = {
+                    "model_type": "FOPDT",
+                    "K": float(selected_model_params.get("K", K)),
+                    "T1": float(selected_model_params.get("T", T)),
+                    "T2": 0.0,
+                    "L": float(selected_model_params.get("L", L)),
+                }
+
+            from skills.rating import ModelRating
+
+            replay_evaluation = ModelRating.evaluate_replay(
+                model_params=replay_model_params,
+                pid_params={"Kp": float(Kp), "Ki": float(Ki), "Kd": float(Kd)},
+                sp_series=sp_series,
+                pv_initial=pv_initial,
+                mv_initial=mv_initial,
+                dt=float(session_store.get("dt", 1.0)),
+                loop_type=str(session_store.get("loop_type", "flow")),
+            )
+            replay_evaluation["source"] = replay_source
+            replay_evaluation["sp_align_offset"] = sp_align_offset
+    except Exception:
+        replay_evaluation = None
+
     session_store["evaluation_pass_threshold"] = pass_threshold
     session_store["evaluation_feedback"] = diagnosis
     session_store["initial_assessment"] = initial_assessment
@@ -674,6 +771,8 @@ def evaluate_pid_tool(
     session_store["performance_details"] = eval_result["performance_details"]
     session_store["final_details"] = eval_result["final_details"]
     session_store["simulation"] = eval_result["simulation"]
+    if replay_evaluation:
+        session_store["replay_evaluation"] = replay_evaluation
 
     return {
         "model_type": active_model_type,
@@ -693,5 +792,6 @@ def evaluate_pid_tool(
         "auto_refine_result": auto_refine_result or {},
         "model_retry_result": model_retry_result or {},
         "simulation": eval_result["simulation"],
+        "replay_evaluation": replay_evaluation or {},
         "evaluated_pid": {"Kp": float(Kp), "Ki": float(Ki), "Kd": float(Kd)},
     }

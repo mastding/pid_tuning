@@ -9,6 +9,7 @@ __pycache__/
 # Environment
 .env
 .env.local
+.env.*
 venv/
 ENV/
 
@@ -37,3 +38,6 @@ node_modules/
 package.json
 package-lock.json
 scripts/
+
+# Local persisted task sessions
+backend/state/frontend_sessions.json
