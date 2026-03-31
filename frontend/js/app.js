@@ -71,6 +71,8 @@ createApp({
       loopUri: '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b',
       startTime: '1772467200000',
       endTime: '1772553600000',
+      csvDerivedStartTime: '',
+      csvDerivedEndTime: '',
       historyWindow: 1,
       historyPanelCollapsed: false,
       loopType: 'flow',
@@ -322,9 +324,10 @@ createApp({
         },
 
         currentTaskContextSnapshot() {
+          const usingCsv = this.dataSource === 'csv';
           return {
             loopName: this.loopName,
-            loopUri: this.loopUri,
+            loopUri: usingCsv ? '' : this.loopUri,
             loopType: this.loopType,
             scenario: this.scenario,
             scenarioLabel: this.scenarioLabel(this.scenario),
@@ -334,9 +337,9 @@ createApp({
             controlObjectLabel: this.controlObjectLabel(this.controlObject),
             dataSource: this.dataSource,
             dataSourceLabel: this.dataSource === 'history' ? '历史接口' : 'CSV 上传',
-            startTime: this.startTime,
-            endTime: this.endTime,
-            historyWindow: this.historyWindow
+            startTime: usingCsv ? (this.csvDerivedStartTime || '') : this.startTime,
+            endTime: usingCsv ? (this.csvDerivedEndTime || '') : this.endTime,
+            historyWindow: usingCsv ? '' : this.historyWindow
           };
         },
 
@@ -354,16 +357,18 @@ createApp({
             : [];
           this.messageIdCounter = Number(session.messageIdCounter) || this.messages.reduce((maxId, msg) => Math.max(maxId, msg.id || 0), 0);
           const context = session.context || {};
-          this.loopName = context.loopName || this.loopName;
-          this.loopUri = context.loopUri || this.loopUri;
-          this.loopType = context.loopType || this.loopType;
-          this.scenario = context.scenario || this.scenario;
-          this.plantType = context.plantType || this.plantType;
-          this.controlObject = context.controlObject || this.controlObject;
-          this.dataSource = context.dataSource || this.dataSource;
-          this.startTime = context.startTime || this.startTime;
-          this.endTime = context.endTime || this.endTime;
-          this.historyWindow = Number(context.historyWindow || this.historyWindow || 1) || 1;
+          this.loopName = context.loopName ?? this.loopName;
+          this.loopUri = context.loopUri ?? this.loopUri;
+          this.loopType = context.loopType ?? this.loopType;
+          this.scenario = context.scenario ?? this.scenario;
+          this.plantType = context.plantType ?? this.plantType;
+          this.controlObject = context.controlObject ?? this.controlObject;
+          this.dataSource = context.dataSource ?? this.dataSource;
+          this.startTime = context.startTime ?? this.startTime;
+          this.endTime = context.endTime ?? this.endTime;
+          this.csvDerivedStartTime = context.startTime ?? this.csvDerivedStartTime;
+          this.csvDerivedEndTime = context.endTime ?? this.csvDerivedEndTime;
+          this.historyWindow = Number(context.historyWindow ?? this.historyWindow ?? 1) || 1;
         },
 
         async saveTaskSessions() {
@@ -1688,6 +1693,10 @@ createApp({
         async loadPidAnalysisRemotePayload() {
           const session = this.selectedTaskSession;
           const context = session?.context || {};
+          if ((context.dataSource || this.dataSource) === 'csv') {
+            this.pidAnalysisRemotePayload = null;
+            return null;
+          }
           const loopUri = context.loopUri || this.loopUri;
           const startTime = context.startTime || this.startTime;
           const endTime = context.endTime || this.endTime;
@@ -2511,7 +2520,7 @@ createApp({
         async startTuning() {
           if (this.loading) return;
 
-          const usingUploadedCsv = this.dataSource === 'upload';
+          const usingUploadedCsv = this.dataSource === 'csv';
           if (usingUploadedCsv && !this.uploadedFile) {
             this.addMessage({
               type: 'assistant',
@@ -2520,11 +2529,25 @@ createApp({
             return;
           }
 
+          if (!usingUploadedCsv) {
+            if (!String(this.loopUri || '').trim() || !String(this.startTime || '').trim() || !String(this.endTime || '').trim()) {
+              this.addMessage({
+                type: 'assistant',
+                content: '请先填写历史接口的 loop_uri、start_time、end_time 后再开始整定。'
+              });
+              return;
+            }
+          }
+
           this.loading = true;
           this.loadingMessage = usingUploadedCsv ? '正在上传文件...' : '正在获取历史数据...';
           this.createTaskSession();
           this.shellSection = 'tuning-process';
           this.professionalReportDrawerOpen = false;
+          if (usingUploadedCsv) {
+            this.csvDerivedStartTime = '';
+            this.csvDerivedEndTime = '';
+          }
 
           this.addMessage({
             type: 'user',
@@ -2537,9 +2560,9 @@ createApp({
 控制对象: ${this.controlObjectLabel(this.controlObject)}`
               : `为控制回路 ${this.loopName} 整定PID参数
 数据来源: 历史数据
-loop_uri: ${this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b'}
-start_time: ${this.startTime || '1772467200000'}
-end_time: ${this.endTime || '1772553600000'}
+loop_uri: ${this.loopUri}
+start_time: ${this.startTime}
+end_time: ${this.endTime}
 window: ${this.historyWindow || 1}
 回路类型: ${this.loopType}
 工况: ${this.scenarioLabel(this.scenario)}
@@ -2554,10 +2577,12 @@ window: ${this.historyWindow || 1}
           }
           formData.append('loop_name', this.loopName);
           formData.append('loop_type', this.loopType);
-          formData.append('loop_uri', this.loopUri || '/pid_zd/5989fb05a2ce4828a7ae36c682906f2b');
-          formData.append('start_time', this.startTime || '1772467200000');
-          formData.append('end_time', this.endTime || '1772553600000');
-          formData.append('window', String(this.historyWindow || 1));
+          if (!usingUploadedCsv) {
+            formData.append('loop_uri', this.loopUri);
+            formData.append('start_time', this.startTime);
+            formData.append('end_time', this.endTime);
+            formData.append('window', String(this.historyWindow || 1));
+          }
           formData.append('scenario', this.scenario || '');
           formData.append('plant_type', this.plantType || 'distillation_column');
           formData.append('control_object', this.controlObject || '');
@@ -2630,6 +2655,15 @@ window: ${this.historyWindow || 1}
               data: data.data,
               collapsed: false
             });
+            if (this.dataSource === 'csv') {
+              const historyRange = data.data?.dataAnalysis?.historyRange || {};
+              const overview = data.data?.model?.windowOverview || {};
+              const fitPreview = data.data?.model?.fitPreview || {};
+              const startCandidate = historyRange.startTime ?? fitPreview.start_time ?? overview.start_time ?? '';
+              const endCandidate = historyRange.endTime ?? fitPreview.end_time ?? overview.end_time ?? '';
+              this.csvDerivedStartTime = startCandidate === 0 ? '0' : (startCandidate ? String(startCandidate) : '');
+              this.csvDerivedEndTime = endCandidate === 0 ? '0' : (endCandidate ? String(endCandidate) : '');
+            }
             this.syncCurrentTaskSession({
               status: 'completed',
               latestResult: data.data
