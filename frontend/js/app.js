@@ -20,6 +20,8 @@ import {
   fetchCaseLibraryItems as fetchCaseLibraryItemsApi,
   fetchCaseLibraryStats as fetchCaseLibraryStatsApi
 } from './api/case-library.js';
+import { fetchPidChartData, fetchPidPredictionCurve, startTuneStream } from './api/tuning.js';
+import { createRafScheduler, destroyPidAnalysisChart, renderPidAnalysisChart } from './charts/index.js';
 import { loadTaskSessionsPayload, saveTaskSessionsPayload } from './state/task-sessions.js';
 
 const { createApp } = Vue;
@@ -195,6 +197,7 @@ createApp({
       systemConfigTestMessage: '',
       systemConfigTestOk: false,
       systemConfigShowApiKey: false,
+      chartRenderScheduler: null,
       systemConfig: {
         model: {
           name: '',
@@ -1640,21 +1643,12 @@ createApp({
 
           this.pidAnalysisRemoteLoading = true;
           try {
-            const response = await fetch(`${resolveApiBase()}/api/tuning/pid-chart-data`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                loop_uri: loopUri,
-                start_time: startTime,
-                end_time: endTime,
-                window
-              })
+            const payload = await fetchPidChartData({
+              loop_uri: loopUri,
+              start_time: startTime,
+              end_time: endTime,
+              window
             });
-            if (!response.ok) {
-              this.pidAnalysisRemotePayload = null;
-              return null;
-            }
-            const payload = await response.json();
             const points = this.normalizePidAnalysisPoints(payload?.points);
             if (!points.length) {
               this.pidAnalysisRemotePayload = null;
@@ -1740,37 +1734,26 @@ createApp({
           this.pidAnalysisPredictionLoading = true;
           this.pidAnalysisPredictionError = '';
           try {
-            const response = await fetch(`${resolveApiBase()}/api/tuning/pid-prediction-curve`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                points: basePayload.points.map(item => ({
-                  sv: item.sv,
-                  pv: item.pv,
-                  mv: item.mv,
-                  index: item.index
-                })),
-                dt,
-                loop_type: pid.loopType || this.loopType || 'flow',
-                pid_params: {
-                  Kp: Number(pid.Kp),
-                  Ki: Number(pid.Ki),
-                  Kd: Number(pid.Kd)
-                },
-                model_type: model.modelType || 'FOPDT',
-                selected_model_params: model.selectedModelParams || {},
-                K: Number(model.K || 0),
-                T: Number(model.T || 0),
-                L: Number(model.L || 0)
-              })
+            const prediction = await fetchPidPredictionCurve({
+              points: basePayload.points.map(item => ({
+                sv: item.sv,
+                pv: item.pv,
+                mv: item.mv,
+                index: item.index
+              })),
+              dt,
+              loop_type: pid.loopType || this.loopType || 'flow',
+              pid_params: {
+                Kp: Number(pid.Kp),
+                Ki: Number(pid.Ki),
+                Kd: Number(pid.Kd)
+              },
+              model_type: model.modelType || 'FOPDT',
+              selected_model_params: model.selectedModelParams || {},
+              K: Number(model.K || 0),
+              T: Number(model.T || 0),
+              L: Number(model.L || 0)
             });
-            if (!response.ok) {
-              this.pidAnalysisPrediction = null;
-              this.pidAnalysisPredictionKey = '';
-              this.pidAnalysisPredictionError = `HTTP ${response.status}`;
-              return null;
-            }
-            const prediction = await response.json();
             const pvPred = Array.isArray(prediction?.pv_pred) ? prediction.pv_pred.map(Number) : [];
             const mvPred = Array.isArray(prediction?.mv_pred) ? prediction.mv_pred.map(Number) : [];
             const spPred = Array.isArray(prediction?.sp_pred) ? prediction.sp_pred.map(Number) : [];
@@ -1829,21 +1812,21 @@ createApp({
           const allowed = this.currentPage === 'tuning' && this.shellSection === 'tuning-loop-analysis';
 
           if (!allowed) {
-            if (historyElement) window.PidAnalysisChart.destroy(historyElement);
-            if (replayElement) window.PidAnalysisChart.destroy(replayElement);
+            destroyPidAnalysisChart(historyElement);
+            destroyPidAnalysisChart(replayElement);
             return;
           }
 
           if (historyElement && this.pidAnalysisChartPayload) {
-            window.PidAnalysisChart.render(historyElement, this.pidAnalysisChartPayload);
+            renderPidAnalysisChart(historyElement, this.pidAnalysisChartPayload);
           } else if (historyElement) {
-            window.PidAnalysisChart.destroy(historyElement);
+            destroyPidAnalysisChart(historyElement);
           }
 
           if (replayElement && this.pidReplayChartPayload) {
-            window.PidAnalysisChart.render(replayElement, this.pidReplayChartPayload);
+            renderPidAnalysisChart(replayElement, this.pidReplayChartPayload);
           } else if (replayElement) {
-            window.PidAnalysisChart.destroy(replayElement);
+            destroyPidAnalysisChart(replayElement);
           }
         },
 
@@ -1860,7 +1843,13 @@ createApp({
           if (this.currentPage === 'tuning' && this.shellSection === 'tuning-loop-analysis' && this.pidAnalysisChartPayload) {
             await this.loadPidAnalysisPrediction(this.pidAnalysisChartPayload);
           }
-          this.$nextTick(() => this.renderPidAnalysisChart());
+          this.$nextTick(() => {
+            if (typeof this.chartRenderScheduler === 'function') {
+              this.chartRenderScheduler(() => this.renderPidAnalysisChart());
+            } else {
+              this.renderPidAnalysisChart();
+            }
+          });
         },
 
         openDataAnalysisExplain(msg) {
@@ -2565,13 +2554,7 @@ window: ${this.historyWindow || 1}
 
           try {
             this.loadingMessage = '智能体正在协同处理...';
-            const response = await fetch(`${resolveApiBase()}/api/tune_stream`, {
-              method: 'POST',
-              body: formData
-            });
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
+            const response = await startTuneStream(formData);
             await this.consumeSSEStream(response);
           } catch (error) {
             console.error('Tuning failed:', error);
@@ -4210,6 +4193,7 @@ window: ${this.historyWindow || 1}
         }
       },
       async mounted() {
+        this.chartRenderScheduler = createRafScheduler();
         await this.loadTaskSessions();
         this.loadStrategyLabState();
         this.shellSection = this.shellSecondaryItemsFor(this.currentPage)[0]?.id || '';
@@ -4217,9 +4201,9 @@ window: ${this.historyWindow || 1}
         this.schedulePidAnalysisChartRender();
       },
       beforeUnmount() {
-        const element = document.getElementById('pid-analysis-chart');
-        if (element && window.PidAnalysisChart) {
-          window.PidAnalysisChart.destroy(element);
-        }
+        const historyElement = document.getElementById('pid-analysis-chart-history') || document.getElementById('pid-analysis-chart');
+        const replayElement = document.getElementById('pid-analysis-chart-replay');
+        destroyPidAnalysisChart(historyElement);
+        destroyPidAnalysisChart(replayElement);
       }
     }).mount('#app');
