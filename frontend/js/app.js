@@ -1600,11 +1600,13 @@ createApp({
               const sv = Number(point?.sv ?? point?.SV);
               const mv = Number(point?.mv ?? point?.MV);
               if (!Number.isFinite(pv) || !Number.isFinite(mv) || !Number.isFinite(sv)) return null;
+              const pvFitRaw = Number(point?.pv_fit ?? point?.pvFit);
               const rawIndex = Number(point?.index);
               return {
                 label: point?.time || point?.timestamp || `索引 ${point?.index ?? 0}`,
                 index: Number.isFinite(rawIndex) ? rawIndex : null,
                 pv,
+                ...(Number.isFinite(pvFitRaw) ? { pv_fit: pvFitRaw } : {}),
                 sv,
                 mv,
                 error: sv - pv
@@ -1618,20 +1620,40 @@ createApp({
           const fitPreview = result?.model?.fitPreview || {};
           const latestDataAnalysis = this.latestDataAnalysisResult() || {};
 
-          const sourceCandidates = [
-            {
-              points: overview.points,
-              xAxisTitle: overview.x_axis === 'timestamp' ? '时间' : '采样点'
-            },
-            {
-              points: fitPreview.points,
-              xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点'
-            },
-            {
-              points: latestDataAnalysis.window_overview?.points,
-              xAxisTitle: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? '时间' : '采样点'
-            }
-          ];
+          const preferFitPreview =
+            this.shellSection === 'tuning-loop-analysis'
+            && Array.isArray(fitPreview.points)
+            && fitPreview.points.some(item => Number.isFinite(Number(item?.pv_fit ?? item?.pvFit)));
+
+          const sourceCandidates = preferFitPreview
+            ? [
+              {
+                points: fitPreview.points,
+                xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点'
+              },
+              {
+                points: overview.points,
+                xAxisTitle: overview.x_axis === 'timestamp' ? '时间' : '采样点'
+              },
+              {
+                points: latestDataAnalysis.window_overview?.points,
+                xAxisTitle: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? '时间' : '采样点'
+              }
+            ]
+            : [
+              {
+                points: overview.points,
+                xAxisTitle: overview.x_axis === 'timestamp' ? '时间' : '采样点'
+              },
+              {
+                points: fitPreview.points,
+                xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点'
+              },
+              {
+                points: latestDataAnalysis.window_overview?.points,
+                xAxisTitle: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? '时间' : '采样点'
+              }
+            ];
 
           const matchedSource = sourceCandidates
             .map(source => ({

@@ -2,6 +2,7 @@ import Plotly from 'plotly.js-dist-min';
 
   const COLORS = {
     pv: '#1d4ed8',
+    pvFit: '#059669',
     pvPred: '#7c3aed',
     sv: '#222222',
     mv: 'rgba(245, 158, 11, 0.78)',
@@ -14,6 +15,7 @@ import Plotly from 'plotly.js-dist-min';
   const buildHoverText = (item) => {
     const time = item.label || '-';
     const pv = Number.isFinite(item.pv) ? item.pv.toFixed(3) : '-';
+    const pvFit = Number.isFinite(item.pv_fit) ? item.pv_fit.toFixed(3) : null;
     const sv = Number.isFinite(item.sv) ? item.sv.toFixed(3) : '-';
     const svRaw = Number.isFinite(item.sv_raw) ? item.sv_raw.toFixed(3) : null;
     const mv = Number.isFinite(item.mv) ? item.mv.toFixed(3) : '-';
@@ -21,6 +23,7 @@ import Plotly from 'plotly.js-dist-min';
     const lines = [
       `时间：${time}`,
       `PV：${pv}`,
+      ...(pvFit !== null ? [`PV(拟合)：${pvFit}`] : []),
       `SV：${sv}`,
       ...(svRaw !== null ? [`SV(原始)：${svRaw}`] : []),
       `MV：${mv}`,
@@ -51,6 +54,7 @@ import Plotly from 'plotly.js-dist-min';
 
     const labels = payload.points.map(item => item.label);
     const pv = payload.points.map(item => item.pv);
+    const pvFit = payload.points.map(item => item.pv_fit ?? item.pvFit);
     const pvPred = payload.points.map(item => item.pv_pred ?? item.pvPred);
     const sv = payload.points.map(item => item.sv);
     const mv = payload.points.map(item => item.mv);
@@ -101,6 +105,22 @@ import Plotly from 'plotly.js-dist-min';
         hovertext: hoverText
       }
     ];
+
+    if (pvFit.some(value => Number.isFinite(value))) {
+      traces.splice(1, 0, {
+        x: labels,
+        y: pvFit,
+        name: 'PV(拟合)',
+        mode: 'lines',
+        line: {
+          color: COLORS.pvFit,
+          width: 2,
+          dash: 'dot'
+        },
+        hoverinfo: 'text',
+        hovertext: hoverText
+      });
+    }
 
     if (pvPred.some(value => Number.isFinite(value))) {
       traces.splice(1, 0, {
