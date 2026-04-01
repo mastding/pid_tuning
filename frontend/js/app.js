@@ -21,7 +21,7 @@ import {
   fetchCaseLibraryItems as fetchCaseLibraryItemsApi,
   fetchCaseLibraryStats as fetchCaseLibraryStatsApi
 } from './api/case-library.js';
-import { fetchPidChartData, fetchPidPredictionCurve, startTuneStream } from './api/tuning.js';
+import { fetchPidChartData, fetchPidPredictionCurve, inspectCsvLoops, startTuneStream } from './api/tuning.js';
 import { createRafScheduler, destroyPidAnalysisChart, renderPidAnalysisChart } from './charts/index.js';
 import { loadHelpCenterMarkdown } from './content/help-center.js';
 import { buildHelpCenterRenderModel } from './content/help-center-render.js';
@@ -73,6 +73,11 @@ createApp({
       endTime: '1772553600000',
       csvDerivedStartTime: '',
       csvDerivedEndTime: '',
+      csvLoopInspecting: false,
+      csvLoopInspectError: '',
+      csvDetectedLoops: [],
+      csvSelectedLoopPrefix: '',
+      csvRecommendedLoopPrefix: '',
       historyWindow: 1,
       historyPanelCollapsed: false,
       loopType: 'flow',
@@ -245,6 +250,8 @@ createApp({
       selectedDataAnalysisExplain: null,
       identificationExplainOpen: false,
       selectedIdentificationExplain: null,
+      executionDetailDrawerOpen: false,
+      selectedExecutionDetail: null,
       caseLibraryLoading: false,
       caseLibraryDetailLoading: false,
       caseLibraryDrawerOpen: false,
@@ -916,6 +923,21 @@ createApp({
         },
 
         async submitTuningTaskModal() {
+          const usingUploadedCsv = this.dataSource === 'csv';
+          if (usingUploadedCsv && this.uploadedFile && !this.csvDetectedLoops.length && !this.csvLoopInspecting) {
+            await this.inspectUploadedCsvLoops();
+            if (this.csvLoopInspectError) {
+              this.addMessage({
+                type: 'assistant',
+                content: `❌ 错误：回路识别失败：${this.csvLoopInspectError}`
+              });
+              return;
+            }
+            if (this.csvDetectedLoops.length > 1 && !String(this.csvSelectedLoopPrefix || '').trim()) {
+              return;
+            }
+          }
+
           this.tuningTaskModalOpen = false;
           await this.startTuning();
         },
@@ -1387,9 +1409,9 @@ createApp({
         hasDataAnalysisExplain(msg) {
           if (!msg || msg.agent !== '数据分析智能体') return false;
           const result = this.getToolResult(msg, 'tool_load_data');
-          const selectedWindow = result?.selected_window || {};
+          const candidateWindows = Array.isArray(result?.candidate_windows) ? result.candidate_windows : [];
           const stepEvents = Array.isArray(result?.step_events) ? result.step_events : [];
-          return Boolean(stepEvents.length || selectedWindow.rows || selectedWindow.start_index !== undefined);
+          return Boolean(candidateWindows.length || stepEvents.length);
         },
 
         describeStepEventType(type) {
@@ -1453,45 +1475,74 @@ createApp({
           const result = this.getToolResult(msg, 'tool_load_data');
           if (!result) return null;
 
-          const selectedWindow = result.selected_window || {};
-          const windowOverview = result.window_overview || {};
+          const candidateWindows = Array.isArray(result.candidate_windows) ? result.candidate_windows : [];
           const stepEvents = Array.isArray(result.step_events) ? result.step_events : [];
-          const selectedStart = Number(selectedWindow.event_start_index);
-          const selectedEnd = Number(selectedWindow.event_end_index);
-          const selectedOrder = stepEvents.findIndex(
-            event => Number(event?.start_idx) === selectedStart && Number(event?.end_idx) === selectedEnd
-          );
-          const selectionReason =
-            selectedOrder >= 0
-              ? `当前窗口由候选事件 #${selectedOrder + 1} 触发。系统会围绕所有候选阶跃构造窗口，并默认选择阶跃幅值最大的候选窗口进入辨识，因此这条事件被作为本次辨识窗口的来源。`
-              : '系统会围绕检测到的候选阶跃构造多个窗口，并默认选择最有代表性的候选窗口进入后续辨识。';
+          const effectiveWindows = candidateWindows.length ? candidateWindows : stepEvents;
+          const samplingTime = Number(result?.sampling_time);
+
+          const windowSelectionExplanation = (event) => {
+            const type = String(event?.type || '');
+            if (type === 'step_up' || type === 'step_down') {
+              return '来源：SV 阶跃检测（SV 在阈值以上发生突变）；窗口：围绕阶跃点前后扩展，并尽量在下一个阶跃前截断，若 PV 进入稳定区间则提前结束。';
+            }
+            if (type === 'mv_peak') {
+              return '来源：MV 变化峰值；窗口：围绕 MV 最大变化点前后扩展，避免与已存在窗口重叠。';
+            }
+            if (type === 'mv_change') {
+              return '来源：MV 最大变化点（无 SV 阶跃时的退化路径）；窗口：围绕变化点固定扩展。';
+            }
+            return '来源：候选事件；窗口：围绕事件点形成用于后续辨识的时间片段。';
+          };
+
+          const qualityExplanation = () => {
+            return '质量=MV激励(40%)+PV响应(40%)+相关性(20%)；饱和/漂移会扣分。饱和比例=MV落在近似上下限（1%带宽）附近的占比。';
+          };
 
           return {
-            windowRows: selectedWindow.rows ?? '-',
-            windowTimeRange: this.rangeLabel(
-              windowOverview.window_start_time,
-              windowOverview.window_end_time,
-              selectedWindow.start_index,
-              selectedWindow.end_index
-            ),
-            windowIndexRange: `${selectedWindow.start_index ?? 0} -> ${selectedWindow.end_index ?? 0}`,
-            triggerEventLabel: this.describeStepEventType(selectedWindow.event_type),
-            selectionReason,
-            stepEvents: stepEvents.map((event, idx) => ({
-              order: idx + 1,
-              isSelected:
-                Number(event?.start_idx) === selectedStart &&
-                Number(event?.end_idx) === selectedEnd,
-              typeLabel: this.describeStepEventType(event?.type),
-              indexRange: `${event?.start_idx ?? 0} -> ${event?.end_idx ?? 0}`,
-              timeRange: this.eventTimeRange(result, event),
-              timeRangeDetail: this.eventTimeRangeDetail(result, event),
-              amplitude: this.formatNumber(event?.amplitude, 3),
-              svChange:
-                Number.isFinite(Number(event?.sv_start)) && Number.isFinite(Number(event?.sv_end))
-                  ? `${this.formatNumber(event?.sv_start, 3)} -> ${this.formatNumber(event?.sv_end, 3)}`
-                  : '-'
-            }))
+            pointCount: Number(result?.data_points) || Number(result?.window_overview?.total_points) || 0,
+            samplingTimeLabel: Number.isFinite(samplingTime) ? `${this.formatNumber(samplingTime, 3)} 秒` : '-',
+            stepEventCount: stepEvents.length,
+            candidateCount: effectiveWindows.length,
+            usableWindowCount: effectiveWindows.filter(item => item?.window_usable_for_id === true).length,
+            selectionReason: '系统会先检测阶跃事件并构造多个候选窗口；后续系统辨识智能体会对所有候选窗口×多种模型进行统一评估，并择优选取最终用于整定的窗口与过程模型。',
+            candidateWindows: effectiveWindows.map((event, idx) => {
+              const windowStart = Number(event?.window_start_idx);
+              const windowEnd = Number(event?.window_end_idx);
+              const windowPoints =
+                Number.isFinite(windowStart) && Number.isFinite(windowEnd) ? Math.max(0, windowEnd - windowStart) : '-';
+              const qualityScore = Number(event?.window_quality_score);
+              const saturationRatio = Number(event?.window_saturation_ratio);
+              const usableForId = event?.window_usable_for_id === undefined ? null : Boolean(event?.window_usable_for_id);
+              const reasons = Array.isArray(event?.window_quality_reasons) ? event.window_quality_reasons.filter(Boolean) : [];
+              const windowStartTime = String(event?.window_start_time || '').trim();
+              const windowEndTime = String(event?.window_end_time || '').trim();
+              const windowTimeRange = windowStartTime && windowEndTime ? `${windowStartTime} -> ${windowEndTime}` : '-';
+              const usableLabel = usableForId === null ? '' : (usableForId ? '可用于辨识' : '不建议用于辨识');
+              const reasonText = reasons.length ? `原因：${reasons.join('、')}` : '';
+              const usableText = usableForId === null ? '-' : (usableForId ? '是' : '否');
+              return {
+                order: idx + 1,
+                typeLabel: this.describeStepEventType(event?.type),
+                eventIndexRange: `${event?.start_idx ?? 0} -> ${event?.end_idx ?? 0}`,
+                windowIndexRange:
+                  Number.isFinite(windowStart) && Number.isFinite(windowEnd)
+                    ? `${windowStart} -> ${windowEnd}`
+                    : '-',
+                windowTimeRange,
+                windowPoints,
+                amplitude: this.formatNumber(event?.amplitude, 3),
+                qualityScore: Number.isFinite(qualityScore) ? this.formatNumber(qualityScore, 3) : '-',
+                saturationRatio: Number.isFinite(saturationRatio) ? this.formatPercent(saturationRatio, 1) : '-',
+                usableText,
+                explain: [windowSelectionExplanation(event), qualityExplanation(), usableLabel, reasonText].filter(Boolean).join(' '),
+                svChange:
+                  Number.isFinite(Number(event?.sv_start)) && Number.isFinite(Number(event?.sv_end))
+                    ? `${this.formatNumber(event?.sv_start, 3)} -> ${this.formatNumber(event?.sv_end, 3)}`
+                    : '-',
+                timeRange: this.eventTimeRange(result, event),
+                timeRangeDetail: this.eventTimeRangeDetail(result, event)
+              };
+            })
           };
         },
 
@@ -1938,6 +1989,41 @@ createApp({
           this.selectedDataAnalysisExplain = null;
         },
 
+        openExecutionDetail(groupId) {
+          const msg = (this.messages || []).find(item => String(item?.id) === String(groupId)) || null;
+          if (!msg) return;
+          this.selectedExecutionDetail = this.buildExecutionDetailPayload(msg);
+          this.executionDetailDrawerOpen = Boolean(this.selectedExecutionDetail);
+        },
+
+        closeExecutionDetail() {
+          this.executionDetailDrawerOpen = false;
+          this.selectedExecutionDetail = null;
+        },
+
+        buildExecutionDetailPayload(msg) {
+          if (!msg) return null;
+          const dataAnalysis = this.buildDataAnalysisExplainPayload(msg);
+          const identification = this.buildIdentificationExplainPayload(msg);
+          return {
+            id: msg.id,
+            agent: msg.agent || '智能体',
+            stage: this.executionStageName(msg.agent, msg),
+            summary: this.executionSummaryForMessage(msg),
+            response: msg.response || msg.content || '',
+            dataAnalysis,
+            identification,
+            tools: Array.isArray(msg.tools)
+              ? msg.tools.map(tool => ({
+                  name: tool.tool_name || 'tool',
+                  success: tool.success !== false,
+                  args: tool.args || null,
+                  result: tool.result || null
+                }))
+              : []
+          };
+        },
+
         hasIdentificationExplain(msg) {
           const result = this.getToolResult(msg, 'tool_fit_fopdt');
           return Boolean(result && Array.isArray(result.attempts) && result.attempts.length);
@@ -1974,6 +2060,15 @@ createApp({
           const modelType = String(result.model_type || '').toUpperCase() || '-';
           const selectedModelParams = result.selected_model_params || {};
           const attempts = Array.isArray(result.attempts) ? result.attempts.slice() : [];
+          const windowSourcesAll = new Set(attempts.map(item => String(item?.window_source || '')));
+          const filteredWindowSources = new Set(
+            attempts
+              .filter(item => String(item?.model_type || '').toUpperCase() === 'WINDOW_FILTER')
+              .map(item => String(item?.window_source || ''))
+          );
+          const fittedAttemptsRaw = attempts.filter(item => String(item?.model_type || '').toUpperCase() !== 'WINDOW_FILTER');
+          const fittedWindowSources = new Set(fittedAttemptsRaw.map(item => String(item?.window_source || '')));
+
           const sortedAttempts = attempts
             .map((attempt, idx) => ({ ...attempt, _idx: idx }))
             .sort((a, b) => {
@@ -2004,6 +2099,10 @@ createApp({
             modelParamsSummary: this.summarizeModelParams({ model_type: modelType, ...selectedModelParams }),
             windowSource: result.selected_window_source || '-',
             confidence: this.formatPercent(result.confidence, 1),
+            windowCountTotal: windowSourcesAll.size,
+            windowCountFitted: fittedWindowSources.size,
+            windowCountFiltered: filteredWindowSources.size,
+            attemptCountFitted: fittedAttemptsRaw.length,
             selectionReason: result.model_selection_reason || '系统会在候选窗口上比较多种模型的拟合质量与后续整定表现，最终选取综合表现最优的模型。',
             parameterExplanation: this.buildParameterExplanation(modelType, selectedModelParams),
             attempts: sortedAttempts
@@ -2332,12 +2431,50 @@ createApp({
           }
         },
 
-        handleFileUpload(event) {
+        async handleFileUpload(event) {
           this.uploadedFile = event.target.files[0];
+          this.csvLoopInspectError = '';
+          this.csvDetectedLoops = [];
+          this.csvSelectedLoopPrefix = '';
+          this.csvRecommendedLoopPrefix = '';
+          if (!this.uploadedFile) return;
+          await this.inspectUploadedCsvLoops();
+        },
+
+        async inspectUploadedCsvLoops() {
+          if (!this.uploadedFile) return;
+
+          this.csvLoopInspecting = true;
+          this.csvLoopInspectError = '';
+          this.csvDetectedLoops = [];
+          this.csvSelectedLoopPrefix = '';
+          this.csvRecommendedLoopPrefix = '';
+
+          try {
+            const formData = new FormData();
+            formData.append('file', this.uploadedFile);
+            const payload = await inspectCsvLoops(formData);
+            const loops = Array.isArray(payload?.loops) ? payload.loops : [];
+            this.csvDetectedLoops = loops;
+            this.csvRecommendedLoopPrefix = String(payload?.recommended_prefix || '').trim();
+
+            if (loops.length === 1) {
+              this.csvSelectedLoopPrefix = String(loops[0]?.prefix || '').trim();
+            }
+          } catch (error) {
+            console.error('Failed to inspect CSV loops:', error);
+            this.csvLoopInspectError = error?.message || '回路识别失败';
+          } finally {
+            this.csvLoopInspecting = false;
+          }
         },
 
         clearUploadedFile() {
           this.uploadedFile = null;
+          this.csvLoopInspectError = '';
+          this.csvDetectedLoops = [];
+          this.csvSelectedLoopPrefix = '';
+          this.csvRecommendedLoopPrefix = '';
           if (this.$refs.fileInput) {
             this.$refs.fileInput.value = '';
           }
@@ -2449,15 +2586,39 @@ createApp({
           }
         },
 
-        async consumeSSEStream(response) {
+        async consumeSSEStream(response, options = {}) {
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = '';
           let sawResult = false;
           let sawError = false;
+          const idleTimeoutMs = Number(options?.idleTimeoutMs) || 90000;
+          const abortController = options?.abortController || null;
+
+          const readWithTimeout = async () => {
+            if (!idleTimeoutMs || idleTimeoutMs <= 0) return reader.read();
+            let timer = null;
+            const timeoutPromise = new Promise((_, reject) => {
+              timer = window.setTimeout(() => reject(new Error(`stream_read_timeout:${idleTimeoutMs}`)), idleTimeoutMs);
+            });
+            try {
+              return await Promise.race([reader.read(), timeoutPromise]);
+            } finally {
+              if (timer) window.clearTimeout(timer);
+            }
+          };
 
           while (true) {
-            const { done, value } = await reader.read();
+            let readResult;
+            try {
+              readResult = await readWithTimeout();
+            } catch (err) {
+              if (abortController) {
+                try { abortController.abort(); } catch (_) {}
+              }
+              throw err;
+            }
+            const { done, value } = readResult;
             buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
 
             let boundaryIndex = buffer.indexOf('\n\n');
@@ -2574,6 +2735,8 @@ window: ${this.historyWindow || 1}
           const formData = new FormData();
           if (usingUploadedCsv) {
             formData.append('file', this.uploadedFile);
+            const selectedLoopPrefix = String(this.csvSelectedLoopPrefix || '').trim();
+            if (selectedLoopPrefix) formData.append('selected_loop_prefix', selectedLoopPrefix);
           }
           formData.append('loop_name', this.loopName);
           formData.append('loop_type', this.loopType);
@@ -2589,18 +2752,36 @@ window: ${this.historyWindow || 1}
 
           try {
             this.loadingMessage = '智能体正在协同处理...';
-            const response = await startTuneStream(formData);
-            await this.consumeSSEStream(response);
+            const abortController = new AbortController();
+            this._activeTuneAbortController = abortController;
+            const response = await startTuneStream(formData, { signal: abortController.signal, timeoutMs: 15000 });
+            const idleTimeoutMs = usingUploadedCsv ? 90000 : 75000;
+            await this.consumeSSEStream(response, { abortController, idleTimeoutMs });
           } catch (error) {
             console.error('Tuning failed:', error);
+            const raw = String(error?.message || '').trim();
+            const isTimeout = raw.startsWith('stream_read_timeout:');
+            const detail = isTimeout
+              ? `长时间未收到后端流式输出（超过 ${raw.split(':')[1] || ''}ms），可能原因：历史接口不通、后端阻塞或网络中断。`
+              : (error?.name === 'AbortError' ? '请求超时或已取消。可能原因：后端不可达或网络异常。' : raw);
+            const msg = isTimeout ? '请求超时：后端长时间无响应。' : `请求失败: ${detail}`;
             this.addMessage({
               type: 'assistant',
-              content: `请求失败: ${error.message}`
+              content: `❌ 错误：${msg}`
             });
-            this.syncCurrentTaskSession({ status: 'failed' });
+            this.syncCurrentTaskSession({
+              status: 'failed',
+              error: {
+                message: raw || 'request_failed',
+                code: isTimeout ? 'stream_read_timeout' : (error?.name || 'request_failed'),
+                type: isTimeout ? 'timeout' : 'request_failed',
+                detail
+              }
+            });
           } finally {
             this.loading = false;
             this.progressSteps.forEach(step => step.active = false);
+            this._activeTuneAbortController = null;
             this.syncCurrentTaskSession({
               status: this.latestTuningResultData ? 'completed' : (this.messages.length ? 'failed' : 'draft')
             });
@@ -4072,6 +4253,14 @@ window: ${this.historyWindow || 1}
             scenarioLabel: item.context?.scenarioLabel || this.scenarioLabel(item.context?.scenario),
             controlObjectLabel: item.context?.controlObjectLabel || this.controlObjectLabel(item.context?.controlObject),
             scoreLabel: item.latestResult ? `${this.formatScore100(item.latestResult?.evaluation?.final_rating, 1)}/100` : '-',
+            errorTooltip: item.status === 'failed'
+              ? [
+                  item.error?.message ? `错误：${item.error.message}` : '',
+                  item.error?.type ? `类型：${item.error.type}` : '',
+                  item.error?.code ? `错误码：${item.error.code}` : '',
+                  item.error?.detail ? `详细原因：${item.error.detail}` : ''
+                ].filter(Boolean).join('\n')
+              : '',
             updatedAtTs: this.parseTaskSessionTime(item.updatedAt || item.createdAt),
             createdAtTs: this.parseTaskSessionTime(item.createdAt)
           }));

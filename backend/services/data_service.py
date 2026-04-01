@@ -80,8 +80,16 @@ def build_window_overview(
     }
 
 
-def load_pid_dataset(csv_path: str) -> Dict[str, Any]:
-    prepared = prepare_pid_dataset(csv_path)
+def load_pid_dataset(
+    csv_path: str,
+    selected_loop_prefix: str | None = None,
+    selected_window_index: int | None = None,
+) -> Dict[str, Any]:
+    prepared = prepare_pid_dataset(
+        csv_path,
+        selected_loop_prefix=selected_loop_prefix,
+        selected_window_index=selected_window_index,
+    )
     cleaned_df = prepared["cleaned_df"]
     window_df = prepared["window_df"]
     dt = float(prepared["dt"])

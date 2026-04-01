@@ -2,6 +2,7 @@
 数据分析智能体的Skills
 """
 import os
+import re
 import tempfile
 from typing import Dict, List, Tuple
 
@@ -20,10 +21,43 @@ DEFAULT_HISTORY_END_TIME = "1772617199000"
 DEFAULT_HISTORY_WINDOW_SECONDS = 1
 LOCAL_TIMEZONE = "Asia/Shanghai"
 PID_COLUMN_ALIASES = {
-    "timestamp": ["timestamp", "time", "datetime", "ts"],
-    "SV": ["sv", "sp", "setpoint"],
-    "PV": ["pv", "cv", "process_value"],
-    "MV": ["mv", "op", "output", "manipulated_value"],
+    "timestamp": ["timestamp", "time", "datetime", "ts", "date", "test", "时间", "时间戳", "采集时间"],
+    "SV": ["sv", "sp", "setpoint", "set_point", "set point", "target", "给定", "设定", "设定值", "目标值"],
+    "PV": [
+        "pv",
+        "cv",
+        "process_value",
+        "process value",
+        "measurement",
+        "measured_value",
+        "measured value",
+        "feedback",
+        "过程值",
+        "测量值",
+        "反馈值",
+        "工艺值",
+        "实际值",
+    ],
+    "MV": [
+        "mv",
+        "op",
+        "output",
+        "manipulated_value",
+        "manipulated value",
+        "controller_output",
+        "controller output",
+        "control_output",
+        "control output",
+        "valve",
+        "valve_position",
+        "valve position",
+        "opening",
+        "开度",
+        "阀位",
+        "操纵量",
+        "控制输出",
+        "输出值",
+    ],
 }
 MAX_DENOISE_POINTS = 200000
 
@@ -32,6 +66,144 @@ def _median_abs(values: np.ndarray) -> float:
     if values.size == 0:
         return 0.0
     return float(np.median(np.abs(values - np.median(values))))
+
+
+def _canonicalize_column_name(value: str) -> str:
+    text = str(value).replace("\ufeff", "").strip().lower()
+    text = re.sub(r"[\(\（\[].*?[\)\）\]]", "", text)
+    text = text.replace("%", "")
+    text = re.sub(r"[\s\-_./\\]+", "", text)
+    text = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", text)
+    return text
+
+
+def detect_pid_loops(df: pd.DataFrame) -> List[Dict[str, str]]:
+    loops: Dict[str, Dict[str, str]] = {}
+    for col in df.columns:
+        original = str(col)
+        stripped = original.strip()
+        match = re.match(r"^(?P<prefix>.+?)\.(?P<sig>pv|sv|mv)\s*$", stripped, flags=re.IGNORECASE)
+        if not match:
+            continue
+        prefix = str(match.group("prefix")).strip()
+        sig = str(match.group("sig")).upper()
+        canon_prefix = _canonicalize_column_name(prefix)
+        if not canon_prefix:
+            continue
+        entry = loops.setdefault(canon_prefix, {"prefix": prefix})
+        entry[f"{sig.lower()}_col"] = original
+
+    detected: List[Dict[str, str]] = []
+    for entry in loops.values():
+        if "pv_col" in entry and "mv_col" in entry:
+            detected.append(entry)
+
+    detected.sort(key=lambda item: item.get("prefix", ""))
+    return detected
+
+
+def _read_csv_loose(*, csv_path: str, encoding: str, header_skip: int, delimiter: str) -> pd.DataFrame:
+    import csv
+
+    with open(csv_path, "r", encoding=encoding, newline="") as f:
+        for _ in range(max(0, int(header_skip))):
+            next(f, None)
+
+        reader = csv.reader(f, delimiter=delimiter)
+        header = next(reader, None)
+        if header is None:
+            return pd.DataFrame()
+
+        header = [str(item).replace("\ufeff", "").strip() for item in header]
+        while header and not header[-1]:
+            header.pop()
+
+        expected = len(header)
+        rows: List[List[str]] = []
+        for row in reader:
+            if not row:
+                continue
+            if expected == 0:
+                continue
+            if len(row) > expected:
+                row = row[:expected]
+            elif len(row) < expected:
+                row = row + [""] * (expected - len(row))
+            rows.append([str(item).strip() for item in row])
+
+    return pd.DataFrame(rows, columns=header)
+
+
+def _read_csv_with_fallback(csv_path: str) -> pd.DataFrame:
+    """Read CSV with encoding fallback (utf-8 -> gbk -> gb18030) and handle potential preamble lines."""
+    encodings = ["utf-8", "gbk", "gb18030", "ISO-8859-1"]
+    alias_sets: Dict[str, List[str]] = {
+        standard: [_canonicalize_column_name(standard), *[_canonicalize_column_name(alias) for alias in aliases]]
+        for standard, aliases in PID_COLUMN_ALIASES.items()
+    }
+
+    for enc in encodings:
+        try:
+            with open(csv_path, "r", encoding=enc) as f:
+                lines = f.readlines()
+
+            best_idx = 0
+            best_score = -1
+            scan_limit = min(80, len(lines))
+            for idx in range(scan_limit):
+                raw_line = lines[idx].strip()
+                if not raw_line:
+                    continue
+                if raw_line.count(",") + raw_line.count(";") + raw_line.count("\t") < 1:
+                    continue
+
+                cells = re.split(r"[,\t;]", raw_line)
+                canon_cells = [_canonicalize_column_name(cell) for cell in cells if cell.strip()]
+                if not canon_cells:
+                    continue
+
+                pv_hit = any(
+                    any(alias and (alias == cell or alias in cell) for alias in alias_sets["PV"])
+                    for cell in canon_cells
+                )
+                mv_hit = any(
+                    any(alias and (alias == cell or alias in cell) for alias in alias_sets["MV"])
+                    for cell in canon_cells
+                )
+                ts_hit = any(
+                    any(alias and (alias == cell or alias in cell) for alias in alias_sets["timestamp"])
+                    for cell in canon_cells
+                )
+                sv_hit = any(
+                    any(alias and (alias == cell or alias in cell) for alias in alias_sets["SV"])
+                    for cell in canon_cells
+                )
+
+                score = (5 if pv_hit else 0) + (5 if mv_hit else 0) + (2 if ts_hit else 0) + (1 if sv_hit else 0)
+                if score > best_score:
+                    best_score = score
+                    best_idx = idx
+
+            header_skip = best_idx if best_score >= 10 else 0
+            header_line = lines[header_skip] if 0 <= header_skip < len(lines) else ""
+            delimiter_candidates = [",", "\t", ";"]
+            delimiter = max(delimiter_candidates, key=lambda ch: header_line.count(ch) if header_line else 0)
+            if not delimiter:
+                delimiter = ","
+
+            try:
+                return pd.read_csv(csv_path, encoding=enc, skiprows=header_skip, sep=delimiter)
+            except pd.errors.ParserError:
+                return _read_csv_loose(
+                    csv_path=csv_path,
+                    encoding=enc,
+                    header_skip=header_skip,
+                    delimiter=delimiter,
+                )
+        except UnicodeDecodeError:
+            continue
+
+    return pd.read_csv(csv_path, encoding="utf-8")
 
 
 def _normalize_time_value(value: str | None, *, fallback: str) -> str:
@@ -157,18 +329,109 @@ def fetch_history_data_csv(
     }
 
 
-def normalize_pid_columns(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_pid_columns(df: pd.DataFrame, selected_loop_prefix: str | None = None) -> pd.DataFrame:
     rename_map: Dict[str, str] = {}
-    lowered = {col.lower(): col for col in df.columns}
+    canonical_to_original: Dict[str, str] = {}
+    for col in df.columns:
+        canonical = _canonicalize_column_name(col)
+        if canonical and canonical not in canonical_to_original:
+            canonical_to_original[canonical] = col
+
     for standard_name, aliases in PID_COLUMN_ALIASES.items():
-        for alias in aliases:
-            if alias in lowered:
-                rename_map[lowered[alias]] = standard_name
+        if standard_name in {"PV", "MV", "SV"}:
+            continue
+        candidates = [_canonicalize_column_name(standard_name)] + [_canonicalize_column_name(alias) for alias in aliases]
+        best_original = None
+        best_score = -1
+        for cand in candidates:
+            if not cand:
+                continue
+            if cand in canonical_to_original:
+                best_original = canonical_to_original[cand]
+                best_score = 100
                 break
+            for canon_col, original_col in canonical_to_original.items():
+                if not canon_col:
+                    continue
+                if canon_col == cand:
+                    score = 100
+                elif canon_col.startswith(cand) or canon_col.endswith(cand):
+                    score = 80
+                elif cand in canon_col:
+                    score = 60
+                else:
+                    continue
+                if score > best_score:
+                    best_score = score
+                    best_original = original_col
+
+        if best_original is not None:
+            rename_map[best_original] = standard_name
+
+    loops = detect_pid_loops(df)
+    if loops and len(loops) > 1 and not selected_loop_prefix:
+        prefixes = [loop.get("prefix", "") for loop in loops]
+        raise ValueError(f"检测到多个回路数据列，请先选择需要整定的回路。可选回路: {prefixes}")
+    chosen_loop = None
+    if selected_loop_prefix:
+        selected_canon = _canonicalize_column_name(selected_loop_prefix)
+        for loop in loops:
+            if _canonicalize_column_name(loop.get("prefix", "")) == selected_canon:
+                chosen_loop = loop
+                break
+    if chosen_loop is None and len(loops) == 1:
+        chosen_loop = loops[0]
+
+    if chosen_loop is not None:
+        pv_col = chosen_loop.get("pv_col")
+        mv_col = chosen_loop.get("mv_col")
+        sv_col = chosen_loop.get("sv_col")
+        if pv_col in df.columns:
+            rename_map[pv_col] = "PV"
+        if mv_col in df.columns:
+            rename_map[mv_col] = "MV"
+        if sv_col and sv_col in df.columns:
+            rename_map[sv_col] = "SV"
+    else:
+        for standard_name, aliases in PID_COLUMN_ALIASES.items():
+            if standard_name not in {"PV", "MV", "SV"}:
+                continue
+            candidates = [_canonicalize_column_name(standard_name)] + [_canonicalize_column_name(alias) for alias in aliases]
+            best_original = None
+            best_score = -1
+            for cand in candidates:
+                if not cand:
+                    continue
+                if cand in canonical_to_original:
+                    best_original = canonical_to_original[cand]
+                    best_score = 100
+                    break
+                for canon_col, original_col in canonical_to_original.items():
+                    if not canon_col:
+                        continue
+                    if canon_col == cand:
+                        score = 100
+                    elif canon_col.startswith(cand) or canon_col.endswith(cand):
+                        score = 80
+                    elif cand in canon_col:
+                        score = 60
+                    else:
+                        continue
+                    if score > best_score:
+                        best_score = score
+                        best_original = original_col
+
+            if best_original is not None:
+                rename_map[best_original] = standard_name
 
     normalized = df.rename(columns=rename_map).copy()
     if "PV" not in normalized.columns or "MV" not in normalized.columns:
-        raise ValueError("CSV must contain MV/PV columns or equivalent aliases")
+        columns_preview = [str(col) for col in df.columns.tolist()]
+        canonical_preview = [_canonicalize_column_name(col) for col in df.columns.tolist()]
+        raise ValueError(
+            "CSV must contain MV/PV columns or equivalent aliases. "
+            f"columns={columns_preview}, canonical={canonical_preview}, mapped={rename_map}"
+        )
     return normalized
 
 
@@ -201,8 +464,8 @@ def estimate_sampling_time(df: pd.DataFrame, fallback: float = 1.0) -> float:
     return float(deltas.median())
 
 
-def clean_pid_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    cleaned = normalize_pid_columns(df)
+def clean_pid_dataframe(df: pd.DataFrame, selected_loop_prefix: str | None = None) -> pd.DataFrame:
+    cleaned = normalize_pid_columns(df, selected_loop_prefix=selected_loop_prefix)
     cleaned = parse_timestamp_column(cleaned)
 
     numeric_cols = [col for col in ["SV", "PV", "MV"] if col in cleaned.columns]
@@ -262,6 +525,127 @@ def _adaptive_event_window(
     }
 
 
+def _robust_diff_noise(values: np.ndarray) -> float:
+    values = np.asarray(values, dtype=float)
+    if values.size < 3:
+        return 0.0
+    diffs = np.diff(values)
+    med = float(np.median(diffs))
+    mad = float(np.median(np.abs(diffs - med)))
+    return mad
+
+
+def _score_candidate_window(df: pd.DataFrame, event: Dict) -> Dict:
+    start = int(event.get("window_start_idx", 0) or 0)
+    end = int(event.get("window_end_idx", 0) or 0)
+    if end <= start or end - start < 10:
+        return {
+            "window_quality_score": 0.0,
+            "window_saturation_ratio": 0.0,
+            "window_corr": 0.0,
+            "window_drift_ratio": 0.0,
+        }
+
+    seg = df.iloc[start:end]
+    mv = seg["MV"].to_numpy(dtype=float)
+    pv = seg["PV"].to_numpy(dtype=float)
+
+    mv_std = float(np.std(mv)) if mv.size else 0.0
+    pv_std = float(np.std(pv)) if pv.size else 0.0
+    mv_span = float(np.max(mv) - np.min(mv)) if mv.size else 0.0
+    pv_span = float(np.max(pv) - np.min(pv)) if pv.size else 0.0
+    mv_noise = _robust_diff_noise(mv)
+    pv_noise = _robust_diff_noise(pv)
+    mv_effective = mv_span >= max(mv_noise * 12.0, 1e-6) and mv_std >= max(mv_noise * 4.0, 1e-6)
+    pv_effective = pv_span >= max(pv_noise * 10.0, 1e-6) and pv_std >= max(pv_noise * 3.0, 1e-6)
+
+    corr = 0.0
+    if mv.size >= 5:
+        mv_centered = mv - float(np.mean(mv))
+        pv_centered = pv - float(np.mean(pv))
+        denom = float(np.std(mv_centered) * np.std(pv_centered))
+        if denom > 1e-12:
+            corr = float(np.mean(mv_centered * pv_centered) / denom)
+
+    saturation_ratio = 0.0
+    if mv_span > 1e-9:
+        low = float(np.min(mv)) + 0.01 * mv_span
+        high = float(np.max(mv)) - 0.01 * mv_span
+        near_low = float(np.mean(mv <= low))
+        near_high = float(np.mean(mv >= high))
+        saturation_ratio = max(near_low, near_high)
+
+    drift_ratio = 0.0
+    if pv.size >= 5 and pv_span > 1e-9:
+        x = np.arange(pv.size, dtype=float)
+        slope = float(np.polyfit(x, pv, 1)[0])
+        drift_ratio = abs(slope) * float(pv.size - 1) / max(pv_span, 1e-9)
+
+    reasons: List[str] = []
+    if not mv_effective:
+        reasons.append("MV激励不足")
+    if not pv_effective:
+        reasons.append("PV响应不足")
+    if mv.size >= 5 and abs(corr) < 0.05:
+        reasons.append("MV与PV相关性弱")
+    if saturation_ratio > 0.4:
+        reasons.append("MV疑似饱和")
+    if drift_ratio > 0.8:
+        reasons.append("PV漂移明显")
+
+    score = 0.0
+    score += 0.4 if mv_effective else 0.0
+    score += 0.4 if pv_effective else 0.0
+    score += 0.2 * min(abs(corr) / 0.4, 1.0)
+    if saturation_ratio > 0.0:
+        score *= 1.0 - min(saturation_ratio / 0.6, 1.0) * 0.7
+    if drift_ratio > 0.0:
+        score *= 1.0 - min(drift_ratio / 1.0, 1.0) * 0.25
+    score = float(max(0.0, min(score, 1.0)))
+
+    usable = bool(mv_effective and pv_effective and abs(corr) >= 0.05 and saturation_ratio <= 0.6)
+    if not mv_effective:
+        score = float(min(score, 0.15))
+
+    window_start_time = None
+    window_end_time = None
+    event_start_time = None
+    event_end_time = None
+    if "timestamp" in df.columns and len(df) > 0:
+        last = len(df) - 1
+        start_i = max(0, min(start, last))
+        end_i = max(0, min(end - 1, last))
+        event_start_i = max(0, min(int(event.get("start_idx", start_i) or start_i), last))
+        event_end_i = max(0, min(int(event.get("end_idx", event_start_i) or event_start_i) - 1, last))
+        ts = df["timestamp"]
+        if len(ts) > 0:
+            try:
+                window_start_time = ts.iloc[start_i].strftime("%Y-%m-%d %H:%M:%S")
+                window_end_time = ts.iloc[end_i].strftime("%Y-%m-%d %H:%M:%S")
+                event_start_time = ts.iloc[event_start_i].strftime("%Y-%m-%d %H:%M:%S")
+                event_end_time = ts.iloc[event_end_i].strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                window_start_time = None
+                window_end_time = None
+                event_start_time = None
+                event_end_time = None
+
+    return {
+        "window_quality_score": score,
+        "window_saturation_ratio": saturation_ratio,
+        "window_corr": corr,
+        "window_drift_ratio": drift_ratio,
+        "window_mv_span": mv_span,
+        "window_pv_span": pv_span,
+        "window_usable_for_id": usable,
+        "window_quality_reasons": reasons,
+        "window_start_time": window_start_time,
+        "window_end_time": window_end_time,
+        "event_start_time": event_start_time,
+        "event_end_time": event_end_time,
+    }
+
+
 def build_candidate_windows(df: pd.DataFrame) -> Tuple[List[Dict], Dict | None]:
     if len(df) < 10:
         return [], None
@@ -275,6 +659,51 @@ def build_candidate_windows(df: pd.DataFrame) -> Tuple[List[Dict], Dict | None]:
                 _adaptive_event_window(df, event, idx, len(step_events))
                 for idx, event in enumerate(step_events)
             ]
+            if "MV" in df.columns and len(df) >= 20:
+                mv = df["MV"].to_numpy(dtype=float)
+                mv_diff = np.abs(np.diff(mv))
+                top_k = 6
+                min_gap = max(40, int(len(df) // 5000))
+                padding = max(80, min(500, int(len(df) // 200)))
+                order = np.argsort(mv_diff)[::-1]
+                selected: List[int] = []
+                for idx in order:
+                    if len(selected) >= top_k:
+                        break
+                    if mv_diff[idx] <= 1e-9:
+                        break
+                    if any(abs(int(idx) - prev) < min_gap for prev in selected):
+                        continue
+                    selected.append(int(idx))
+                for center in selected:
+                    if any(int(e.get("window_start_idx", 0)) <= center <= int(e.get("window_end_idx", 0)) for e in candidate_windows):
+                        continue
+                    start_idx = max(0, center - padding)
+                    end_idx = min(len(df), center + padding)
+                    if end_idx - start_idx < 10:
+                        continue
+                    candidate_windows.append(
+                        {
+                            "start_idx": center,
+                            "end_idx": min(len(df), center + 1),
+                            "window_start_idx": start_idx,
+                            "window_end_idx": end_idx,
+                            "amplitude": float(mv_diff[center]),
+                            "type": "mv_peak",
+                        }
+                    )
+
+            candidate_windows = [{**event, **_score_candidate_window(df, event)} for event in candidate_windows]
+            for idx, item in enumerate(candidate_windows):
+                item["candidate_order"] = int(idx + 1)
+            candidate_windows.sort(
+                key=lambda item: (
+                    bool(item.get("window_usable_for_id", False)),
+                    float(item.get("window_quality_score", 0.0) or 0.0),
+                    abs(float(item.get("amplitude", 0.0) or 0.0)),
+                ),
+                reverse=True,
+            )
             best_event = max(candidate_windows, key=lambda item: abs(item["amplitude"]))
             return candidate_windows, best_event
         return [], None
@@ -295,25 +724,43 @@ def build_candidate_windows(df: pd.DataFrame) -> Tuple[List[Dict], Dict | None]:
         "amplitude": float(mv_diff[center]),
         "type": "mv_change",
     }
+    event = {**event, **_score_candidate_window(df, event)}
     return [event], event
 
 
-def select_identification_window(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict], Dict | None, List[Dict]]:
+def select_identification_window(
+    df: pd.DataFrame,
+    selected_window_index: int | None = None,
+) -> Tuple[pd.DataFrame, List[Dict], Dict | None, List[Dict]]:
     candidate_windows, selected_event = build_candidate_windows(df)
+    step_events = list(df.attrs.get("step_events", [])) if isinstance(getattr(df, "attrs", None), dict) else []
     if candidate_windows:
-        selected_event = selected_event or candidate_windows[0]
+        chosen_event = None
+        if selected_window_index is not None:
+            try:
+                idx = int(selected_window_index)
+            except Exception:
+                idx = -1
+            if 0 <= idx < len(candidate_windows):
+                chosen_event = candidate_windows[idx]
+
+        selected_event = chosen_event or selected_event or candidate_windows[0]
         start_idx = int(selected_event["window_start_idx"])
         end_idx = int(selected_event["window_end_idx"])
-        return df.iloc[start_idx:end_idx].reset_index(drop=True), candidate_windows, selected_event, candidate_windows
+        return df.iloc[start_idx:end_idx].reset_index(drop=True), step_events, selected_event, candidate_windows
 
     if len(df) < 20:
         return df.copy(), [], None, []
     return df.copy(), [], None, []
 
 
-def prepare_pid_dataset(csv_path: str) -> Dict:
-    raw_df = pd.read_csv(csv_path)
-    cleaned_df = clean_pid_dataframe(raw_df)
+def prepare_pid_dataset(
+    csv_path: str,
+    selected_loop_prefix: str | None = None,
+    selected_window_index: int | None = None,
+) -> Dict:
+    raw_df = _read_csv_with_fallback(csv_path)
+    cleaned_df = clean_pid_dataframe(raw_df, selected_loop_prefix=selected_loop_prefix)
     dt = estimate_sampling_time(cleaned_df)
 
     denoised_df = cleaned_df.copy()
@@ -321,7 +768,10 @@ def prepare_pid_dataset(csv_path: str) -> Dict:
         denoised_df["PV"] = adaptive_denoise(denoised_df["PV"].to_numpy(), noise_level="auto")
         denoised_df["MV"] = adaptive_denoise(denoised_df["MV"].to_numpy(), noise_level="low")
 
-    window_df, step_events, selected_event, candidate_windows = select_identification_window(denoised_df)
+    window_df, step_events, selected_event, candidate_windows = select_identification_window(
+        denoised_df,
+        selected_window_index=selected_window_index,
+    )
     if len(window_df) < 20:
         window_df = denoised_df.copy().reset_index(drop=True)
         selected_event = None
@@ -363,7 +813,7 @@ def load_and_slice_data(csv_path: str, max_pv_change: bool = True) -> pd.DataFra
     Returns:
         DataFrame with columns: timestamp, SV, PV, MV
     """
-    df = pd.read_csv(csv_path)
+    df = _read_csv_with_fallback(csv_path)
     
     # 确保必要的列存在
     required_cols = ['timestamp', 'SV', 'PV', 'MV']

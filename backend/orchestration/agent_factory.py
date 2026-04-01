@@ -28,7 +28,7 @@ def create_pid_agents(
         data_analyst_prompt = f"""You are the data analysis agent.
 The user already provided a local CSV file: "{csv_path}".
 Call tool_load_data(csv_path="{csv_path}") directly. Do not call tool_fetch_history_data.
-After the tool succeeds, summarize the data size, sampling time, candidate step count, and selected identification window in one concise Chinese sentence."""
+After the tool succeeds, summarize the data size, sampling time, candidate step count, and clearly state that "all identified candidate windows have been passed to the identification agent for unified multi-window multi-model optimal selection" in one concise Chinese sentence."""
     else:
         data_analyst_tools = [tool_fetch_history_data, tool_load_data]
         data_analyst_prompt = f"""You are the data analysis agent.
@@ -36,7 +36,7 @@ No CSV file was uploaded, so you must fetch historical data first.
 Call:
 tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_time="{end_time}", data_type="{data_type}", window={window})
 Then call tool_load_data(csv_path=...) with the returned csv_path.
-After both steps succeed, summarize the data size, sampling time, candidate step count, and selected identification window in one concise Chinese sentence."""
+After both steps succeed, summarize the data size, sampling time, candidate step count, and clearly state that "all identified candidate windows have been passed to the identification agent for unified multi-window multi-model optimal selection" in one concise Chinese sentence."""
 
     data_analyst = AssistantAgent(
 

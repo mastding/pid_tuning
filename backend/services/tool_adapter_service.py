@@ -77,9 +77,15 @@ def load_data_tool(
     *,
     session_store: Mapping[str, Any] | dict[str, Any],
     csv_path: str,
-    load_pid_dataset_fn: Callable[[str], Dict[str, Any]],
+    selected_loop_prefix: str | None = None,
+    selected_window_index: int | None = None,
+    load_pid_dataset_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
-    prepared = load_pid_dataset_fn(csv_path)
+    prepared = load_pid_dataset_fn(
+        csv_path,
+        selected_loop_prefix=selected_loop_prefix,
+        selected_window_index=selected_window_index,
+    )
     session_store["csv_path"] = prepared["csv_path"]
     session_store["cleaned_df"] = prepared["cleaned_df"]
     session_store["window_df"] = prepared["window_df"]
@@ -95,17 +101,14 @@ def load_data_tool(
 
     return {
         "data_points": prepared["data_points"],
-        "window_points": prepared["window_points"],
         "sampling_time": prepared["sampling_time"],
         "mv_range": prepared["mv_range"],
         "pv_range": prepared["pv_range"],
         "available_columns": prepared["available_columns"],
         "step_events": prepared["step_events"],
         "candidate_windows": prepared["candidate_windows"],
-        "selected_window": prepared["selected_window"],
-        "window_overview": prepared["window_overview"],
-        "quality_metrics": prepared["quality_metrics"],
         "status": prepared["status"],
+        "instruction": "数据加载成功。已提取多个候选窗口并存入上下文，后续由辨识智能体(tool_fit_fopdt)做多窗口评估，无需你做单窗口选择。"
     }
 
 

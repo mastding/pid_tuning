@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PID 智能整定系统｜生产化人力分工建议</title>
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #475569;
+        --line: #e2e8f0;
+        --bg: #ffffff;
+        --chip: #f1f5f9;
+        --accent: #2563eb;
+        --ok: #059669;
+        --warn: #b45309;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      }
+      .page {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 28px 28px 40px;
+      }
+      .header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid var(--line);
+      }
+      .title h1 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: 0.2px;
+      }
+      .title p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        max-width: 720px;
+      }
+      .meta {
+        text-align: right;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .meta .chip {
+        display: inline-block;
+        padding: 4px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--chip);
+        margin-left: 6px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 16px;
+        margin-top: 18px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px 14px 12px;
+        background: #fff;
+      }
+      h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        letter-spacing: 0.2px;
+      }
+      ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); }
+      li { margin: 4px 0; }
+      .kpi {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .kpi .item {
+        border: 1px dashed var(--line);
+        border-radius: 12px;
+        padding: 10px 10px 8px;
+        background: #fcfcfd;
+      }
+      .kpi .label { color: var(--muted); font-size: 12px; }
+      .kpi .value { font-weight: 700; margin-top: 2px; }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 12px;
+        border: 1px solid var(--line);
+        background: var(--chip);
+        color: var(--muted);
+        margin-right: 6px;
+      }
+      .pill strong { color: var(--ink); }
+      .pill.ok { border-color: rgba(5, 150, 105, 0.25); background: rgba(5, 150, 105, 0.08); }
+      .pill.warn { border-color: rgba(180, 83, 9, 0.25); background: rgba(180, 83, 9, 0.08); }
+      .section { margin-top: 16px; }
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .table th, .table td {
+        padding: 10px 10px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      .table th {
+        text-align: left;
+        font-size: 12px;
+        color: var(--muted);
+        background: #f8fafc;
+        letter-spacing: 0.2px;
+      }
+      .table tr:last-child td { border-bottom: none; }
+      .small { font-size: 12px; color: var(--muted); }
+      .tags { margin-top: 8px; }
+      .tag {
+        display: inline-block;
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 10px;
+        padding: 4px 8px;
+        font-size: 12px;
+        color: var(--muted);
+        margin: 4px 6px 0 0;
+      }
+      .tag code { color: var(--ink); }
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .callout {
+        border-left: 4px solid var(--accent);
+        background: rgba(37, 99, 235, 0.06);
+        border-radius: 12px;
+        padding: 12px 12px;
+        color: var(--muted);
+      }
+      .callout b { color: var(--ink); }
+      .footer {
+        margin-top: 18px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .page-break { break-before: page; page-break-before: always; }
+      @media print {
+        body { background: #fff; }
+        .page { padding: 18mm 16mm; }
+        .meta .chip { border-color: #cbd5e1; }
+        a { color: inherit; text-decoration: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="header">
+        <div class="title">
+          <h1>PID 智能整定系统｜生产化人力分工建议</h1>
+          <p>
+            目标：将当前“多智能体协同 + 数据分析/系统辨识/PID整定/评估反馈”的原型，推进为可生产落地的系统。
+            下面分工基于现有代码结构（后端 <b>FastAPI + 多智能体编排 + 控制算法服务</b>，前端 <b>Vue/Vite + 过程可视化与解释弹窗</b>）。
+          </p>
+        </div>
+        <div class="meta">
+          <div>材料类型：项目汇报（1–2页）</div>
+          <div>
+            <span class="chip">人力申请</span>
+            <span class="chip">分工与里程碑</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h2>当前实现概览（从代码拆解能力边界）</h2>
+          <div class="tags">
+            <span class="tag"><code>backend/api</code>：流式整定接口（SSE）与 CSV 上传/解析</span>
+            <span class="tag"><code>backend/orchestration</code>：多智能体编排、事件映射、工作流运行器</span>
+            <span class="tag"><code>backend/services</code>：数据服务/辨识服务/整定服务/评估服务/工具适配</span>
+            <span class="tag"><code>backend/skills</code>：系统辨识、整定策略、评分器、数据分析技能</span>
+            <span class="tag"><code>frontend/js + public</code>：SSE 消费、执行过程卡片、解释弹窗与图表</span>
+            <span class="tag"><code>tests</code>：服务重构冒烟、知识图谱泛化测试</span>
+          </div>
+          <ul>
+            <li>数据接入：历史接口与 CSV 上传两种路径；支持多回路识别与回路选择。</li>
+            <li>候选窗口：基于 SV 阶跃与 MV 变化形成候选窗口；前端可查看候选与尝试过程。</li>
+            <li>系统辨识：对候选窗口×多模型（FO/FOPDT/SOPDT/IPDT）尝试，输出参数与置信度。</li>
+            <li>整定与评估：策略候选（IMC/LAMBDA/ZN/CHR）+ 闭环仿真评分；低置信度时策略更保守。</li>
+            <li>可解释性：已具备“候选窗口说明/辨识过程详情/整定详情抽屉”等可视化入口。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h2>生产化关注点（需要补齐的工程能力）</h2>
+          <div class="kpi">
+            <div class="item">
+              <div class="label">可靠性</div>
+              <div class="value">告警/追踪/限流/重试</div>
+            </div>
+            <div class="item">
+              <div class="label">质量</div>
+              <div class="value">测试矩阵与回归</div>
+            </div>
+            <div class="item">
+              <div class="label">安全</div>
+              <div class="value">鉴权/脱敏/审计</div>
+            </div>
+            <div class="item">
+              <div class="label">交付</div>
+              <div class="value">CI/CD 与版本发布</div>
+            </div>
+          </div>
+          <div class="section">
+            <span class="pill ok"><strong>已有</strong>：核心算法链路贯通</span>
+            <span class="pill warn"><strong>缺口</strong>：可观测性与测试覆盖</span>
+            <span class="pill warn"><strong>缺口</strong>：接入规范/权限边界</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>人力分工建议（按工作流拆分，便于并行推进）</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width: 14%">角色 / 人数建议</th>
+              <th style="width: 28%">责任边界（对应代码模块）</th>
+              <th style="width: 30%">关键交付物（可验收）</th>
+              <th style="width: 28%">风险与依赖</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>技术负责人</b><div class="small">1 人</div></td>
+              <td>
+                架构与质量门禁；接口规范；性能与可观测性标准。
+                <div class="small">覆盖：<code>backend/orchestration</code>、<code>backend/services</code></div>
+              </td>
+              <td>
+                生产化技术路线、版本策略、关键指标定义（置信度阈值、稳定性、失败降级）。
+              </td>
+              <td>
+                需要与产品/算法/测试对齐验收口径，避免“能跑但不可用/不可解释”。
+              </td>
+            </tr>
+            <tr>
+              <td><b>后端工程师</b><div class="small">2 人</div></td>
+              <td>
+                API/流式事件协议、会话状态、任务队列与持久化；接入鉴权与限流。
+                <div class="small">覆盖：<code>backend/api</code>、<code>backend/state</code>、<code>backend/services</code></div>
+              </td>
+              <td>
+                稳定的 SSE 事件结构；任务会话可追溯；错误码体系；并发与超时策略。
+              </td>
+              <td>
+                依赖 DevOps 的部署/观测；依赖前端对事件协议的稳定消费。
+              </td>
+            </tr>
+            <tr>
+              <td><b>算法/控制工程师</b><div class="small">2 人</div></td>
+              <td>
+                窗口质量评估、模型族扩展、拟合稳健性、整定策略约束与可解释性。
+                <div class="small">覆盖：<code>backend/skills</code>、<code>backend/services/identification_service.py</code>、<code>backend/services/pid_tuning_service.py</code></div>
+              </td>
+              <td>
+                数据质量判定规则（门槛/原因码）；模型选择与策略选择的可解释输出；离线回归集。
+              </td>
+              <td>
+                需要真实工业数据样本与标注（哪些窗口可用、期望策略）；与 QA 共建回归标准。
+              </td>
+            </tr>
+            <tr>
+              <td><b>前端工程师</b><div class="small">1–2 人</div></td>
+              <td>
+                执行过程可视化（详情抽屉/解释弹窗/对比表格/图表）；任务会话管理与导出报告。
+                <div class="small">覆盖：<code>frontend/js/app.js</code>、<code>frontend/public/app-template.html</code></div>
+              </td>
+              <td>
+                “一键定位问题”体验：候选窗口、attempts、最终选择原因；导出专业报告 HTML/PDF。
+              </td>
+              <td>
+                依赖后端输出结构化 detail 字段；大数据量 attempts 的性能与分页策略。
+              </td>
+            </tr>
+            <tr>
+              <td><b>测试/QA</b><div class="small">1–2 人</div></td>
+              <td>
+                回归用例、数据集管理、端到端链路测试、稳定性/性能/安全测试。
+                <div class="small">覆盖：<code>tests</code> + 新增 e2e</div>
+              </td>
+              <td>
+                测试矩阵：数据接入/多回路/窗口识别/辨识/整定/评估/异常降级；自动化回归流水线。
+              </td>
+              <td>
+                依赖产品验收标准；依赖 DevOps 提供测试环境与日志/指标可观测能力。
+              </td>
+            </tr>
+            <tr>
+              <td><b>DevOps/SRE</b><div class="small">1 人</div></td>
+              <td>
+                部署发布、监控告警、日志追踪、容量规划与备份恢复。
+                <div class="small">覆盖：部署脚本/CI/CD/运行时观测</div>
+              </td>
+              <td>
+                CI/CD（构建/测试/发布）；环境隔离（dev/stage/prod）；指标与告警面板。
+              </td>
+              <td>
+                依赖后端埋点与结构化日志；依赖安全要求（密钥管理、审计）。</td>
+            </tr>
+            <tr>
+              <td><b>产品/行业顾问</b><div class="small">1 人</div></td>
+              <td>
+                定义“可用”的业务标准：置信度阈值、稳定性、结果解释、上线流程与责任边界。
+              </td>
+              <td>
+                需求拆解与验收口径；典型场景与数据样本池；用户手册与操作 SOP。
+              </td>
+              <td>
+                需要对接现场工艺与运行约束；统一“失败/不可辨识”时的处理策略。</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="callout section">
+          <b>人员规模建议：</b>核心 7–10 人并行推进（后端 2、算法 2、前端 1–2、QA 1–2、SRE 1、技术负责人 1，产品/行业顾问 1 可与 PM 角色合并或兼职）。
+          该规模可覆盖“功能完善 + 质量门禁 + 可观测性 + 交付上线”四条主线。
+        </div>
+      </div>
+
+      <div class="page-break"></div>
+
+      <div class="header">
+        <div class="title">
+          <h1>生产化推进路径（按交付物分阶段验收）</h1>
+          <p>按“能上线、能解释、能回归”的顺序推进；每阶段都给出可验收产物与责任人。</p>
+        </div>
+        <div class="meta">
+          <div><span class="chip">阶段化交付</span><span class="chip">验收口径</span></div>
+        </div>
+      </div>
+
+      <div class="two-col section">
+        <div class="card">
+          <h2>阶段 1：稳定可用（工程底座）</h2>
+          <ul>
+            <li>接口协议稳定：SSE 事件结构化（tool/attempts/selection_reason）与错误码体系。</li>
+            <li>会话可追溯：每次整定绑定 task session，可回放、可导出。</li>
+            <li>基础观测：关键链路耗时、失败率、模型置信度分布、策略分布。</li>
+          </ul>
+          <div class="tags">
+            <span class="tag">负责人：后端 ×2 + SRE ×1</span>
+            <span class="tag">验收：压测/超时/重试/错误码一致</span>
+          </div>
+        </div>
+        <div class="card">
+          <h2>阶段 2：可解释可诊断（面向现场）</h2>
+          <ul>
+            <li>候选窗口可视化：窗口列表、触发原因、质量过滤原因码。</li>
+            <li>辨识过程透明：多窗口×多模型 attempts 表格、对齐/去趋势信息、拟合预览。</li>
+            <li>低置信度降级：策略强制保守 + 明确的“建议补采/换窗口”提示。</li>
+          </ul>
+          <div class="tags">
+            <span class="tag">负责人：前端 ×1–2 + 算法 ×2</span>
+            <span class="tag">验收：可复现诊断路径与解释一致</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col section">
+        <div class="card">
+          <h2>阶段 3：质量门禁（自动化回归）</h2>
+          <ul>
+            <li>数据集回归：典型回路/工况/噪声/饱和/漂移样本集。</li>
+            <li>端到端自动化：CSV 与历史接口两条路径的全链路回归。</li>
+            <li>指标门槛：置信度、稳定性、最终评分、关键错误码“零回归”。</li>
+          </ul>
+          <div class="tags">
+            <span class="tag">负责人：QA ×1–2 + 算法 ×1 + 后端 ×1</span>
+            <span class="tag">验收：CI 通过率、回归覆盖率、缺陷闭环</span>
+          </div>
+        </div>
+        <div class="card">
+          <h2>阶段 4：上线与运维（可持续运行）</h2>
+          <ul>
+            <li>环境隔离与发布：dev/stage/prod；灰度/回滚流程。</li>
+            <li>安全与审计：密钥管理、访问控制、关键操作审计与脱敏。</li>
+            <li>运维手册：告警处置、数据接入 SOP、现场故障排查路径。</li>
+          </ul>
+          <div class="tags">
+            <span class="tag">负责人：SRE ×1 + 后端 ×1 + 产品/行业 ×1</span>
+            <span class="tag">验收：演练通过（故障/回滚/审计）</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section card">
+        <h2>关键风险与人力诉求（建议在汇报中强调）</h2>
+        <ul>
+          <li><b>数据可辨识性</b>：现场数据噪声/漂移/饱和导致置信度低，必须投入算法+行业联合定义“可用数据门槛”和“补采策略”。</li>
+          <li><b>端到端质量</b>：仅靠单元测试不足以保障生产表现，需要 QA 主导的样本集与回归流水线。</li>
+          <li><b>可观测性</b>：没有日志/指标/追踪就无法定位“是数据问题还是算法问题”，必须 SRE 早介入。</li>
+          <li><b>解释一致性</b>：输出给现场的解释必须与系统内部决策一致，前端需要稳定承载结构化 detail。</li>
+        </ul>
+        <div class="callout">
+          <b>人力申请要点：</b>本项目不是“单纯做界面/接接口”，核心在“控制算法 + 工程质量 + 可解释性 + 运维体系”的组合交付。
+          建议一次性补齐后端、算法、QA、SRE 的关键岗位，避免后期返工。
+        </div>
+      </div>
+
+      <div class="footer">
+        备注：本材料基于当前代码结构梳理分工，便于快速启动多人并行开发与测试。建议在立项后同步补充：验收指标表、数据集清单、上线责任边界（失败/不可辨识/建议补采的处置流程）。
+      </div>
+    </div>
+  </body>
+</html>
+

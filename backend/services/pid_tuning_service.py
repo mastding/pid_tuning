@@ -708,6 +708,10 @@ def select_best_pid_strategy(
 
     if full_benchmark_triggered:
         remaining = [strategy for strategy in ALL_STRATEGIES if strategy not in prioritized]
+        if confidence_score < 0.55:
+            remaining = [strategy for strategy in remaining if strategy not in {"ZN", "CHR"}]
+        if confidence_score < 0.35:
+            remaining = [strategy for strategy in remaining if strategy in {"IMC", "LAMBDA"}]
         evaluate_group(remaining)
 
     if best_candidate is None:
@@ -769,7 +773,7 @@ def select_best_pid_strategy(
     if full_benchmark_triggered:
         selection_reason = (
             f"先优先试算历史偏好策略与启发式策略（{', '.join(prioritized)}），"
-            f"因评分未达标，已扩展为 {', '.join(ALL_STRATEGIES)} 的全量闭环试算，"
+            f"因评分未达标，已扩展为 {', '.join(remaining or prioritized)} 的闭环试算，"
             f"最终选择 performance_score 最高的 {best_candidate['strategy']}。"
         )
     else:

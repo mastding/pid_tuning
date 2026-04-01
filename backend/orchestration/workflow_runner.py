@@ -64,7 +64,10 @@ def _parse_tool_result(content: Any) -> Dict[str, Any]:
         try:
             return json.loads(content)
         except Exception:
-            return ast.literal_eval(content)
+            try:
+                return ast.literal_eval(content)
+            except Exception:
+                return {"result": content}
     return {"result": str(content)}
 
 
@@ -198,6 +201,8 @@ async def run_multi_agent_collaboration(
     end_time: str,
     data_type: str,
     window: int,
+    selected_loop_prefix: str | None = None,
+    selected_window_index: int | None = None,
     llm_config: Dict[str, Any],
     shared_data_store: Dict[str, Any],
     create_model_client: Callable[..., Any],
@@ -215,6 +220,10 @@ async def run_multi_agent_collaboration(
     shared_data_store["plant_type"] = plant_type
     shared_data_store["scenario"] = scenario
     shared_data_store["control_object"] = control_object
+    if selected_loop_prefix is not None:
+        shared_data_store["selected_loop_prefix"] = selected_loop_prefix
+    if selected_window_index is not None:
+        shared_data_store["selected_window_index"] = selected_window_index
 
     model_client = create_model_client(
         model_api_key=llm_config["api_key"],
@@ -260,9 +269,48 @@ async def run_multi_agent_collaboration(
     current_agent = ""
     current_turn_data = None
     last_agent = None
+    next_event_task: asyncio.Task | None = None
 
     try:
-        async for event in team.run_stream(task=task_message, cancellation_token=cancel_token):
+        stream = team.run_stream(task=task_message, cancellation_token=cancel_token)
+        idle_seconds = 0.0
+        heartbeat_interval_seconds = 15.0
+        max_idle_seconds = 180.0
+        next_event_task = asyncio.create_task(stream.__anext__())
+
+        while True:
+            try:
+                event = await asyncio.wait_for(asyncio.shield(next_event_task), timeout=heartbeat_interval_seconds)
+            except asyncio.TimeoutError:
+                idle_seconds += heartbeat_interval_seconds
+                yield {
+                    "type": "thought",
+                    "agent": current_agent or (last_agent or "系统"),
+                    "content": f"[heartbeat] 仍在等待智能体响应…已等待 {int(idle_seconds)} 秒",
+                }
+                await asyncio.sleep(0.1)
+                if idle_seconds >= max_idle_seconds:
+                    cancel_token.cancel()
+                    try:
+                        if next_event_task is not None:
+                            next_event_task.cancel()
+                    except Exception:
+                        pass
+                    yield {
+                        "type": "error",
+                        "message": "任务长时间无输出，可能上游模型调用超时或阻塞。",
+                        "error_type": "TIMEOUT",
+                        "error_code": "STREAM_IDLE_TIMEOUT",
+                        "error_detail": f"agent={current_agent or last_agent or ''}, idle_seconds={int(idle_seconds)}",
+                    }
+                    return
+                continue
+            except StopAsyncIteration:
+                break
+
+            idle_seconds = 0.0
+            next_event_task = asyncio.create_task(stream.__anext__())
+
             event_agent = None
             if hasattr(event, "source"):
                 event_agent = DISPLAY_AGENT_NAMES.get(str(event.source), str(event.source))
@@ -312,6 +360,156 @@ async def run_multi_agent_collaboration(
                         )
                         if current_turn_data and current_turn_data["tools"]:
                             current_turn_data["tools"][-1]["result"] = display_result
+
+                        if isinstance(result_data, dict) and current_tool_name == "tool_load_data":
+                            candidate_windows = result_data.get("candidate_windows") or []
+                            usable_windows = [
+                                w for w in candidate_windows if isinstance(w, dict) and w.get("window_usable_for_id") is True
+                            ]
+                            if not usable_windows:
+                                reason_counter: Dict[str, int] = {}
+                                for w in candidate_windows:
+                                    if not isinstance(w, dict):
+                                        continue
+                                    reasons = w.get("window_quality_reasons") or []
+                                    if not isinstance(reasons, list):
+                                        continue
+                                    for r in reasons:
+                                        if not r:
+                                            continue
+                                        key = str(r)
+                                        reason_counter[key] = int(reason_counter.get(key, 0)) + 1
+
+                                top_reasons = sorted(reason_counter.items(), key=lambda kv: kv[1], reverse=True)[:3]
+                                top_reason_text = "、".join([f"{name}({count})" for name, count in top_reasons]) if top_reasons else ""
+
+                                data_points = int(result_data.get("data_points") or 0)
+                                sampling_time = result_data.get("sampling_time")
+                                step_event_count = len(result_data.get("step_events") or [])
+                                candidate_count = len(candidate_windows)
+                                response_text = (
+                                    f"数据分析完成。数据包含{data_points}个采样点，采样间隔{sampling_time}秒，"
+                                    f"共识别出{candidate_count}个候选窗口（阶跃事件{step_event_count}个）。"
+                                    "未发现可用于系统辨识的窗口，已终止后续流程。"
+                                )
+                                if top_reason_text:
+                                    response_text += f"主要原因：{top_reason_text}。"
+
+                                if current_turn_data is not None:
+                                    current_turn_data["response"] = response_text
+                                    finalized = finalize_agent_turn(current_turn_data)
+                                    if finalized is not None:
+                                        yield finalized
+                                        await asyncio.sleep(0.2)
+
+                                yield {
+                                    "type": "result",
+                                    "data": {
+                                        "termination": {
+                                            "terminated": True,
+                                            "stage": "data_analysis",
+                                            "reason_code": "NO_USABLE_WINDOWS",
+                                            "message": response_text,
+                                        },
+                                        "dataAnalysis": {
+                                            "dataPoints": data_points,
+                                            "stepEvents": step_event_count,
+                                            "stepEventDetails": result_data.get("step_events") or [],
+                                            "samplingTime": sampling_time,
+                                            "candidateWindows": candidate_windows,
+                                            "qualityMetrics": result_data.get("quality_metrics") or {},
+                                        },
+                                        "model": {
+                                            "modelType": "",
+                                            "confidence": 0.0,
+                                            "attempts": [],
+                                            "windowOverview": result_data.get("window_overview") or {"points": []},
+                                            "fitPreview": {"points": []},
+                                        },
+                                        "pidParams": {},
+                                    },
+                                }
+                                cancel_token.cancel()
+                                return
+
+                        if isinstance(result_data, dict) and current_tool_name == "tool_fit_fopdt":
+                            confidence_value = 1.0
+                            try:
+                                confidence_value = float(result_data.get("confidence", 1.0))
+                            except Exception:
+                                confidence_value = 1.0
+
+                            min_confidence = 0.35
+                            if confidence_value < min_confidence:
+                                response_text = (
+                                    f"系统辨识完成，但模型置信度{confidence_value:.2f}低于阈值{min_confidence:.2f}，"
+                                    "为避免不可靠的整定结果，已终止后续整定与评估流程。"
+                                )
+                                if current_turn_data is not None:
+                                    current_turn_data["response"] = response_text
+                                    finalized = finalize_agent_turn(current_turn_data)
+                                    if finalized is not None:
+                                        yield finalized
+                                        await asyncio.sleep(0.2)
+
+                                quality_metrics = shared_data.get("quality_metrics") or {}
+                                yield {
+                                    "type": "result",
+                                    "data": {
+                                        "termination": {
+                                            "terminated": True,
+                                            "stage": "system_identification",
+                                            "reason_code": "LOW_CONFIDENCE",
+                                            "message": response_text,
+                                            "min_confidence": min_confidence,
+                                            "confidence": confidence_value,
+                                        },
+                                        "dataAnalysis": {
+                                            "dataPoints": shared_data.get("data_points", 0),
+                                            "stepEvents": len(shared_data.get("step_events") or []),
+                                            "stepEventDetails": shared_data.get("step_events") or [],
+                                            "samplingTime": shared_data.get("sampling_time", 1.0),
+                                            "historyRange": {
+                                                "startTime": shared_data.get("start_time", start_time),
+                                                "endTime": shared_data.get("end_time", end_time),
+                                            },
+                                            "qualityMetrics": quality_metrics,
+                                        },
+                                        "model": {
+                                            "modelType": shared_data.get("model_type", result_data.get("model_type", "")),
+                                            "selectedModelParams": shared_data.get(
+                                                "selected_model_params", result_data.get("selected_model_params", {})
+                                            ),
+                                            "modelSelectionReason": shared_data.get(
+                                                "model_selection_reason", result_data.get("model_selection_reason", "")
+                                            ),
+                                            "K": shared_data.get("K", result_data.get("K", 0.0)),
+                                            "T": shared_data.get("T", result_data.get("T", 0.0)),
+                                            "L": shared_data.get("L", result_data.get("L", 0.0)),
+                                            "confidence": confidence_value,
+                                            "normalizedRmse": shared_data.get(
+                                                "normalized_rmse", result_data.get("normalized_rmse", shared_data.get("residue", 0.0))
+                                            ),
+                                            "r2Score": shared_data.get("r2_score", result_data.get("r2_score", 0.0)),
+                                            "reasonCodes": result_data.get("reason_codes", shared_data.get("reason_codes", [])),
+                                            "nextActions": result_data.get("next_actions", shared_data.get("next_actions", [])),
+                                            "selectedWindowSource": result_data.get(
+                                                "selected_window_source", shared_data.get("selected_window_source", "")
+                                            ),
+                                            "attempts": result_data.get("attempts", shared_data.get("attempts", [])),
+                                            "fitPreview": result_data.get("fit_preview", shared_data.get("fit_preview", {"points": []})),
+                                            "windowOverview": result_data.get(
+                                                "window_overview", shared_data.get("window_overview", {"points": []})
+                                            ),
+                                            "windowBenchmark": result_data.get(
+                                                "window_benchmark", shared_data.get("window_benchmark", {})
+                                            ),
+                                        },
+                                        "pidParams": {},
+                                    },
+                                }
+                                cancel_token.cancel()
+                                return
                     except Exception as exc:
                         error_result = {
                             "raw_content": str(tool_result.content)[:500],
@@ -325,7 +523,33 @@ async def run_multi_agent_collaboration(
                 continue
 
             if isinstance(event, TextMessage):
-                if event.content and getattr(event, "source", None) != "user" and current_turn_data:
+                if event.content and getattr(event, "source", None) != "user":
+                    if event_agent and event_agent != last_agent:
+                        if current_turn_data is not None:
+                            finalized = finalize_agent_turn(current_turn_data)
+                            if finalized is not None:
+                                yield finalized
+                                await asyncio.sleep(0.2)
+
+                        current_turn_data = {
+                            "type": "agent_turn",
+                            "agent": event_agent,
+                            "tools": [],
+                            "response": "",
+                        }
+                        last_agent = event_agent
+                        current_agent = event_agent
+
+                    if current_turn_data is None:
+                        current_turn_data = {
+                            "type": "agent_turn",
+                            "agent": event_agent or (current_agent or "系统"),
+                            "tools": [],
+                            "response": "",
+                        }
+                        last_agent = event_agent or last_agent
+                        current_agent = event_agent or current_agent
+
                     current_turn_data["response"] = event.content
                 continue
 
@@ -335,6 +559,11 @@ async def run_multi_agent_collaboration(
                     if finalized is not None:
                         yield finalized
                         await asyncio.sleep(0.3)
+                try:
+                    if next_event_task is not None and not next_event_task.done():
+                        next_event_task.cancel()
+                except Exception:
+                    pass
                 break
 
             event_type = type(event).__name__
@@ -472,3 +701,9 @@ async def run_multi_agent_collaboration(
             "error_type": mapped_error["error_type"],
             "error_detail": mapped_error["detail"],
         }
+    finally:
+        try:
+            if next_event_task is not None and not next_event_task.done():
+                next_event_task.cancel()
+        except Exception:
+            pass

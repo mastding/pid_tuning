@@ -43,7 +43,7 @@ from services.system_config_service import (
     get_runtime_system_config,
     update_runtime_system_config,
 )
-from skills.data_analysis_skills import fetch_history_data_csv
+from skills.data_analysis_skills import _read_csv_with_fallback, detect_pid_loops, fetch_history_data_csv
 from skills.rating import ModelRating
 from state.workflow_task_store import WorkflowTaskStore
 
@@ -310,6 +310,8 @@ def create_app(
         end_time: str,
         data_type: str,
         window: int,
+        selected_loop_prefix: str | None = None,
+        selected_window_index: int | None = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         async for event in run_multi_agent_collaboration(
             csv_path=csv_path,
@@ -323,6 +325,8 @@ def create_app(
             end_time=end_time,
             data_type=data_type,
             window=window,
+            selected_loop_prefix=selected_loop_prefix,
+            selected_window_index=selected_window_index,
             llm_config=llm_config,
         ):
             yield event
@@ -403,6 +407,8 @@ def create_app(
         end_time: str = Form(default_history_end_time),
         data_type: str = Form("interpolated"),
         window: int = Form(1),
+        selected_loop_prefix: str | None = Form(default=None),
+        selected_window_index: int | None = Form(default=None),
     ) -> StreamingResponse:
         csv_path = ""
         if file is not None:
@@ -425,6 +431,8 @@ def create_app(
                     end_time=end_time,
                     data_type=data_type,
                     window=window,
+                    selected_loop_prefix=selected_loop_prefix,
+                    selected_window_index=selected_window_index,
                 ):
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             except Exception as exc:
@@ -452,6 +460,141 @@ def create_app(
                 "Connection": "keep-alive",
             },
         )
+
+    @app.post("/api/tuning/csv/inspect-loops")
+    async def inspect_csv_loops(file: UploadFile = File(...)) -> Any:
+        csv_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
+                content = await file.read()
+                tmp_file.write(content)
+                csv_path = tmp_file.name
+
+            raw_df = _read_csv_with_fallback(csv_path)
+            loops = detect_pid_loops(raw_df)
+            options = [
+                {
+                    "prefix": loop.get("prefix", ""),
+                    "has_sv": bool(loop.get("sv_col")),
+                }
+                for loop in loops
+                if loop.get("prefix")
+            ]
+            recommended_prefix = options[0]["prefix"] if options else None
+            return JSONResponse(
+                {
+                    "code": 0,
+                    "message": "ok",
+                    "data": {
+                        "loops": options,
+                        "recommended_prefix": recommended_prefix,
+                        "available_columns": [str(col) for col in raw_df.columns.tolist()],
+                    },
+                }
+            )
+        except Exception as exc:
+            mapped_error = _map_workflow_error(exc)
+            return JSONResponse(
+                {
+                    "code": 1,
+                    "message": mapped_error["message"],
+                    "error_code": mapped_error["error_code"],
+                    "error_type": mapped_error["error_type"],
+                    "detail": mapped_error["detail"],
+                },
+                status_code=400,
+            )
+        finally:
+            if csv_path and os.path.exists(csv_path):
+                os.remove(csv_path)
+
+    @app.post("/api/tuning/csv/inspect-windows")
+    async def inspect_csv_windows(
+        file: UploadFile = File(...),
+        selected_loop_prefix: str | None = Form(default=None),
+    ) -> Any:
+        csv_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
+                content = await file.read()
+                tmp_file.write(content)
+                csv_path = tmp_file.name
+
+            dataset = load_pid_dataset(csv_path, selected_loop_prefix=selected_loop_prefix)
+            cleaned_df = dataset.get("cleaned_df")
+            candidate_windows = dataset.get("candidate_windows") or []
+            timestamps = cleaned_df["timestamp"] if cleaned_df is not None and "timestamp" in cleaned_df.columns else None
+
+            ranked: list[dict[str, Any]] = []
+            for idx, event in enumerate(candidate_windows):
+                amplitude = float(event.get("amplitude", 0.0) or 0.0)
+                score = abs(amplitude)
+                ranked.append({"index": int(idx), "score": score, "event": event})
+
+            ranked.sort(key=lambda item: item["score"], reverse=True)
+            top = ranked[:2]
+            recommended_index = int(ranked[0]["index"]) if ranked else None
+
+            display = []
+            for item in top:
+                event = item["event"] or {}
+                start_idx = int(event.get("window_start_idx", event.get("start_idx", 0)) or 0)
+                end_idx = int(event.get("window_end_idx", event.get("end_idx", start_idx)) or start_idx)
+                event_start_idx = int(event.get("start_idx", start_idx) or start_idx)
+                event_end_idx = int(event.get("end_idx", event_start_idx) or event_start_idx)
+                payload: dict[str, Any] = {
+                    "index": int(item["index"]),
+                    "event_type": str(event.get("type", "")),
+                    "amplitude": float(event.get("amplitude", 0.0) or 0.0),
+                    "window_start_idx": start_idx,
+                    "window_end_idx": end_idx,
+                    "event_start_idx": event_start_idx,
+                    "event_end_idx": event_end_idx,
+                }
+                if timestamps is not None and len(timestamps) > 0:
+                    last = len(timestamps) - 1
+                    start_idx = max(0, min(start_idx, last))
+                    end_idx = max(start_idx, min(end_idx, last))
+                    event_start_idx = max(0, min(event_start_idx, last))
+                    event_end_idx = max(event_start_idx, min(event_end_idx, last))
+                    payload.update(
+                        {
+                            "window_start_time": timestamps.iloc[start_idx].strftime("%Y-%m-%d %H:%M:%S"),
+                            "window_end_time": timestamps.iloc[end_idx].strftime("%Y-%m-%d %H:%M:%S"),
+                            "event_start_time": timestamps.iloc[event_start_idx].strftime("%Y-%m-%d %H:%M:%S"),
+                            "event_end_time": timestamps.iloc[event_end_idx].strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                    )
+                display.append(payload)
+
+            return JSONResponse(
+                {
+                    "code": 0,
+                    "message": "ok",
+                    "data": {
+                        "candidate_windows": display,
+                        "recommended_index": recommended_index,
+                        "available_columns": dataset.get("available_columns") or [],
+                        "sampling_time": dataset.get("sampling_time"),
+                        "data_points": dataset.get("data_points"),
+                    },
+                }
+            )
+        except Exception as exc:
+            mapped_error = _map_workflow_error(exc)
+            return JSONResponse(
+                {
+                    "code": 1,
+                    "message": mapped_error["message"],
+                    "error_code": mapped_error["error_code"],
+                    "error_type": mapped_error["error_type"],
+                    "detail": mapped_error["detail"],
+                },
+                status_code=400,
+            )
+        finally:
+            if csv_path and os.path.exists(csv_path):
+                os.remove(csv_path)
 
     @app.post("/api/agent/workflow/run", response_model=None)
     async def workflow_run(

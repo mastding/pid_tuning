@@ -199,12 +199,17 @@ async def tool_fetch_history_data(
     return _to_jsonable(result)
 
 
-async def tool_load_data(csv_path: str) -> Dict[str, Any]:
+async def tool_load_data(csv_path: str, selected_window_index: int | None = None) -> Dict[str, Any]:
     """Load and preprocess PID historical data via the data service."""
+    if selected_window_index is None:
+        selected_window_index = _shared_data_store.get("selected_window_index")
+    selected_loop_prefix = _shared_data_store.get("selected_loop_prefix")
     result = await asyncio.to_thread(
         service_load_data_tool,
         session_store=_shared_data_store,
         csv_path=csv_path,
+        selected_loop_prefix=selected_loop_prefix,
+        selected_window_index=selected_window_index,
         load_pid_dataset_fn=load_pid_dataset,
     )
     return _to_jsonable(result)
@@ -355,6 +360,8 @@ async def run_multi_agent_collaboration(
     data_type: str,
     window: int,
     llm_config: Dict[str, Any],
+    selected_loop_prefix: str | None = None,
+    selected_window_index: int | None = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     async def _fallback_without_llm() -> AsyncGenerator[Dict[str, Any], None]:
         shared_data: Dict[str, Any] = {}
@@ -364,6 +371,10 @@ async def run_multi_agent_collaboration(
         _shared_data_store["plant_type"] = plant_type
         _shared_data_store["scenario"] = scenario
         _shared_data_store["control_object"] = control_object
+        if selected_loop_prefix is not None:
+            _shared_data_store["selected_loop_prefix"] = selected_loop_prefix
+        if selected_window_index is not None:
+            _shared_data_store["selected_window_index"] = selected_window_index
 
         effective_csv_path = csv_path
         if not effective_csv_path:
@@ -521,6 +532,11 @@ async def run_multi_agent_collaboration(
         yield {"type": "result", "data": final_result}
         yield {"type": "done", "status": "succeeded"}
 
+    if selected_window_index is not None:
+        _shared_data_store["selected_window_index"] = selected_window_index
+    if selected_loop_prefix is not None:
+        _shared_data_store["selected_loop_prefix"] = selected_loop_prefix
+
     async for event in orchestration_run_multi_agent_collaboration(
         csv_path=csv_path,
         loop_name=loop_name,
@@ -533,6 +549,8 @@ async def run_multi_agent_collaboration(
         end_time=end_time,
         data_type=data_type,
         window=window,
+        selected_loop_prefix=selected_loop_prefix,
+        selected_window_index=selected_window_index,
         llm_config=llm_config,
         shared_data_store=_shared_data_store,
         create_model_client=create_model_client,
