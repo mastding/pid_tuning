@@ -550,6 +550,8 @@ async def run_multi_agent_collaboration(
                                 await asyncio.sleep(0.2)
 
                             effective_pid_params = shared_data_store.get("selected_pid_params") or {}
+                            initial_assessment = shared_data.get("initial_assessment") or {}
+                            evaluated_pid = initial_assessment.get("evaluated_pid") or {}
                             final_result: Dict[str, Any] = {
                                 "dataAnalysis": {
                                     "dataPoints": shared_data.get("data_points", 0),
@@ -587,9 +589,9 @@ async def run_multi_agent_collaboration(
                                     "windowOverview": shared_data.get("window_overview", {"points": []}),
                                 },
                                 "pidParams": {
-                                    "Kp": effective_pid_params.get("Kp", shared_data.get("Kp", 0.0)),
-                                    "Ki": effective_pid_params.get("Ki", shared_data.get("Ki", 0.0)),
-                                    "Kd": effective_pid_params.get("Kd", shared_data.get("Kd", 0.0)),
+                                    "Kp": effective_pid_params.get("Kp", shared_data.get("Kp", evaluated_pid.get("Kp", 0.0))),
+                                    "Ki": effective_pid_params.get("Ki", shared_data.get("Ki", evaluated_pid.get("Ki", 0.0))),
+                                    "Kd": effective_pid_params.get("Kd", shared_data.get("Kd", evaluated_pid.get("Kd", 0.0))),
                                     "Ti": effective_pid_params.get("Ti", shared_data.get("Ti", 0.0)),
                                     "Td": effective_pid_params.get("Td", shared_data.get("Td", 0.0)),
                                     "strategy": effective_pid_params.get("strategy", shared_data.get("strategy", "")),
@@ -733,6 +735,8 @@ async def run_multi_agent_collaboration(
             await asyncio.sleep(0.2)
 
         effective_pid_params = shared_data_store.get("selected_pid_params") or {}
+        initial_assessment = shared_data.get("initial_assessment") or {}
+        evaluated_pid = initial_assessment.get("evaluated_pid") or {}
         final_result = {
             "dataAnalysis": {
                 "dataPoints": shared_data.get("data_points", 0),
@@ -770,9 +774,9 @@ async def run_multi_agent_collaboration(
                 "windowOverview": shared_data.get("window_overview", {"points": []}),
             },
             "pidParams": {
-                "Kp": effective_pid_params.get("Kp", shared_data.get("Kp", 0.0)),
-                "Ki": effective_pid_params.get("Ki", shared_data.get("Ki", 0.0)),
-                "Kd": effective_pid_params.get("Kd", shared_data.get("Kd", 0.0)),
+                "Kp": effective_pid_params.get("Kp", shared_data.get("Kp", evaluated_pid.get("Kp", 0.0))),
+                "Ki": effective_pid_params.get("Ki", shared_data.get("Ki", evaluated_pid.get("Ki", 0.0))),
+                "Kd": effective_pid_params.get("Kd", shared_data.get("Kd", evaluated_pid.get("Kd", 0.0))),
                 "Ti": effective_pid_params.get("Ti", shared_data.get("Ti", 0.0)),
                 "Td": effective_pid_params.get("Td", shared_data.get("Td", 0.0)),
                 "strategy": effective_pid_params.get("strategy", shared_data.get("strategy", "")),

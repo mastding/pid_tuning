@@ -632,6 +632,9 @@ def fit_best_fopdt_window(
                 confidence_base = calculate_model_confidence(
                     fitted_model_base["normalized_rmse"],
                     fitted_model_base.get("r2_score"),
+                    points=len(candidate_df),
+                    drift_ratio=float(quality.get("drift_ratio", 0.0) or 0.0),
+                    saturation_ratio=float(quality.get("saturation_ratio", 0.0) or 0.0),
                 )
 
                 fitted_model = fitted_model_base
@@ -655,6 +658,9 @@ def fit_best_fopdt_window(
                     confidence_alt = calculate_model_confidence(
                         fitted_model_alt["normalized_rmse"],
                         fitted_model_alt.get("r2_score"),
+                        points=len(candidate_df),
+                        drift_ratio=float(quality.get("drift_ratio", 0.0) or 0.0),
+                        saturation_ratio=float(quality.get("saturation_ratio", 0.0) or 0.0),
                     )
 
                     attempt_result["alt_pv_detrended"] = bool(pv_detrended)

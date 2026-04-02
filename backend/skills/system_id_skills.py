@@ -352,29 +352,46 @@ def fit_sopdt_model(mv: np.ndarray, pv: np.ndarray, dt: float = 1.0) -> Dict:
 def calculate_model_confidence(
     residue: float,
     r2_score: float | None = None,
-    threshold: float = 0.25,
+    threshold: float = 0.35,
+    points: int | None = None,
+    drift_ratio: float = 0.0,
+    saturation_ratio: float = 0.0,
 ) -> Dict:
     """Calculate confidence from fit error and R²."""
     residue = float(residue)
-    rmse_score = max(0.0, 1.0 - residue / max(float(threshold), 1e-6))
     r2_score = float(r2_score) if r2_score is not None else 0.0
     r2_component = min(1.0, max(0.0, r2_score))
-    confidence = 0.6 * rmse_score + 0.4 * r2_component
+    points = max(1, int(points or 0))
+    drift_ratio = max(0.0, float(drift_ratio or 0.0))
+    saturation_ratio = max(0.0, float(saturation_ratio or 0.0))
 
-    if residue > 0.15:
-        confidence = min(confidence, 0.45)
-    elif residue > 0.1:
-        confidence = min(confidence, 0.65)
+    short_window_factor = max(0.0, min(1.0, (400.0 - float(points)) / 250.0))
+    r2_weight = 0.5 + 0.15 * short_window_factor
+    rmse_weight = 1.0 - r2_weight
+
+    rmse_ref = max(float(threshold), 1e-6)
+    if points < 400:
+        rmse_ref = max(rmse_ref, 0.45)
+    rmse_score = max(0.0, 1.0 - (residue / rmse_ref) ** 1.2)
+
+    confidence = r2_weight * r2_component + rmse_weight * rmse_score
+
+    if drift_ratio > 0.3:
+        confidence *= 1.0 - min((drift_ratio - 0.3) / 0.7, 1.0) * 0.18
+    if saturation_ratio > 0.25:
+        confidence *= 1.0 - min((saturation_ratio - 0.25) / 0.5, 1.0) * 0.15
     if r2_component < 0.4:
         confidence = min(confidence, 0.45)
+    if r2_component < 0.25:
+        confidence = min(confidence, 0.3)
 
-    if confidence > 0.85:
+    if confidence >= 0.8:
         recommendation = "模型可信，可直接用于 PID 整定"
         quality = "excellent"
-    elif confidence > 0.7:
+    elif confidence >= 0.65:
         recommendation = "模型基本可信，建议结合现场经验校核"
         quality = "good"
-    elif confidence > 0.5:
+    elif confidence >= 0.45:
         recommendation = "模型置信度偏低，建议复查数据窗口或重新试验"
         quality = "fair"
     else:
@@ -382,13 +399,18 @@ def calculate_model_confidence(
         quality = "poor"
 
     return {
-        "confidence": float(confidence),
+        "confidence": float(min(1.0, max(0.0, confidence))),
         "quality": quality,
         "recommendation": recommendation,
         "residue": residue,
         "rmse_score": float(rmse_score),
         "r2_score": float(r2_component),
         "threshold": float(threshold),
+        "points": int(points),
+        "drift_ratio": float(drift_ratio),
+        "saturation_ratio": float(saturation_ratio),
+        "r2_weight": float(r2_weight),
+        "rmse_weight": float(rmse_weight),
     }
 
 

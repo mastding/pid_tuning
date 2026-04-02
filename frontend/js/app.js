@@ -3668,7 +3668,21 @@ window: ${this.historyWindow || 1}
           return null;
         },
         latestTuningResultData() {
-          return this.latestTuningResultMessage?.data || this.selectedTaskSession?.latestResult || null;
+          const result = this.latestTuningResultMessage?.data || this.selectedTaskSession?.latestResult || null;
+          if (!result || typeof result !== 'object') return result;
+          const pid = result.pidParams || {};
+          const assessedPid = result.evaluation?.initial_assessment?.evaluated_pid || {};
+          const hasPid = ['Kp', 'Ki', 'Kd'].some(key => Number.isFinite(Number(pid?.[key])) && Math.abs(Number(pid[key])) > 0);
+          if (hasPid || !Object.keys(assessedPid).length) return result;
+          return {
+            ...result,
+            pidParams: {
+              ...pid,
+              Kp: Number.isFinite(Number(pid?.Kp)) && Math.abs(Number(pid.Kp)) > 0 ? pid.Kp : assessedPid.Kp ?? 0,
+              Ki: Number.isFinite(Number(pid?.Ki)) && Math.abs(Number(pid.Ki)) > 0 ? pid.Ki : assessedPid.Ki ?? 0,
+              Kd: Number.isFinite(Number(pid?.Kd)) && Math.abs(Number(pid.Kd)) > 0 ? pid.Kd : assessedPid.Kd ?? 0
+            }
+          };
         },
         professionalReportPayload() {
           const result = this.latestTuningResultData;

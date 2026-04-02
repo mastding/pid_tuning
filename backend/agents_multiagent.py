@@ -44,6 +44,9 @@ from services.system_config_service import (
     DEFAULT_KNOWLEDGE_GRAPH_ID,
     get_knowledge_graph_runtime_config,
     get_model_runtime_config,
+    get_model_timeout_config,
+    is_knowledge_expert_enabled,
+    is_llm_orchestration_enabled,
 )
 from orchestration.event_mapper import (
     build_agent_response as orchestration_build_agent_response,
@@ -62,11 +65,17 @@ from state.session_store import SessionStore
 
 def create_model_client(*, model_api_key: str, model_api_url: str, model: str) -> OpenAIChatCompletionClient:
     """创建OpenAI兼容的模型客户端（千问）"""
+    timeout_config = get_model_timeout_config()
     return OpenAIChatCompletionClient(
         api_key=model_api_key,
         base_url=model_api_url,
         http_client=httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=20.0, read=120.0, write=60.0, pool=30.0),
+            timeout=httpx.Timeout(
+                connect=float(timeout_config.get("connect", 20.0)),
+                read=float(timeout_config.get("read", 120.0)),
+                write=float(timeout_config.get("write", 60.0)),
+                pool=float(timeout_config.get("pool", 30.0)),
+            ),
             trust_env=False,
             http2=False,
             headers={
@@ -262,6 +271,18 @@ async def tool_query_expert_knowledge(
     control_target: str = "",
 ) -> Dict[str, Any]:
     """Query distillation-column expert knowledge and store the guidance for PID tuning."""
+    if not is_knowledge_expert_enabled():
+        _shared_data_store["expert_knowledge_guidance_full"] = {"answers": [], "graph_hints": [], "graph_summary": "已关闭知识检索步骤"}
+        _shared_data_store["expert_knowledge_guidance"] = {
+            "preferred_strategy": "",
+            "risk_hints": [],
+            "answers": [],
+            "summary": "已关闭知识检索步骤",
+            "questions": [],
+        }
+        _shared_data_store["knowledge_questions"] = []
+        return _to_jsonable(_shared_data_store["expert_knowledge_guidance"])
+
     knowledge_runtime_config = get_knowledge_graph_runtime_config()
     result = await asyncio.to_thread(
         service_query_expert_knowledge_tool,
@@ -378,51 +399,232 @@ async def run_multi_agent_collaboration(
 
         effective_csv_path = csv_path
         if not effective_csv_path:
-            fetch_result = await tool_fetch_history_data(
-                loop_uri=loop_uri,
-                start_time=start_time,
-                end_time=end_time,
-                data_type=data_type,
-                window=int(window or 1),
-            )
+            try:
+                fetch_result = await tool_fetch_history_data(
+                    loop_uri=loop_uri,
+                    start_time=start_time,
+                    end_time=end_time,
+                    data_type=data_type,
+                    window=int(window or 1),
+                )
+            except Exception as exc:
+                yield {
+                    "type": "error",
+                    "message": "本地整定流程失败：历史数据获取失败",
+                    "error_type": "LOCAL_FLOW_ERROR",
+                    "error_code": "LOCAL_FETCH_HISTORY_FAILED",
+                    "error_detail": str(exc),
+                }
+                yield {"type": "done", "status": "failed"}
+                return
             shared_data.update(fetch_result)
             effective_csv_path = str(fetch_result.get("csv_path") or "")
+            yield {
+                "type": "agent_turn",
+                "agent": "数据分析智能体",
+                "tools": [
+                    {
+                        "tool_name": "tool_fetch_history_data",
+                        "args": {
+                            "loop_uri": loop_uri,
+                            "start_time": start_time,
+                            "end_time": end_time,
+                            "data_type": data_type,
+                            "window": int(window or 1),
+                        },
+                        "result": fetch_result,
+                    }
+                ],
+                "response": "已从历史接口获取数据并生成CSV，准备加载与预处理。",
+            }
 
-        load_result = await tool_load_data(effective_csv_path)
+        try:
+            load_result = await tool_load_data(effective_csv_path)
+        except Exception as exc:
+            yield {
+                "type": "error",
+                "message": "本地整定流程失败：数据加载失败",
+                "error_type": "LOCAL_FLOW_ERROR",
+                "error_code": "LOCAL_LOAD_DATA_FAILED",
+                "error_detail": str(exc),
+            }
+            yield {"type": "done", "status": "failed"}
+            return
         shared_data.update(load_result)
         dt = float(_shared_data_store.get("dt", 1.0) or 1.0)
-
-        id_result = await tool_fit_fopdt(dt=dt)
-        shared_data.update(id_result)
-
-        knowledge_result = await tool_query_expert_knowledge(
-            loop_type=loop_type,
-            loop_name=loop_name,
-            plant_type=plant_type,
-            scenario=scenario,
-            control_object=control_object,
+        try:
+            data_points = int(load_result.get("data_points") or 0)
+        except Exception:
+            data_points = 0
+        try:
+            sampling_time = float(load_result.get("sampling_time") or dt)
+        except Exception:
+            sampling_time = dt
+        step_event_count = len(load_result.get("step_events") or [])
+        candidate_windows = load_result.get("candidate_windows") or []
+        usable_count = len(
+            [w for w in candidate_windows if isinstance(w, dict) and w.get("window_usable_for_id") is True]
         )
-        shared_data.update({"knowledge_guidance": knowledge_result})
+        yield {
+            "type": "agent_turn",
+            "agent": "数据分析智能体",
+            "tools": [
+                {
+                    "tool_name": "tool_load_data",
+                    "args": {"csv_path": effective_csv_path},
+                    "result": load_result,
+                }
+            ],
+            "response": (
+                f"数据分析完成：已加载{data_points}个数据点，采样间隔{sampling_time}秒，"
+                f"检测到{step_event_count}个阶跃事件，构造{len(candidate_windows)}个候选窗口，"
+                f"其中{usable_count}个可用于辨识；已将候选窗口传递给系统辨识阶段。"
+            ),
+        }
+
+        try:
+            id_result = await tool_fit_fopdt(dt=dt)
+        except Exception as exc:
+            yield {
+                "type": "error",
+                "message": "本地整定流程失败：系统辨识失败",
+                "error_type": "LOCAL_FLOW_ERROR",
+                "error_code": "LOCAL_IDENTIFICATION_FAILED",
+                "error_detail": str(exc),
+            }
+            yield {"type": "done", "status": "failed"}
+            return
+        shared_data.update(id_result)
+        yield {
+            "type": "agent_turn",
+            "agent": "系统辨识智能体",
+            "tools": [
+                {
+                    "tool_name": "tool_fit_fopdt",
+                    "args": {"dt": dt},
+                    "result": id_result,
+                }
+            ],
+            "response": "系统辨识完成，已选取最优窗口与过程模型并输出拟合指标与置信度。",
+        }
+
+        if is_knowledge_expert_enabled():
+            try:
+                knowledge_result = await tool_query_expert_knowledge(
+                    loop_type=loop_type,
+                    loop_name=loop_name,
+                    plant_type=plant_type,
+                    scenario=scenario,
+                    control_object=control_object,
+                )
+            except Exception as exc:
+                yield {
+                    "type": "error",
+                    "message": "本地整定流程失败：知识检索失败",
+                    "error_type": "LOCAL_FLOW_ERROR",
+                    "error_code": "LOCAL_KNOWLEDGE_FAILED",
+                    "error_detail": str(exc),
+                }
+                yield {"type": "done", "status": "failed"}
+                return
+            shared_data.update({"knowledge_guidance": knowledge_result})
+            yield {
+                "type": "agent_turn",
+                "agent": "知识增强智能体",
+                "tools": [
+                    {
+                        "tool_name": "tool_query_expert_knowledge",
+                        "args": {
+                            "loop_type": loop_type,
+                            "loop_name": loop_name,
+                            "plant_type": plant_type,
+                            "scenario": scenario,
+                            "control_object": control_object,
+                        },
+                        "result": knowledge_result,
+                    }
+                ],
+                "response": "知识检索完成，已生成策略偏好与风险提示，供PID整定参考。",
+            }
+        else:
+            shared_data.update({"knowledge_guidance": {"summary": "已关闭知识检索步骤"}})
 
         model_type_value = str(_shared_data_store.get("model_type", "FOPDT"))
         selected_model_params = _shared_data_store.get("selected_model_params") or {}
-        tune_result = await tool_tune_pid(
-            loop_type=loop_type,
-            model_type=model_type_value,
-            selected_model_params=selected_model_params,
-        )
+        try:
+            tune_result = await tool_tune_pid(
+                loop_type=loop_type,
+                model_type=model_type_value,
+                selected_model_params=selected_model_params,
+            )
+        except Exception as exc:
+            yield {
+                "type": "error",
+                "message": "本地整定流程失败：PID整定失败",
+                "error_type": "LOCAL_FLOW_ERROR",
+                "error_code": "LOCAL_TUNE_PID_FAILED",
+                "error_detail": str(exc),
+            }
+            yield {"type": "done", "status": "failed"}
+            return
         shared_data.update(tune_result)
+        yield {
+            "type": "agent_turn",
+            "agent": "PID专家智能体",
+            "tools": [
+                {
+                    "tool_name": "tool_tune_pid",
+                    "args": {
+                        "loop_type": loop_type,
+                        "model_type": model_type_value,
+                        "selected_model_params": selected_model_params,
+                    },
+                    "result": tune_result,
+                }
+            ],
+            "response": "PID整定完成，已生成候选策略并选定最终PID参数。",
+        }
 
-        evaluation_result = await tool_evaluate_pid(
-            model_type=model_type_value,
-            selected_model_params=selected_model_params,
-            method="auto",
-        )
+        try:
+            evaluation_result = await tool_evaluate_pid(
+                model_type=model_type_value,
+                selected_model_params=selected_model_params,
+                method="auto",
+            )
+        except Exception as exc:
+            yield {
+                "type": "error",
+                "message": "本地整定流程失败：评估失败",
+                "error_type": "LOCAL_FLOW_ERROR",
+                "error_code": "LOCAL_EVALUATE_PID_FAILED",
+                "error_detail": str(exc),
+            }
+            yield {"type": "done", "status": "failed"}
+            return
         shared_data.update(evaluation_result)
+        yield {
+            "type": "agent_turn",
+            "agent": "评估智能体",
+            "tools": [
+                {
+                    "tool_name": "tool_evaluate_pid",
+                    "args": {
+                        "model_type": model_type_value,
+                        "selected_model_params": selected_model_params,
+                        "method": "auto",
+                    },
+                    "result": evaluation_result,
+                }
+            ],
+            "response": "评估完成，已输出综合评分、通过与否及下一步建议。",
+        }
 
-        quality_metrics = shared_data.get("quality_metrics") or {}
-        effective_pid_params = _shared_data_store.get("selected_pid_params") or {}
-        final_result: Dict[str, Any] = {
+        try:
+            quality_metrics = shared_data.get("quality_metrics") or {}
+            effective_pid_params = _shared_data_store.get("selected_pid_params") or {}
+            initial_assessment = shared_data.get("initial_assessment") or {}
+            evaluated_pid = initial_assessment.get("evaluated_pid") or {}
+            final_result: Dict[str, Any] = {
             "dataAnalysis": {
                 "dataPoints": shared_data.get("data_points", 0),
                 "windowPoints": shared_data.get("window_points", 0),
@@ -459,9 +661,9 @@ async def run_multi_agent_collaboration(
                 "windowOverview": _shared_data_store.get("window_overview", {"points": []}),
             },
             "pidParams": {
-                "Kp": effective_pid_params.get("Kp", shared_data.get("Kp", 0.0)),
-                "Ki": effective_pid_params.get("Ki", shared_data.get("Ki", 0.0)),
-                "Kd": effective_pid_params.get("Kd", shared_data.get("Kd", 0.0)),
+                "Kp": effective_pid_params.get("Kp", shared_data.get("Kp", evaluated_pid.get("Kp", 0.0))),
+                "Ki": effective_pid_params.get("Ki", shared_data.get("Ki", evaluated_pid.get("Ki", 0.0))),
+                "Kd": effective_pid_params.get("Kd", shared_data.get("Kd", evaluated_pid.get("Kd", 0.0))),
                 "Ti": effective_pid_params.get("Ti", shared_data.get("Ti", 0.0)),
                 "Td": effective_pid_params.get("Td", shared_data.get("Td", 0.0)),
                 "strategy": effective_pid_params.get("strategy", _shared_data_store.get("strategy_used", "")),
@@ -477,10 +679,10 @@ async def run_multi_agent_collaboration(
             "knowledge": {
                 "guidance": _shared_data_store.get("expert_knowledge_guidance", {}),
             },
-        }
+            }
 
-        if "final_rating" in shared_data:
-            final_result["evaluation"] = {
+            if "final_rating" in shared_data:
+                final_result["evaluation"] = {
                 "performance_score": shared_data.get("performance_score", 0.0),
                 "method_confidence": shared_data.get("method_confidence", 0.0),
                 "final_rating": shared_data.get("final_rating", 0.0),
@@ -496,84 +698,140 @@ async def run_multi_agent_collaboration(
                 "model_retry_result": shared_data.get("model_retry_result", {}),
                 "performance_details": shared_data.get("performance_details", {}),
                 "final_details": shared_data.get("final_details", {}),
-            }
+                }
 
-        final_result["tuningAdvice"] = _build_tuning_advice(final_result)
-        experience_record = build_experience_record(
-            loop_name=loop_name,
-            loop_type=loop_type,
-            loop_uri=loop_uri,
-            data_source="csv" if csv_path else "history",
-            start_time=shared_data.get("start_time", start_time),
-            end_time=shared_data.get("end_time", end_time),
-            shared_data=shared_data,
-            final_result=final_result,
-        )
-        experience_id = persist_experience_record(experience_record)
-        referenced_experience_ids = experience_record.get("referenced_experience_ids") or []
-        reuse_summary = {}
-        if referenced_experience_ids:
-            reuse_summary = register_experience_reuse(
-                referenced_experience_ids,
-                follow_up_passed=bool(final_result.get("evaluation", {}).get("passed", False)),
-                follow_up_final_rating=float(final_result.get("evaluation", {}).get("final_rating", 0.0) or 0.0),
+            final_result["tuningAdvice"] = _build_tuning_advice(final_result)
+            experience_record = build_experience_record(
+                loop_name=loop_name,
+                loop_type=loop_type,
+                loop_uri=loop_uri,
+                data_source="csv" if csv_path else "history",
+                start_time=shared_data.get("start_time", start_time),
+                end_time=shared_data.get("end_time", end_time),
+                shared_data=shared_data,
+                final_result=final_result,
             )
-        final_result["memory"] = {
-            "experienceId": experience_id,
-            "experienceGuidance": _shared_data_store.get("experience_guidance", {}),
-            "referenceReuse": reuse_summary,
-        }
+            experience_id = persist_experience_record(experience_record)
+            referenced_experience_ids = experience_record.get("referenced_experience_ids") or []
+            reuse_summary = {}
+            if referenced_experience_ids:
+                reuse_summary = register_experience_reuse(
+                    referenced_experience_ids,
+                    follow_up_passed=bool(final_result.get("evaluation", {}).get("passed", False)),
+                    follow_up_final_rating=float(final_result.get("evaluation", {}).get("final_rating", 0.0) or 0.0),
+                )
+            final_result["memory"] = {
+                "experienceId": experience_id,
+                "experienceGuidance": _shared_data_store.get("experience_guidance", {}),
+                "referenceReuse": reuse_summary,
+            }
+        except Exception as exc:
+            yield {
+                "type": "error",
+                "message": "本地整定流程失败：结果汇总失败",
+                "error_type": "LOCAL_FLOW_ERROR",
+                "error_code": "LOCAL_FINALIZE_FAILED",
+                "error_detail": str(exc),
+            }
+            yield {"type": "done", "status": "failed"}
+            return
+        yield {"type": "result", "data": final_result}
+        yield {"type": "done", "status": "succeeded"}
 
+
+    if not is_llm_orchestration_enabled():
         yield {
             "type": "thought",
             "agent": "系统",
-            "content": "检测到上游模型服务不可用，已自动切换为本地整定流程。",
+            "content": "已关闭LLM多智能体编排，改用本地确定性整定流程。",
         }
-        yield {"type": "result", "data": final_result}
-        yield {"type": "done", "status": "succeeded"}
+        async for fallback_event in _fallback_without_llm():
+            yield fallback_event
+        return
 
     if selected_window_index is not None:
         _shared_data_store["selected_window_index"] = selected_window_index
     if selected_loop_prefix is not None:
         _shared_data_store["selected_loop_prefix"] = selected_loop_prefix
 
-    async for event in orchestration_run_multi_agent_collaboration(
-        csv_path=csv_path,
-        loop_name=loop_name,
-        loop_type=loop_type,
-        plant_type=plant_type,
-        scenario=scenario,
-        control_object=control_object,
-        loop_uri=loop_uri,
-        start_time=start_time,
-        end_time=end_time,
-        data_type=data_type,
-        window=window,
-        selected_loop_prefix=selected_loop_prefix,
-        selected_window_index=selected_window_index,
-        llm_config=llm_config,
-        shared_data_store=_shared_data_store,
-        create_model_client=create_model_client,
-        create_pid_agents=create_pid_agents,
-        finalize_agent_turn=_finalize_agent_turn,
-        build_feedback_turns=_build_feedback_turns,
-        build_experience_record=build_experience_record,
-        persist_experience_record=persist_experience_record,
-        register_experience_reuse=register_experience_reuse,
-        to_jsonable=_to_jsonable,
-    ):
-        if event.get("type") != "error":
+    orchestration_completed = False
+    try:
+        async for event in orchestration_run_multi_agent_collaboration(
+            csv_path=csv_path,
+            loop_name=loop_name,
+            loop_type=loop_type,
+            plant_type=plant_type,
+            scenario=scenario,
+            control_object=control_object,
+            loop_uri=loop_uri,
+            start_time=start_time,
+            end_time=end_time,
+            data_type=data_type,
+            window=window,
+            selected_loop_prefix=selected_loop_prefix,
+            selected_window_index=selected_window_index,
+            llm_config=llm_config,
+            shared_data_store=_shared_data_store,
+            create_model_client=create_model_client,
+            create_pid_agents=create_pid_agents,
+            finalize_agent_turn=_finalize_agent_turn,
+            build_feedback_turns=_build_feedback_turns,
+            build_experience_record=build_experience_record,
+            persist_experience_record=persist_experience_record,
+            register_experience_reuse=register_experience_reuse,
+            to_jsonable=_to_jsonable,
+        ):
+            if event.get("type") == "result":
+                orchestration_completed = True
+            if event.get("type") != "error":
+                yield event
+                continue
+
+            detail = str(event.get("error_detail") or event.get("message") or "")
+            lowered = detail.lower()
+            fallback_markers = (
+                "insufficient balance",
+                "error code: 402",
+                "cancellederror",
+                "apiconnectionerror",
+                "connection error",
+                "read error",
+                "readerror",
+                "timeout",
+                "timed out",
+                "bad gateway",
+                "service unavailable",
+            )
+            if any(marker in lowered for marker in fallback_markers):
+                yield {
+                    "type": "thought",
+                    "agent": "系统",
+                    "content": "检测到 LLM 编排中断，自动切换为本地确定性整定流程继续执行。",
+                }
+                async for fallback_event in _fallback_without_llm():
+                    yield fallback_event
+                return
+
             yield event
-            continue
-
-        detail = str(event.get("error_detail") or event.get("message") or "")
-        lowered = detail.lower()
-        if "insufficient balance" in lowered or "error code: 402" in lowered:
-            async for fallback_event in _fallback_without_llm():
-                yield fallback_event
             return
+    except asyncio.CancelledError:
+        yield {
+            "type": "thought",
+            "agent": "系统",
+            "content": "LLM 编排被取消，自动切换为本地确定性整定流程继续执行。",
+        }
+        async for fallback_event in _fallback_without_llm():
+            yield fallback_event
+        return
 
-        yield event
+    if not orchestration_completed:
+        yield {
+            "type": "thought",
+            "agent": "系统",
+            "content": "LLM 编排异常结束且未产出结果，自动切换为本地确定性整定流程继续执行。",
+        }
+        async for fallback_event in _fallback_without_llm():
+            yield fallback_event
         return
 
 
