@@ -231,11 +231,17 @@ createApp({
         model: {
           name: '',
           api_url: '',
-          api_key: ''
+          api_key: '',
+          timeout_connect_seconds: 20,
+          timeout_read_seconds: 120,
+          timeout_write_seconds: 60,
+          timeout_pool_seconds: 30,
+          enable_llm_orchestration: true
         },
         integration: {
           history_data_api_url: '',
-          knowledge_graph_api_url: ''
+          knowledge_graph_api_url: '',
+          enable_knowledge_expert: true
         }
       },
       helpCenterOpen: false,
@@ -667,11 +673,17 @@ createApp({
               model: {
                 name: payload?.model?.name || '',
                 api_url: payload?.model?.api_url || '',
-                api_key: payload?.model?.api_key || ''
+                api_key: payload?.model?.api_key || '',
+                timeout_connect_seconds: Number(payload?.model?.timeout_connect_seconds ?? 20),
+                timeout_read_seconds: Number(payload?.model?.timeout_read_seconds ?? 120),
+                timeout_write_seconds: Number(payload?.model?.timeout_write_seconds ?? 60),
+                timeout_pool_seconds: Number(payload?.model?.timeout_pool_seconds ?? 30),
+                enable_llm_orchestration: payload?.model?.enable_llm_orchestration !== false
               },
               integration: {
                 history_data_api_url: payload?.integration?.history_data_api_url || '',
-                knowledge_graph_api_url: payload?.integration?.knowledge_graph_api_url || ''
+                knowledge_graph_api_url: payload?.integration?.knowledge_graph_api_url || '',
+                enable_knowledge_expert: payload?.integration?.enable_knowledge_expert !== false
               }
             };
           } catch (error) {
@@ -2594,6 +2606,7 @@ createApp({
           let sawError = false;
           const idleTimeoutMs = Number(options?.idleTimeoutMs) || 90000;
           const abortController = options?.abortController || null;
+          console.info('[tuning] consumeSSEStream:start', { idleTimeoutMs });
 
           const readWithTimeout = async () => {
             if (!idleTimeoutMs || idleTimeoutMs <= 0) return reader.read();
@@ -2613,12 +2626,24 @@ createApp({
             try {
               readResult = await readWithTimeout();
             } catch (err) {
+              console.warn('[tuning] consumeSSEStream:read_failed', {
+                errorName: err?.name || '',
+                errorMessage: String(err?.message || '')
+              });
               if (abortController) {
-                try { abortController.abort(); } catch (_) {}
+                try {
+                  console.warn('[tuning] consumeSSEStream:abort_controller.abort', {
+                    reason: String(err?.message || err?.name || 'unknown')
+                  });
+                  abortController.abort();
+                } catch (_) {}
               }
               throw err;
             }
             const { done, value } = readResult;
+            if (done) {
+              console.info('[tuning] consumeSSEStream:reader_done', { sawResult, sawError, buffered: buffer.length });
+            }
             buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
 
             let boundaryIndex = buffer.indexOf('\n\n');
@@ -2634,6 +2659,7 @@ createApp({
               if (dataLines.length) {
                 const payload = dataLines.join('\n');
                 const data = JSON.parse(payload);
+                console.info('[tuning] consumeSSEStream:event', { type: data?.type || '' });
                 if (data?.type === 'result') sawResult = true;
                 if (data?.type === 'error') sawError = true;
                 this.handleSSEMessage(data);
@@ -2652,6 +2678,7 @@ createApp({
                 if (dataLines.length) {
                   const payload = dataLines.join('\n');
                   const data = JSON.parse(payload);
+                  console.info('[tuning] consumeSSEStream:trailing_event', { type: data?.type || '' });
                   if (data?.type === 'result') sawResult = true;
                   if (data?.type === 'error') sawError = true;
                   this.handleSSEMessage(data);
@@ -2754,7 +2781,13 @@ window: ${this.historyWindow || 1}
             this.loadingMessage = '智能体正在协同处理...';
             const abortController = new AbortController();
             this._activeTuneAbortController = abortController;
+            console.info('[tuning] startTuneStream:start', {
+              usingUploadedCsv,
+              loopName: this.loopName,
+              loopType: this.loopType
+            });
             const response = await startTuneStream(formData, { signal: abortController.signal, timeoutMs: 15000 });
+            console.info('[tuning] startTuneStream:connected', { status: response.status });
             const idleTimeoutMs = usingUploadedCsv ? 90000 : 75000;
             await this.consumeSSEStream(response, { abortController, idleTimeoutMs });
           } catch (error) {

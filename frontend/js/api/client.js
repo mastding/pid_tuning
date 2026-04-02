@@ -23,7 +23,9 @@ const mergeAbortSignals = (signals) => {
 export const apiFetch = async (path, options = {}) => {
   const { timeoutMs, signal, ...rest } = options || {};
   const timeout = Number(timeoutMs) || 0;
+  const method = String(rest?.method || 'GET').toUpperCase();
   if (timeout <= 0) {
+    console.info('[apiFetch] start', { path, method, timeoutMs: 0 });
     return fetch(apiUrl(path), { ...rest, signal });
   }
 
@@ -31,7 +33,17 @@ export const apiFetch = async (path, options = {}) => {
   const mergedSignal = mergeAbortSignals([signal, timeoutController.signal]);
   const timer = window.setTimeout(() => timeoutController.abort(), timeout);
   try {
+    console.info('[apiFetch] start', { path, method, timeoutMs: timeout });
     return await fetch(apiUrl(path), { ...rest, signal: mergedSignal });
+  } catch (error) {
+    console.warn('[apiFetch] failed', {
+      path,
+      method,
+      timeoutMs: timeout,
+      errorName: error?.name || '',
+      errorMessage: String(error?.message || '')
+    });
+    throw error;
   } finally {
     window.clearTimeout(timer);
   }

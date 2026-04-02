@@ -18,6 +18,7 @@ from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_core import CancellationToken
 
 from orchestration.constants import DISPLAY_AGENT_NAMES
+from services.system_config_service import is_knowledge_expert_enabled
 
 
 def _build_task_message(
@@ -36,6 +37,10 @@ def _build_task_message(
     data_source = "上传CSV" if csv_path else "获取历史数据"
     display_start = start_time or "使用默认开始时间"
     display_end = end_time or "使用默认结束时间"
+    knowledge_line = "3. 本体知识智能体：检索专家规则与约束\n" if is_knowledge_expert_enabled() else ""
+    step4 = "4. PID专家智能体：计算 PID 参数\n" if is_knowledge_expert_enabled() else "3. PID专家智能体：计算 PID 参数\n"
+    step5 = "5. 评估智能体：评估整定质量\n\n" if is_knowledge_expert_enabled() else "4. 评估智能体：评估整定质量\n\n"
+
     return (
         f"请为控制回路 {loop_name} 整定 PID 参数。\n"
         f"数据来源: {data_source}\n"
@@ -50,9 +55,9 @@ def _build_task_message(
         "请按以下顺序协作完成：\n"
         "1. 数据分析智能体：加载和分析数据\n"
         "2. 系统辨识智能体：辨识过程模型\n"
-        "3. 本体知识智能体：检索专家规则与约束\n"
-        "4. PID专家智能体：计算 PID 参数\n"
-        "5. 评估智能体：评估整定质量\n\n"
+        f"{knowledge_line}"
+        f"{step4}"
+        f"{step5}"
         "每个智能体完成任务后，请明确交接给下一位智能体。"
     )
 
@@ -276,6 +281,10 @@ async def run_multi_agent_collaboration(
         idle_seconds = 0.0
         heartbeat_interval_seconds = 15.0
         max_idle_seconds = 180.0
+        print(
+            f"[workflow_runner] start loop={loop_name} loop_type={loop_type} "
+            f"participants={[getattr(agent, 'name', '') for agent in agents]}"
+        )
         next_event_task = asyncio.create_task(stream.__anext__())
 
         while True:
@@ -283,6 +292,10 @@ async def run_multi_agent_collaboration(
                 event = await asyncio.wait_for(asyncio.shield(next_event_task), timeout=heartbeat_interval_seconds)
             except asyncio.TimeoutError:
                 idle_seconds += heartbeat_interval_seconds
+                print(
+                    f"[workflow_runner] heartbeat_wait loop={loop_name} idle_seconds={int(idle_seconds)} "
+                    f"current_agent={current_agent or last_agent or ''}"
+                )
                 yield {
                     "type": "thought",
                     "agent": current_agent or (last_agent or "系统"),
@@ -306,6 +319,7 @@ async def run_multi_agent_collaboration(
                     return
                 continue
             except StopAsyncIteration:
+                print(f"[workflow_runner] stop_async_iteration loop={loop_name}")
                 break
 
             idle_seconds = 0.0
@@ -314,6 +328,10 @@ async def run_multi_agent_collaboration(
             event_agent = None
             if hasattr(event, "source"):
                 event_agent = DISPLAY_AGENT_NAMES.get(str(event.source), str(event.source))
+            print(
+                f"[workflow_runner] event loop={loop_name} event_type={type(event).__name__} "
+                f"event_agent={event_agent or ''}"
+            )
 
             if isinstance(event, ToolCallRequestEvent):
                 if event_agent and event_agent != last_agent:
@@ -366,6 +384,18 @@ async def run_multi_agent_collaboration(
                             usable_windows = [
                                 w for w in candidate_windows if isinstance(w, dict) and w.get("window_usable_for_id") is True
                             ]
+                            data_points = int(result_data.get("data_points") or 0)
+                            sampling_time = result_data.get("sampling_time")
+                            step_event_count = len(result_data.get("step_events") or [])
+                            candidate_count = len(candidate_windows)
+                            usable_count = len(usable_windows)
+
+                            if current_turn_data is not None:
+                                current_turn_data["response"] = (
+                                    f"数据分析完成：已加载{data_points}个数据点，采样间隔{sampling_time}秒，"
+                                    f"检测到{step_event_count}个阶跃事件，构造{candidate_count}个候选窗口，"
+                                    f"其中{usable_count}个可用于辨识；已将候选窗口传递给系统辨识智能体。"
+                                )
                             if not usable_windows:
                                 reason_counter: Dict[str, int] = {}
                                 for w in candidate_windows:
@@ -383,10 +413,6 @@ async def run_multi_agent_collaboration(
                                 top_reasons = sorted(reason_counter.items(), key=lambda kv: kv[1], reverse=True)[:3]
                                 top_reason_text = "、".join([f"{name}({count})" for name, count in top_reasons]) if top_reasons else ""
 
-                                data_points = int(result_data.get("data_points") or 0)
-                                sampling_time = result_data.get("sampling_time")
-                                step_event_count = len(result_data.get("step_events") or [])
-                                candidate_count = len(candidate_windows)
                                 response_text = (
                                     f"数据分析完成。数据包含{data_points}个采样点，采样间隔{sampling_time}秒，"
                                     f"共识别出{candidate_count}个候选窗口（阶跃事件{step_event_count}个）。"
@@ -510,6 +536,129 @@ async def run_multi_agent_collaboration(
                                 }
                                 cancel_token.cancel()
                                 return
+
+                        if isinstance(result_data, dict) and current_tool_name == "tool_evaluate_pid":
+                            if current_turn_data is not None:
+                                finalized = finalize_agent_turn(current_turn_data)
+                                if finalized is not None:
+                                    yield finalized
+                                    await asyncio.sleep(0.2)
+
+                            quality_metrics = shared_data.get("quality_metrics") or {}
+                            for feedback_turn in build_feedback_turns(shared_data):
+                                yield feedback_turn
+                                await asyncio.sleep(0.2)
+
+                            effective_pid_params = shared_data_store.get("selected_pid_params") or {}
+                            final_result: Dict[str, Any] = {
+                                "dataAnalysis": {
+                                    "dataPoints": shared_data.get("data_points", 0),
+                                    "windowPoints": shared_data.get("window_points", 0),
+                                    "stepEvents": len(shared_data.get("step_events") or []),
+                                    "stepEventDetails": shared_data.get("step_events") or [],
+                                    "currentIAE": quality_metrics.get("IAE", 0.0),
+                                    "samplingTime": shared_data.get("sampling_time", 1.0),
+                                    "selectedWindow": shared_data.get("selected_window", {}),
+                                    "historyRange": {
+                                        "startTime": shared_data.get("start_time", start_time),
+                                        "endTime": shared_data.get("end_time", end_time),
+                                    },
+                                    "qualityMetrics": quality_metrics,
+                                },
+                                "model": {
+                                    "modelType": shared_data.get("model_type", "FOPDT"),
+                                    "selectedModelParams": shared_data.get("selected_model_params", {}),
+                                    "modelSelectionReason": shared_data.get("model_selection_reason", ""),
+                                    "K": shared_data.get("K", 0.0),
+                                    "T": shared_data.get("T", 0.0),
+                                    "L": shared_data.get("L", 0.0),
+                                    "confidence": shared_data.get("confidence", 0.0),
+                                    "residue": shared_data.get("residue", 0.0),
+                                    "normalizedRmse": shared_data.get("normalized_rmse", shared_data.get("residue", 0.0)),
+                                    "rawRmse": shared_data.get("raw_rmse", 0.0),
+                                    "r2Score": shared_data.get("r2_score", 0.0),
+                                    "confidenceQuality": shared_data.get("confidence_quality", ""),
+                                    "confidenceRecommendation": shared_data.get("confidence_recommendation", ""),
+                                    "reasonCodes": shared_data.get("reason_codes", []),
+                                    "nextActions": shared_data.get("next_actions", []),
+                                    "selectedWindowSource": shared_data.get("selected_window_source", ""),
+                                    "attempts": shared_data.get("attempts", []),
+                                    "fitPreview": shared_data.get("fit_preview", {"points": []}),
+                                    "windowOverview": shared_data.get("window_overview", {"points": []}),
+                                },
+                                "pidParams": {
+                                    "Kp": effective_pid_params.get("Kp", shared_data.get("Kp", 0.0)),
+                                    "Ki": effective_pid_params.get("Ki", shared_data.get("Ki", 0.0)),
+                                    "Kd": effective_pid_params.get("Kd", shared_data.get("Kd", 0.0)),
+                                    "Ti": effective_pid_params.get("Ti", shared_data.get("Ti", 0.0)),
+                                    "Td": effective_pid_params.get("Td", shared_data.get("Td", 0.0)),
+                                    "strategy": effective_pid_params.get("strategy", shared_data.get("strategy", "")),
+                                    "strategyRequested": shared_data.get("strategy_requested", "AUTO"),
+                                    "strategyUsed": shared_data.get("strategy_used", ""),
+                                    "loopType": loop_type,
+                                    "selectionReason": shared_data.get("selection_reason", ""),
+                                    "selectionInputs": shared_data.get("selection_inputs", {}),
+                                    "experienceGuidance": shared_data.get("experience_guidance", {}),
+                                    "candidateStrategies": shared_data.get("candidate_strategies", []),
+                                    "description": effective_pid_params.get("description", shared_data.get("description", "")),
+                                },
+                                "knowledge": {
+                                    "guidance": shared_data.get("expert_knowledge_guidance", {})
+                                    or shared_data_store.get("expert_knowledge_guidance", {}),
+                                },
+                            }
+
+                            if "final_rating" in shared_data:
+                                final_result["evaluation"] = {
+                                    "performance_score": shared_data.get("performance_score", 0.0),
+                                    "method_confidence": shared_data.get("method_confidence", 0.0),
+                                    "final_rating": shared_data.get("final_rating", 0.0),
+                                    "strategy_used": shared_data.get("strategy_used", ""),
+                                    "passed": shared_data.get("passed", False),
+                                    "pass_threshold": shared_data.get("pass_threshold", 7.0),
+                                    "failure_reason": shared_data.get("failure_reason", ""),
+                                    "feedback_target": shared_data.get("feedback_target", ""),
+                                    "feedback_target_display": shared_data.get("feedback_target_display", ""),
+                                    "feedback_action": shared_data.get("feedback_action", ""),
+                                    "initial_assessment": shared_data.get("initial_assessment", {}),
+                                    "auto_refine_result": shared_data.get("auto_refine_result", {}),
+                                    "model_retry_result": shared_data.get("model_retry_result", {}),
+                                    "performance_details": shared_data.get("performance_details", {}),
+                                    "final_details": shared_data.get("final_details", {}),
+                                    "replay_evaluation": shared_data.get("replay_evaluation", {}),
+                                }
+
+                            final_result["tuningAdvice"] = _build_tuning_advice(final_result)
+
+                            experience_record = build_experience_record(
+                                loop_name=loop_name,
+                                loop_type=loop_type,
+                                loop_uri=loop_uri,
+                                data_source="csv" if csv_path else "history",
+                                start_time=shared_data.get("start_time", start_time),
+                                end_time=shared_data.get("end_time", end_time),
+                                shared_data=shared_data,
+                                final_result=final_result,
+                            )
+                            experience_id = persist_experience_record(experience_record)
+                            referenced_experience_ids = experience_record.get("referenced_experience_ids") or []
+                            reuse_summary = {}
+                            if register_experience_reuse and referenced_experience_ids:
+                                reuse_summary = register_experience_reuse(
+                                    referenced_experience_ids,
+                                    follow_up_passed=bool(final_result.get("evaluation", {}).get("passed", False)),
+                                    follow_up_final_rating=float(final_result.get("evaluation", {}).get("final_rating", 0.0) or 0.0),
+                                )
+                            final_result["memory"] = {
+                                "experienceId": experience_id,
+                                "experienceGuidance": shared_data.get("experience_guidance", {}),
+                                "referenceReuse": reuse_summary,
+                            }
+
+                            yield {"type": "result", "data": final_result}
+                            yield {"type": "done", "status": "succeeded"}
+                            cancel_token.cancel()
+                            return
                     except Exception as exc:
                         error_result = {
                             "raw_content": str(tool_result.content)[:500],
@@ -691,8 +840,10 @@ async def run_multi_agent_collaboration(
         yield {"type": "result", "data": final_result}
         yield {"type": "done", "status": "succeeded"}
     except asyncio.CancelledError:
+        print(f"[workflow_runner] cancelled loop={loop_name} current_agent={current_agent or last_agent or ''}")
         yield {"type": "error", "message": "任务已取消"}
     except Exception as exc:
+        print(f"[workflow_runner] exception loop={loop_name} type={type(exc).__name__} detail={exc}")
         mapped_error = _classify_workflow_exception(exc)
         yield {
             "type": "error",
@@ -702,8 +853,16 @@ async def run_multi_agent_collaboration(
             "error_detail": mapped_error["detail"],
         }
     finally:
-        try:
-            if next_event_task is not None and not next_event_task.done():
-                next_event_task.cancel()
-        except Exception:
-            pass
+        print(f"[workflow_runner] finalize loop={loop_name}")
+        if next_event_task is not None:
+            try:
+                if not next_event_task.done():
+                    next_event_task.cancel()
+                try:
+                    _ = next_event_task.exception()
+                except asyncio.CancelledError:
+                    pass
+                except StopAsyncIteration:
+                    pass
+            except Exception:
+                pass

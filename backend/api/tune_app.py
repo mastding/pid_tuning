@@ -126,11 +126,17 @@ class ModelConfigPayload(BaseModel):
     name: str = Field(..., description="模型名称")
     api_url: str = Field(..., description="模型服务地址")
     api_key: str = Field(..., description="模型 API Key")
+    timeout_connect_seconds: float = Field(20.0, description="模型请求连接超时（秒）")
+    timeout_read_seconds: float = Field(120.0, description="模型请求读取超时（秒）")
+    timeout_write_seconds: float = Field(60.0, description="模型请求写入超时（秒）")
+    timeout_pool_seconds: float = Field(30.0, description="模型连接池超时（秒）")
+    enable_llm_orchestration: bool = Field(True, description="是否启用LLM多智能体编排（关闭则走本地整定流程）")
 
 
 class IntegrationConfigPayload(BaseModel):
     history_data_api_url: str = Field(..., description="历史数据服务地址")
     knowledge_graph_api_url: str = Field(..., description="本体知识图谱服务地址")
+    enable_knowledge_expert: bool = Field(True, description="是否启用本体知识智能体（知识检索步骤）")
 
 
 class SystemConfigPayload(BaseModel):
@@ -396,6 +402,7 @@ def create_app(
 
     @app.post("/api/tune_stream")
     async def tune_stream(
+        request: Request,
         file: UploadFile = File(None),
         loop_name: str = Form(...),
         loop_type: str = Form("flow"),
@@ -418,6 +425,11 @@ def create_app(
                 csv_path = tmp_file.name
 
         async def event_generator() -> AsyncGenerator[str, None]:
+            event_count = 0
+            print(
+                f"[tune_stream] open loop={loop_name} loop_type={loop_type} "
+                f"data_source={'csv' if csv_path else 'history'} client={getattr(request.client, 'host', '')}"
+            )
             try:
                 async for event in _workflow_event_generator(
                     csv_path=csv_path,
@@ -434,10 +446,31 @@ def create_app(
                     selected_loop_prefix=selected_loop_prefix,
                     selected_window_index=selected_window_index,
                 ):
+                    event_count += 1
+                    if await request.is_disconnected():
+                        print(
+                            f"[tune_stream] client_disconnected_before_yield "
+                            f"loop={loop_name} event_count={event_count} last_event_type={event.get('type')}"
+                        )
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    if event_count <= 3 or event.get("type") in {"error", "result", "done"}:
+                        print(
+                            f"[tune_stream] yield loop={loop_name} event_count={event_count} "
+                            f"event_type={event.get('type')}"
+                        )
+            except asyncio.CancelledError:
+                print(
+                    f"[tune_stream] cancelled loop={loop_name} event_count={event_count} "
+                    f"client_disconnected={await request.is_disconnected()}"
+                )
+                raise
             except Exception as exc:
                 import traceback
 
+                print(
+                    f"[tune_stream] exception loop={loop_name} event_count={event_count} "
+                    f"type={type(exc).__name__} detail={exc}"
+                )
                 mapped_error = _map_workflow_error(exc)
                 error_msg = {
                     "type": "error",
@@ -449,6 +482,10 @@ def create_app(
                 }
                 yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
             finally:
+                print(
+                    f"[tune_stream] close loop={loop_name} event_count={event_count} "
+                    f"client_disconnected={await request.is_disconnected()}"
+                )
                 if csv_path and os.path.exists(csv_path):
                     os.remove(csv_path)
 
