@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Mapping
 
 from memory.experience_service import retrieve_experience_guidance
 from services.identification_service import sanitize_selected_model_params
+from state.task_artifacts import persist_processed_csv
 from services.knowledge_graph_service import (
     build_knowledge_context,
     compact_knowledge_guidance,
@@ -86,6 +87,25 @@ def load_data_tool(
         selected_loop_prefix=selected_loop_prefix,
         selected_window_index=selected_window_index,
     )
+    artifact_payload: Dict[str, Any] = {}
+    task_session_id = str(session_store.get("task_session_id") or "").strip()
+    if task_session_id:
+        processed_meta = persist_processed_csv(
+            task_id=task_session_id,
+            cleaned_df=prepared["cleaned_df"],
+            selected_loop_prefix=selected_loop_prefix or str(session_store.get("selected_loop_prefix") or ""),
+        )
+        artifact_payload = {
+            "task_id": processed_meta.get("task_id", task_session_id),
+            "artifact_dir": processed_meta.get("artifact_dir", ""),
+            "original_file_path": str(session_store.get("uploaded_original_file_path") or session_store.get("csv_path") or ""),
+            "processed_file_path": processed_meta.get("processed_file_path", ""),
+            "uploaded_file_name": str(session_store.get("uploaded_file_name") or ""),
+            "uploaded_file_hash": str(session_store.get("uploaded_file_hash") or ""),
+        }
+        session_store["task_artifact_dir"] = artifact_payload.get("artifact_dir", "")
+        session_store["processed_csv_path"] = artifact_payload.get("processed_file_path", "")
+
     session_store["csv_path"] = prepared["csv_path"]
     session_store["cleaned_df"] = prepared["cleaned_df"]
     session_store["window_df"] = prepared["window_df"]
@@ -98,6 +118,7 @@ def load_data_tool(
     session_store["quality_metrics"] = prepared["quality_metrics"]
     session_store["selected_window"] = prepared["selected_window"]
     session_store["window_overview"] = prepared["window_overview"]
+    session_store["history_range"] = prepared.get("history_range") or {}
 
     return {
         "data_points": prepared["data_points"],
@@ -105,8 +126,10 @@ def load_data_tool(
         "mv_range": prepared["mv_range"],
         "pv_range": prepared["pv_range"],
         "available_columns": prepared["available_columns"],
+        "history_range": prepared.get("history_range") or {},
         "step_events": prepared["step_events"],
         "candidate_windows": prepared["candidate_windows"],
+        "artifacts": artifact_payload,
         "status": prepared["status"],
         "instruction": "数据加载成功。已提取多个候选窗口并存入上下文，后续由辨识智能体(tool_fit_fopdt)做多窗口评估，无需你做单窗口选择。"
     }

@@ -383,6 +383,11 @@ async def run_multi_agent_collaboration(
     llm_config: Dict[str, Any],
     selected_loop_prefix: str | None = None,
     selected_window_index: int | None = None,
+    task_session_id: str = "",
+    uploaded_file_name: str = "",
+    uploaded_file_hash: str = "",
+    uploaded_original_file_path: str = "",
+    task_artifact_dir: str = "",
 ) -> AsyncGenerator[Dict[str, Any], None]:
     async def _fallback_without_llm() -> AsyncGenerator[Dict[str, Any], None]:
         shared_data: Dict[str, Any] = {}
@@ -392,6 +397,16 @@ async def run_multi_agent_collaboration(
         _shared_data_store["plant_type"] = plant_type
         _shared_data_store["scenario"] = scenario
         _shared_data_store["control_object"] = control_object
+        if task_session_id:
+            _shared_data_store["task_session_id"] = task_session_id
+        if uploaded_file_name:
+            _shared_data_store["uploaded_file_name"] = uploaded_file_name
+        if uploaded_file_hash:
+            _shared_data_store["uploaded_file_hash"] = uploaded_file_hash
+        if uploaded_original_file_path:
+            _shared_data_store["uploaded_original_file_path"] = uploaded_original_file_path
+        if task_artifact_dir:
+            _shared_data_store["task_artifact_dir"] = task_artifact_dir
         if selected_loop_prefix is not None:
             _shared_data_store["selected_loop_prefix"] = selected_loop_prefix
         if selected_window_index is not None:
@@ -634,10 +649,20 @@ async def run_multi_agent_collaboration(
                 "samplingTime": shared_data.get("sampling_time", 1.0),
                 "selectedWindow": shared_data.get("selected_window", {}),
                 "historyRange": {
-                    "startTime": shared_data.get("start_time", start_time),
-                    "endTime": shared_data.get("end_time", end_time),
+                    "startTime": (shared_data.get("history_range") or {}).get("start_time")
+                    or shared_data.get("start_time", start_time),
+                    "endTime": (shared_data.get("history_range") or {}).get("end_time")
+                    or shared_data.get("end_time", end_time),
                 },
                 "qualityMetrics": quality_metrics,
+                "artifacts": {
+                    "taskId": shared_data.get("task_session_id", ""),
+                    "artifactDirectory": shared_data.get("task_artifact_dir", ""),
+                    "uploadedOriginalCsvPath": shared_data.get("uploaded_original_file_path", ""),
+                    "processedCsvPath": shared_data.get("processed_csv_path", ""),
+                    "uploadedFileName": shared_data.get("uploaded_file_name", ""),
+                    "uploadedFileHash": shared_data.get("uploaded_file_hash", ""),
+                },
             },
             "model": {
                 "modelType": _shared_data_store.get("model_type", "FOPDT"),
@@ -758,6 +783,11 @@ async def run_multi_agent_collaboration(
     try:
         async for event in orchestration_run_multi_agent_collaboration(
             csv_path=csv_path,
+            task_session_id=task_session_id,
+            uploaded_file_name=uploaded_file_name,
+            uploaded_file_hash=uploaded_file_hash,
+            uploaded_original_file_path=uploaded_original_file_path,
+            task_artifact_dir=task_artifact_dir,
             loop_name=loop_name,
             loop_type=loop_type,
             plant_type=plant_type,

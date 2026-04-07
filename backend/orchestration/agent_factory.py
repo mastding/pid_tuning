@@ -5,6 +5,7 @@ from typing import Any, Callable, List
 from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 
+from services.system_config_service import is_knowledge_expert_enabled
 
 def create_pid_agents(
     *,
@@ -122,4 +123,6 @@ If passed=false, explain the primary reason, the recommended feedback target, an
         model_client_stream=False,
     )
 
-    return [data_analyst, system_id_expert, knowledge_expert, pid_expert, evaluation_expert]
+    if is_knowledge_expert_enabled():
+        return [data_analyst, system_id_expert, knowledge_expert, pid_expert, evaluation_expert]
+    return [data_analyst, system_id_expert, pid_expert, evaluation_expert]

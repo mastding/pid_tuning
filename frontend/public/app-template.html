@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -205,6 +205,123 @@
       </div>
     </div>
 
+    <div v-if="pidTuningExplainOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 md:p-6">
+      <div class="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900">PID整定详情</h2>
+            <p class="mt-1 text-sm text-slate-500">展示 PID 专家智能体如何结合模型、策略、经验和知识约束生成当前参数。</p>
+          </div>
+          <button @click="closePidTuningExplain" class="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all">关闭</button>
+        </div>
+        <div class="overflow-y-auto p-6 custom-scrollbar">
+          <div v-if="selectedPidTuningExplain" class="space-y-5">
+            <div class="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-violet-800"><span>⚙️</span><span>当前整定结果</span></div>
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-violet-100"><div class="text-xs font-semibold text-slate-500">Kp</div><div class="mt-1 text-sm font-mono text-slate-800">{{ selectedPidTuningExplain.kp }}</div></div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-violet-100"><div class="text-xs font-semibold text-slate-500">Ki</div><div class="mt-1 text-sm font-mono text-slate-800">{{ selectedPidTuningExplain.ki }}</div></div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-violet-100"><div class="text-xs font-semibold text-slate-500">Kd</div><div class="mt-1 text-sm font-mono text-slate-800">{{ selectedPidTuningExplain.kd }}</div></div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-violet-100"><div class="text-xs font-semibold text-slate-500">实际策略</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedPidTuningExplain.strategyUsed }}</div></div>
+              </div>
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <div class="rounded-xl border border-violet-100 bg-white px-4 py-3"><div class="text-xs font-semibold text-slate-500">策略请求</div><div class="mt-1 text-sm text-slate-700">{{ selectedPidTuningExplain.strategyRequested }}</div></div>
+                <div class="rounded-xl border border-violet-100 bg-white px-4 py-3"><div class="text-xs font-semibold text-slate-500">模型基础</div><div class="mt-1 text-sm text-slate-700">{{ selectedPidTuningExplain.modelType }} / {{ selectedPidTuningExplain.modelParamsSummary }}</div></div>
+              </div>
+              <div class="mt-3 rounded-xl border border-violet-100 bg-white px-4 py-3"><div class="text-xs font-semibold text-slate-500">参数选择依据</div><div class="mt-1 text-sm leading-relaxed text-slate-700">{{ selectedPidTuningExplain.selectionReason }}</div></div>
+              <div v-if="selectedPidTuningExplain.tuningSummary" class="mt-3 rounded-xl border border-violet-100 bg-white px-4 py-3"><div class="text-xs font-semibold text-slate-500">整定摘要</div><div class="mt-1 text-sm leading-relaxed text-slate-700">{{ selectedPidTuningExplain.tuningSummary }}</div></div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span>🧭</span><span>经验与知识参考</span></div>
+              <div class="grid gap-3 md:grid-cols-2">
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div class="text-xs font-semibold text-slate-500">偏好策略</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedPidTuningExplain.preferredStrategy || '-' }}</div>
+                  <div v-if="selectedPidTuningExplain.recommendedScaleText" class="mt-2 text-xs text-slate-600">推荐修正比例：{{ selectedPidTuningExplain.recommendedScaleText }}</div>
+                  <div v-if="selectedPidTuningExplain.experienceSummary" class="mt-3 text-sm leading-relaxed text-slate-700">{{ selectedPidTuningExplain.experienceSummary }}</div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div class="text-xs font-semibold text-slate-500">知识约束</div>
+                  <div v-if="selectedPidTuningExplain.knowledgeConstraints.length" class="mt-2 space-y-2">
+                    <div v-for="item in selectedPidTuningExplain.knowledgeConstraints.slice(0, 5)" :key="item.title || item.id || item.text" class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <div class="font-semibold text-slate-800">{{ item.title || '约束' }}</div>
+                      <div class="mt-1 text-xs text-slate-600">{{ item.summary || item.description || '-' }}</div>
+                    </div>
+                  </div>
+                  <div v-else class="mt-2 text-sm text-slate-500">当前没有额外知识约束。</div>
+                </div>
+              </div>
+              <div v-if="selectedPidTuningExplain.knowledgeRules.length" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">命中规则</div>
+                <div class="mt-2 space-y-2">
+                  <div v-for="rule in selectedPidTuningExplain.knowledgeRules.slice(0, 5)" :key="rule.title || rule.id || rule.summary" class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    <div class="font-semibold text-slate-800">{{ rule.title || '规则' }}</div>
+                    <div class="mt-1 text-xs text-slate-600">{{ rule.summary || '-' }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="evaluationExplainOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 md:p-6">
+      <div class="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900">评估详情</h2>
+            <p class="mt-1 text-sm text-slate-500">展示评估智能体给出的性能分、综合分、阈值判断以及未通过原因。</p>
+          </div>
+          <button @click="closeEvaluationExplain" class="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all">关闭</button>
+        </div>
+        <div class="overflow-y-auto p-6 custom-scrollbar">
+          <div v-if="selectedEvaluationExplain" class="space-y-5">
+            <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-amber-800"><span>📈</span><span>评估结论</span></div>
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">性能评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.performanceScore }}/100</div></div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">综合评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.finalRating }}/100</div></div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">方法置信度</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.methodConfidence }}</div></div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">通过阈值</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.passThreshold }}</div></div>
+              </div>
+              <div class="mt-3 rounded-xl border border-amber-100 bg-white px-4 py-3">
+                <div class="text-xs font-semibold text-slate-500">结论</div>
+                <div class="mt-1 text-sm font-semibold" :class="selectedEvaluationExplain.passed ? 'text-emerald-700' : 'text-red-700'">{{ selectedEvaluationExplain.passed ? '评估通过' : '评估未通过' }}</div>
+                <div class="mt-2 text-sm leading-relaxed text-slate-700">主因：{{ selectedEvaluationExplain.failureReason }}</div>
+                <div class="mt-2 text-sm leading-relaxed text-slate-700">回流目标：{{ selectedEvaluationExplain.feedbackTarget }}</div>
+                <div v-if="selectedEvaluationExplain.feedbackAction" class="mt-1 text-sm leading-relaxed text-slate-700">建议动作：{{ selectedEvaluationExplain.feedbackAction }}</div>
+              </div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span>🧪</span><span>性能指标拆解</span></div>
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">超调</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.overshoot }}</div></div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">调节时间</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.settlingTime }}</div></div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">稳态误差</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.steadyStateError }}</div></div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">振荡次数</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.oscillationCount }}</div></div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">置信度折算分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.confidenceAsScore }}</div></div>
+              </div>
+              <div v-if="selectedEvaluationExplain.initialPid" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">首次评估 PID</div>
+                <div class="mt-2 text-sm text-slate-700">Kp={{ formatNumber(selectedEvaluationExplain.initialPid.Kp, 4) }} / Ki={{ formatNumber(selectedEvaluationExplain.initialPid.Ki, 4) }} / Kd={{ formatNumber(selectedEvaluationExplain.initialPid.Kd, 4) }}</div>
+              </div>
+              <div v-if="selectedEvaluationExplain.autoRefineResult?.applied || selectedEvaluationExplain.modelRetryResult?.applied" class="mt-4 grid gap-3 md:grid-cols-2">
+                <div v-if="selectedEvaluationExplain.autoRefineResult?.applied" class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div class="text-xs font-semibold text-slate-500">自动细调结果</div>
+                  <div class="mt-2 text-sm text-slate-700">综合评分 {{ formatNumber(selectedEvaluationExplain.autoRefineResult.base_final_rating, 2) }} → {{ formatNumber(selectedEvaluationExplain.autoRefineResult.refined_final_rating, 2) }}</div>
+                </div>
+                <div v-if="selectedEvaluationExplain.modelRetryResult?.applied" class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div class="text-xs font-semibold text-slate-500">模型/窗口回试</div>
+                  <div class="mt-2 text-sm text-slate-700">窗口 {{ selectedEvaluationExplain.modelRetryResult.window_source || '-' }} / 评分 {{ formatNumber(selectedEvaluationExplain.modelRetryResult.final_rating, 2) }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <aside class="shell-primary-nav">
       <div class="shell-brand">
         <div class="shell-brand-mark">PI</div>
@@ -366,6 +483,12 @@
               <div class="flex flex-wrap gap-2 pt-1">
                 <span class="shell-status-pill" :class="taskSessionStatusClass(selectedTaskSession.status)">{{ taskSessionStatusLabel(selectedTaskSession.status) }}</span>
                 <span class="shell-status-pill">{{ selectedTaskSession.context?.dataSourceLabel || '-' }}</span>
+              </div>
+              <div v-if="selectedTaskSessionTraceRows.length" class="grid grid-cols-1 gap-2 pt-2">
+                <div v-for="trace in selectedTaskSessionTraceRows" :key="trace.label" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{{ trace.label }}</div>
+                  <div class="mt-1 break-all text-xs text-slate-700" :class="trace.monospace ? 'font-mono' : ''" :title="trace.fullValue">{{ trace.value }}</div>
+                </div>
               </div>
             </template>
             <div v-else class="text-xs text-slate-500">当前还没有任务会话，发起一次整定后会自动生成。</div>
@@ -655,6 +778,12 @@
                       <td class="px-5 py-4 align-top">
                         <div class="font-semibold text-slate-900">{{ item.title }}</div>
                         <div class="mt-1 text-xs text-slate-500">回路：{{ item.context?.loopName || '-' }} · 工况：{{ item.scenarioLabel || '-' }}</div>
+                        <div v-if="item.uploadedFileName" class="mt-2 text-xs text-slate-500">文件：<span class="text-slate-700">{{ item.uploadedFileName }}</span></div>
+                        <div v-if="item.selectedLoopPrefix || item.recommendedLoopPrefix" class="mt-1 flex flex-wrap gap-2 text-xs">
+                          <span v-if="item.selectedLoopPrefix" class="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-mono text-sky-700" :title="item.selectedLoopPrefix">选中 {{ item.selectedLoopPrefix }}</span>
+                          <span v-if="item.recommendedLoopPrefix" class="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-emerald-700" :title="item.recommendedLoopPrefix">推荐 {{ item.recommendedLoopPrefix }}</span>
+                        </div>
+                        <div v-if="item.uploadedFileHashShort" class="mt-1 text-xs text-slate-500">指纹：<span class="font-mono text-slate-700" :title="item.uploadedFileHash">{{ item.uploadedFileHashShort }}</span></div>
                       </td>
                       <td class="px-5 py-4 text-slate-700">{{ item.dataSourceLabel }}</td>
                       <td class="px-5 py-4">
@@ -933,138 +1062,138 @@
 
           <div v-if="currentPage === 'tuning' && shellSection === 'tuning-loop-analysis'" class="space-y-6">
             <div v-if="!selectedTaskSessionId" class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
-              请先在“任务会话”中选择一条整定任务，再查看对应的回路分析趋势图。
+              请先选择一条整定任务会话，再查看对应的回路分析。
             </div>
             <div v-else-if="latestTuningResultData" class="space-y-6">
               <div class="rounded-2xl border border-indigo-200 bg-white p-6 shadow-sm">
                 <div class="flex items-center justify-between gap-4">
                   <div>
                     <div class="text-xs font-semibold uppercase tracking-[0.12em] text-indigo-600">回路分析</div>
-                    <h2 class="mt-2 text-2xl font-bold text-slate-800">历史趋势与整定回放趋势对比</h2>
-                    <p class="mt-2 text-sm leading-6 text-slate-600">历史趋势展示原始 PV / SV / MV；回放趋势使用整定 PID 参数与辨识模型，在相同 SV 序列下进行闭环回放仿真。</p>
+                    <h2 class="mt-2 text-2xl font-bold text-slate-800">历史趋势、候选窗口、辨识拟合与整定回放</h2>
+                    <p class="mt-2 text-sm leading-6 text-slate-600">每张图都支持手动设置时间范围。候选窗口可以在数据分析识别出的有效阶跃事件之间切换，辨识拟合图可以在可辨识窗口之间切换，并对比实际 PV 与模型预测曲线。</p>
+                  </div>
+                </div>
+                <div class="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,420px)_auto] xl:items-end">
+                  <label class="text-sm text-slate-600">
+                    <span class="mb-2 block font-semibold text-slate-800">任务 ID</span>
+                    <select
+                      v-model="loopAnalysisTaskSelectionId"
+                      class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    >
+                      <option value="" disabled>请选择要分析的任务</option>
+                      <option v-for="item in taskSessions" :key="item.id" :value="item.id">
+                        {{ item.id }}
+                      </option>
+                    </select>
+                  </label>
+                  <div class="flex items-end">
+                    <button
+                      type="button"
+                      class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                      :disabled="!loopAnalysisTaskSelectionId"
+                      @click="applyLoopAnalysisTaskSelection"
+                    >
+                      分析
+                    </button>
                   </div>
                 </div>
               </div>
 
               <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div class="flex items-center justify-between gap-3">
+                <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div>
-                    <div class="text-sm font-semibold text-slate-900">模型拟合对比图</div>
-                    <div class="mt-1 text-xs text-slate-500">使用辨识窗口内的历史 MV 驱动辨识模型，生成 PV(拟合) 并与历史 PV 进行对比。</div>
+                    <div class="text-sm font-semibold text-slate-900">1. 历史数据回路分析图</div>
+                    <div class="mt-1 text-xs text-slate-500">PV 与 SV 使用左轴，MV 使用右轴。可通过下方时间配置手动设置显示范围。</div>
+                  </div>
+                  <div v-if="pidAnalysisBasePayload" class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-3 xl:min-w-[640px]">
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">开始时间</span><input :type="chartRangeInputType(pidAnalysisBasePayload)" :value="chartRangeDraftState('history').start || chartBounds(pidAnalysisBasePayload).start" @input="updatePidChartRange('history', 'start', $event.target.value)" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"></label>
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">结束时间</span><input :type="chartRangeInputType(pidAnalysisBasePayload)" :value="chartRangeDraftState('history').end || chartBounds(pidAnalysisBasePayload).end" @input="updatePidChartRange('history', 'end', $event.target.value)" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"></label>
+                    <div class="flex items-end"><button type="button" class="shell-inline-action is-accent w-full justify-center" :disabled="pidAnalysisRemoteLoadingKeys.history" @click="confirmPidChartRange('history')">{{ pidAnalysisRemoteLoadingKeys.history ? '刷新中...' : '确定' }}</button></div>
+                    <div class="flex items-end"><button type="button" class="shell-inline-action w-full justify-center" @click="clearPidChartRange('history')">重置</button></div>
                   </div>
                 </div>
-                <div v-if="pidFitChartPayload" id="pid-analysis-chart-fit" class="mt-4 h-[360px] w-full"></div>
-                <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-                  当前会话未生成可用的拟合预览数据，暂时无法展示 PV 拟合对比曲线。
+                <div v-if="pidAnalysisChartPayload" class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">IAE</div><div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.iae, 3) }}</div></div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">最大偏差</div><div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.maxError, 3) }}</div></div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">稳态误差</div><div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.steadyStateError, 3) }}</div></div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">MV 峰值</div><div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.mvPeak, 2) }}%</div></div>
                 </div>
+                <div v-if="pidAnalysisChartPayload" id="pid-analysis-chart-history" class="mt-4 h-[420px] w-full"></div>
+                <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">当前任务还没有可用的 PV / SV / MV 历史时序数据。</div>
               </div>
 
-              <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div class="flex items-center justify-between gap-3">
-                    <div>
-                      <div class="text-sm font-semibold text-slate-900">历史数据回路分析图</div>
-                      <div class="mt-1 text-xs text-slate-500">PV / SV 采用左轴，MV 采用右轴；浅蓝填充用于辅助观察偏差面积趋势。</div>
-                    </div>
+              <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div class="space-y-2">
+                    <div class="text-sm font-semibold text-slate-900">2. 候选窗口分析图</div>
+                    <div class="text-xs text-slate-500">查看数据分析阶段识别出的有效阶跃候选窗口，并检查当前选中事件的窗口范围。</div>
+                    <div class="flex flex-wrap items-center gap-2"><span class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">候选窗口 {{ candidateWindowOptions.length }}</span><span class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">可辨识 {{ candidateWindowOptions.filter(item => item.identifiable).length }}</span></div>
                   </div>
-                  <div v-if="pidAnalysisChartPayload" class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">IAE</div>
-                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.iae, 3) }}</div>
-                    </div>
-                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">最大偏差</div>
-                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.maxError, 3) }}</div>
-                    </div>
-                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">稳态误差</div>
-                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.steadyStateError, 3) }}</div>
-                    </div>
-                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">MV 峰值</div>
-                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidAnalysisMetrics.mvPeak, 2) }}%</div>
-                    </div>
-                  </div>
-                  <div v-if="pidAnalysisChartPayload" id="pid-analysis-chart-history" class="mt-4 h-[420px] w-full"></div>
-                  <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-                    当前会话还没有足够的 PV / SV / MV 时序数据，暂时无法生成历史回路分析图。
+                  <div class="grid grid-cols-1 md:grid-cols-[minmax(220px,1fr)_1fr_1fr_auto_auto] gap-3 xl:min-w-[940px]">
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">候选窗口</span><select :value="effectiveSelectedCandidateWindowKey" @change="selectedCandidateWindowKey = $event.target.value; schedulePidAnalysisChartRender()" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"><option v-for="item in candidateWindowOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">开始时间</span><input :type="chartRangeInputType(pidCandidateWindowChartPayload || pidAnalysisBasePayload)" :value="chartRangeDraftState('candidate').start || chartBounds(pidCandidateWindowChartPayload || pidAnalysisBasePayload).start" @input="updatePidChartRange('candidate', 'start', $event.target.value)" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"></label>
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">结束时间</span><input :type="chartRangeInputType(pidCandidateWindowChartPayload || pidAnalysisBasePayload)" :value="chartRangeDraftState('candidate').end || chartBounds(pidCandidateWindowChartPayload || pidAnalysisBasePayload).end" @input="updatePidChartRange('candidate', 'end', $event.target.value)" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"></label>
+                    <div class="flex items-end"><button type="button" class="shell-inline-action is-accent w-full justify-center" :disabled="pidAnalysisRemoteLoadingKeys.candidate" @click="confirmPidChartRange('candidate')">{{ pidAnalysisRemoteLoadingKeys.candidate ? '刷新中...' : '确定' }}</button></div>
+                    <div class="flex items-end"><button type="button" class="shell-inline-action w-full justify-center" @click="clearPidChartRange('candidate')">重置</button></div>
                   </div>
                 </div>
+                <div v-if="selectedCandidateWindowOption" class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">窗口范围</div><div class="mt-1 font-semibold text-slate-900">{{ selectedCandidateWindowOption.windowStartIndex }} - {{ selectedCandidateWindowOption.windowEndIndex }}</div></div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">事件范围</div><div class="mt-1 font-semibold text-slate-900">{{ selectedCandidateWindowOption.eventStartIndex }} - {{ selectedCandidateWindowOption.eventEndIndex }}</div></div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">质量评分</div><div class="mt-1 font-semibold text-slate-900">{{ formatNumber(selectedCandidateWindowOption.qualityScore, 3) }}</div></div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">辨识状态</div><div class="mt-1 font-semibold" :class="selectedCandidateWindowOption.identifiable ? 'text-emerald-700' : 'text-slate-600'">{{ selectedCandidateWindowOption.identifiable ? '可辨识' : '仅候选' }}</div></div>
+                </div>
+                <div v-if="pidCandidateWindowChartPayload" id="pid-analysis-chart-candidate" class="mt-4 h-[420px] w-full"></div>
+                <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">当前任务暂无候选窗口分析数据。</div>
+              </div>
 
-                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div class="flex items-center justify-between gap-3">
-                    <div>
-                      <div class="text-sm font-semibold text-slate-900">整定参数回放分析图</div>
-                      <div class="mt-1 text-xs text-slate-500">使用整定后的 PID 参数与辨识模型，在历史 SV 序列下进行闭环回放仿真。</div>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <span v-if="pidAnalysisPredictionLoading" class="text-[11px] text-slate-400">回放加载中</span>
-                      <span v-else-if="pidAnalysisPredictionError" class="text-[11px] text-rose-500">生成失败</span>
-                      <span v-else-if="!pidReplayChartPayload" class="text-[11px] text-slate-400">未生成</span>
-                      <button type="button" class="shell-inline-action" @click="schedulePidAnalysisChartRender()">重新生成</button>
-                    </div>
+              <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div class="space-y-2">
+                    <div class="text-sm font-semibold text-slate-900">3. 辨识窗口模拟拟合图</div>
+                    <div class="text-xs text-slate-500">在可辨识窗口之间切换，对比模型预测的 PV 曲线与实际 PV 曲线。</div>
                   </div>
-                  <div v-if="pidAnalysisPrediction?.spAlignOffset" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                    <div class="font-semibold">提示：已自动对齐 SV</div>
-                    <div class="mt-1 text-xs text-amber-800">检测到历史 SV 与 PV 量纲差异较大，本次回放仿真将 SV 整体平移 {{ formatNumber(pidAnalysisPrediction.spAlignOffset, 3) }} 以与初始 PV 对齐，避免控制量长期饱和。</div>
-                  </div>
-                  <div v-if="pidAnalysisPredictionError" class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
-                    回放仿真生成失败：{{ pidAnalysisPredictionError }}
-                  </div>
-
-                  <div v-if="pidReplayChartPayload" class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">IAE</div>
-                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.iae, 3) }}</div>
-                    </div>
-                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">最大偏差</div>
-                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.maxError, 3) }}</div>
-                    </div>
-                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">稳态误差</div>
-                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.steadyStateError, 3) }}</div>
-                    </div>
-                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">MV 峰值</div>
-                      <div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.mvPeak, 2) }}%</div>
-                    </div>
-                  </div>
-
-                  <div v-if="latestTuningResultData.evaluation?.replay_evaluation?.metrics" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                    <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">回放指标</div>
-                    <div class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div>
-                        <div class="text-xs text-slate-500">RMSE%</div>
-                        <div class="mt-1 font-semibold text-slate-900">{{ formatNumber(latestTuningResultData.evaluation.replay_evaluation.metrics.rmse_pct, 3) }}</div>
-                      </div>
-                      <div>
-                        <div class="text-xs text-slate-500">MAE%</div>
-                        <div class="mt-1 font-semibold text-slate-900">{{ formatNumber(latestTuningResultData.evaluation.replay_evaluation.metrics.mae_pct, 3) }}</div>
-                      </div>
-                      <div>
-                        <div class="text-xs text-slate-500">饱和占比</div>
-                        <div class="mt-1 font-semibold text-slate-900">{{ formatNumber(latestTuningResultData.evaluation.replay_evaluation.metrics.saturation_pct, 2) }}%</div>
-                      </div>
-                      <div>
-                        <div class="text-xs text-slate-500">振荡次数</div>
-                        <div class="mt-1 font-semibold text-slate-900">{{ latestTuningResultData.evaluation.replay_evaluation.metrics.oscillation_count ?? '-' }}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div v-if="pidReplayChartPayload" id="pid-analysis-chart-replay" class="mt-4 h-[420px] w-full"></div>
-                  <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-                    暂时无法生成回放分析图：需要可用的 SV 序列与整定后的 PID 参数。
+                  <div class="grid grid-cols-1 md:grid-cols-[minmax(220px,1fr)_1fr_1fr_auto_auto] gap-3 xl:min-w-[940px]">
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">辨识窗口</span><select :value="effectiveSelectedFitWindowSource" @change="selectedFitWindowSource = $event.target.value; schedulePidAnalysisChartRender()" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"><option v-for="item in fitWindowOptions" :key="item.source" :value="item.source">{{ item.label }}</option></select></label>
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">开始时间</span><input :type="chartRangeInputType(pidFitChartPayload || pidAnalysisBasePayload)" :value="chartRangeDraftState('fit').start || chartBounds(pidFitChartPayload || pidAnalysisBasePayload).start" @input="updatePidChartRange('fit', 'start', $event.target.value)" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"></label>
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">结束时间</span><input :type="chartRangeInputType(pidFitChartPayload || pidAnalysisBasePayload)" :value="chartRangeDraftState('fit').end || chartBounds(pidFitChartPayload || pidAnalysisBasePayload).end" @input="updatePidChartRange('fit', 'end', $event.target.value)" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"></label>
+                    <div class="flex items-end"><button type="button" class="shell-inline-action is-accent w-full justify-center" :disabled="pidAnalysisRemoteLoadingKeys.fit" @click="confirmPidChartRange('fit')">{{ pidAnalysisRemoteLoadingKeys.fit ? '刷新中...' : '确定' }}</button></div>
+                    <div class="flex items-end"><button type="button" class="shell-inline-action w-full justify-center" @click="clearPidChartRange('fit')">重置</button></div>
                   </div>
                 </div>
+                <div v-if="selectedFitWindowOption" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">模型类型</div><div class="mt-1 font-semibold text-slate-900">{{ selectedFitWindowOption.modelType }}</div></div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">NRMSE</div><div class="mt-1 font-semibold text-slate-900">{{ formatNumber(selectedFitWindowOption.normalizedRmse, 3) }}</div></div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">R² / 置信度</div><div class="mt-1 font-semibold text-slate-900">{{ formatNumber(selectedFitWindowOption.r2, 3) }} / {{ formatPercent(selectedFitWindowOption.confidence, 1) }}</div></div>
+                </div>
+                <div v-if="pidFitChartPayload" id="pid-analysis-chart-fit" class="mt-4 h-[420px] w-full"></div>
+                <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">当前任务暂无辨识拟合对比数据。</div>
+              </div>
+
+              <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div>
+                    <div class="text-sm font-semibold text-slate-900">4. 整定参数回放分析图</div>
+                    <div class="mt-1 text-xs text-slate-500">保留当前回放仿真实现，并以全宽单行布局展示。</div>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-3 xl:min-w-[640px]">
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">开始时间</span><input :type="chartRangeInputType(pidReplayBasePayload || pidAnalysisBasePayload)" :value="chartRangeDraftState('replay').start || chartBounds(pidReplayBasePayload || pidAnalysisBasePayload).start" @input="updatePidChartRange('replay', 'start', $event.target.value)" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"></label>
+                    <label class="text-xs text-slate-500"><span class="mb-1 block font-semibold text-slate-600">结束时间</span><input :type="chartRangeInputType(pidReplayBasePayload || pidAnalysisBasePayload)" :value="chartRangeDraftState('replay').end || chartBounds(pidReplayBasePayload || pidAnalysisBasePayload).end" @input="updatePidChartRange('replay', 'end', $event.target.value)" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"></label>
+                    <div class="flex items-end gap-2"><button type="button" class="shell-inline-action is-accent w-full justify-center" :disabled="pidAnalysisRemoteLoadingKeys.replay" @click="confirmPidChartRange('replay')">{{ pidAnalysisRemoteLoadingKeys.replay ? '刷新中...' : '确定' }}</button></div>
+                    <div class="flex items-end gap-2"><button type="button" class="shell-inline-action w-full justify-center" @click="clearPidChartRange('replay')">重置</button></div>
+                  </div>
+                </div>
+                <div class="mt-4 flex items-center gap-2"><span v-if="pidAnalysisPredictionLoading" class="text-[11px] text-slate-400">回放加载中</span><span v-else-if="pidAnalysisPredictionError" class="text-[11px] text-rose-500">生成失败</span><span v-else-if="!pidReplayChartPayload" class="text-[11px] text-slate-400">尚未就绪</span><button type="button" class="shell-inline-action" @click="schedulePidAnalysisChartRender()">重新生成</button></div>
+                <div v-if="pidAnalysisPrediction?.spAlignOffset" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><div class="font-semibold">已自动对齐 SV</div><div class="mt-1 text-xs text-amber-800">检测到历史 SV 与 PV 存在较大偏移，本次回放仿真已将 SV 平移 {{ formatNumber(pidAnalysisPrediction.spAlignOffset, 3) }} 以便对齐。</div></div>
+                <div v-if="pidAnalysisPredictionError" class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">回放仿真生成失败：{{ pidAnalysisPredictionError }}</div>
+                <div v-if="pidReplayChartPayload" class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3"><div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">IAE</div><div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.iae, 3) }}</div></div><div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">最大偏差</div><div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.maxError, 3) }}</div></div><div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">稳态误差</div><div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.steadyStateError, 3) }}</div></div><div class="rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs text-slate-500">MV 峰值</div><div class="mt-2 text-xl font-bold text-slate-900">{{ formatNumber(pidReplayMetrics.mvPeak, 2) }}%</div></div></div>
+                <div v-if="latestTuningResultData.evaluation?.replay_evaluation?.metrics" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700"><div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">回放指标</div><div class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3"><div><div class="text-xs text-slate-500">RMSE%</div><div class="mt-1 font-semibold text-slate-900">{{ formatNumber(latestTuningResultData.evaluation.replay_evaluation.metrics.rmse_pct, 3) }}</div></div><div><div class="text-xs text-slate-500">MAE%</div><div class="mt-1 font-semibold text-slate-900">{{ formatNumber(latestTuningResultData.evaluation.replay_evaluation.metrics.mae_pct, 3) }}</div></div><div><div class="text-xs text-slate-500">饱和占比</div><div class="mt-1 font-semibold text-slate-900">{{ formatNumber(latestTuningResultData.evaluation.replay_evaluation.metrics.saturation_pct, 2) }}%</div></div><div><div class="text-xs text-slate-500">振荡次数</div><div class="mt-1 font-semibold text-slate-900">{{ latestTuningResultData.evaluation.replay_evaluation.metrics.oscillation_count ?? '-' }}</div></div></div></div>
+                <div v-if="pidReplayChartPayload" id="pid-analysis-chart-replay" class="mt-4 h-[440px] w-full"></div>
+                <div v-else class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">需要同时具备 SV 历史序列和整定后的 PID 参数后，才能生成回放分析图。</div>
               </div>
             </div>
-            <div v-else class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
-              还没有生成可查看的回路分析数据。请先在“工作台”发起整定，或切换到“执行过程”查看智能体运行状态。
-            </div>
+            <div v-else class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">当前还没有可展示的回路分析数据，请先执行一次整定任务。</div>
           </div>
-
           <div v-if="currentPage === 'tuning' && shellSection === 'tuning-explain'" class="space-y-6">
             <div v-if="!selectedTaskSessionId" class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
               请先在“任务会话”中选择一条整定任务，再查看对应的解释详情和专业报告。
@@ -2511,6 +2640,32 @@
                       <span>🧠</span><span>查看辨识过程详情</span>
                     </button>
                   </div>
+                  <div
+                    v-if="hasPidTuningExplain(msg)"
+                    class="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3"
+                  >
+                    <div class="text-xs text-slate-500">可查看 PID 参数、策略选择依据，以及经验/知识约束如何影响当前整定结果。</div>
+                    <button
+                      type="button"
+                      @click.stop="openPidTuningExplain(msg)"
+                      class="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 transition-all"
+                    >
+                      <span>⚙️</span><span>查看PID整定详情</span>
+                    </button>
+                  </div>
+                  <div
+                    v-if="hasEvaluationExplain(msg)"
+                    class="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3"
+                  >
+                    <div class="text-xs text-slate-500">可查看性能评分、综合评分、阈值判断，以及未通过时的主因和回流建议。</div>
+                    <button
+                      type="button"
+                      @click.stop="openEvaluationExplain(msg)"
+                      class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition-all"
+                    >
+                      <span>📈</span><span>查看评估详情</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3352,6 +3507,105 @@
                 </div>
               </div>
               <div v-if="selectedExecutionDetail.identification.attempts.length > 15" class="text-xs text-slate-500">仅展示前 15 条模型尝试，可在“辨识过程详情”弹窗查看完整列表。</div>
+            </div>
+          </div>
+
+          <div v-if="selectedExecutionDetail.pidTuning" class="rounded-xl border border-violet-100 bg-violet-50 p-4">
+            <div class="text-sm font-semibold text-slate-800 mb-2">PID整定详情</div>
+            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-violet-100"><div class="text-xs font-semibold text-slate-500">Kp</div><div class="mt-1 text-sm font-mono text-slate-800">{{ selectedExecutionDetail.pidTuning.kp }}</div></div>
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-violet-100"><div class="text-xs font-semibold text-slate-500">Ki</div><div class="mt-1 text-sm font-mono text-slate-800">{{ selectedExecutionDetail.pidTuning.ki }}</div></div>
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-violet-100"><div class="text-xs font-semibold text-slate-500">Kd</div><div class="mt-1 text-sm font-mono text-slate-800">{{ selectedExecutionDetail.pidTuning.kd }}</div></div>
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-violet-100"><div class="text-xs font-semibold text-slate-500">实际策略</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.pidTuning.strategyUsed }}</div></div>
+            </div>
+            <div class="mt-3 grid gap-3 md:grid-cols-2">
+              <div class="rounded-xl border border-violet-100 bg-white px-4 py-3">
+                <div class="text-xs font-semibold text-slate-500">策略请求</div>
+                <div class="mt-1 text-sm text-slate-700">{{ selectedExecutionDetail.pidTuning.strategyRequested }}</div>
+              </div>
+              <div class="rounded-xl border border-violet-100 bg-white px-4 py-3">
+                <div class="text-xs font-semibold text-slate-500">模型基础</div>
+                <div class="mt-1 text-sm text-slate-700">{{ selectedExecutionDetail.pidTuning.modelType }} / {{ selectedExecutionDetail.pidTuning.modelParamsSummary }}</div>
+              </div>
+            </div>
+            <div class="mt-3 rounded-xl border border-violet-100 bg-white px-4 py-3">
+              <div class="text-xs font-semibold text-slate-500">参数选择依据</div>
+              <div class="mt-1 text-sm leading-relaxed text-slate-700">{{ selectedExecutionDetail.pidTuning.selectionReason }}</div>
+            </div>
+            <div v-if="selectedExecutionDetail.pidTuning.tuningSummary" class="mt-3 rounded-xl border border-violet-100 bg-white px-4 py-3">
+              <div class="text-xs font-semibold text-slate-500">整定摘要</div>
+              <div class="mt-1 text-sm leading-relaxed text-slate-700">{{ selectedExecutionDetail.pidTuning.tuningSummary }}</div>
+            </div>
+            <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span>🧭</span><span>经验与知识参考</span></div>
+              <div class="grid gap-3 md:grid-cols-2">
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div class="text-xs font-semibold text-slate-500">偏好策略</div>
+                  <div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.pidTuning.preferredStrategy || '-' }}</div>
+                  <div v-if="selectedExecutionDetail.pidTuning.recommendedScaleText" class="mt-2 text-xs text-slate-600">推荐修正比例：{{ selectedExecutionDetail.pidTuning.recommendedScaleText }}</div>
+                  <div v-if="selectedExecutionDetail.pidTuning.experienceSummary" class="mt-3 text-sm leading-relaxed text-slate-700">{{ selectedExecutionDetail.pidTuning.experienceSummary }}</div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div class="text-xs font-semibold text-slate-500">知识约束</div>
+                  <div v-if="selectedExecutionDetail.pidTuning.knowledgeConstraints.length" class="mt-2 space-y-2">
+                    <div v-for="item in selectedExecutionDetail.pidTuning.knowledgeConstraints.slice(0, 5)" :key="item.title || item.id || item.text" class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <div class="font-semibold text-slate-800">{{ item.title || '约束' }}</div>
+                      <div class="mt-1 text-xs text-slate-600">{{ item.summary || item.description || '-' }}</div>
+                    </div>
+                  </div>
+                  <div v-else class="mt-2 text-sm text-slate-500">当前没有额外知识约束。</div>
+                </div>
+              </div>
+              <div v-if="selectedExecutionDetail.pidTuning.knowledgeRules.length" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">命中规则</div>
+                <div class="mt-2 space-y-2">
+                  <div v-for="rule in selectedExecutionDetail.pidTuning.knowledgeRules.slice(0, 5)" :key="rule.title || rule.id || rule.summary" class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    <div class="font-semibold text-slate-800">{{ rule.title || '规则' }}</div>
+                    <div class="mt-1 text-xs text-slate-600">{{ rule.summary || '-' }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="selectedExecutionDetail.evaluation" class="rounded-xl border border-amber-100 bg-amber-50 p-4">
+            <div class="text-sm font-semibold text-slate-800 mb-2">评估详情</div>
+            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">性能评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.performanceScore }}/100</div></div>
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">综合评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.finalRating }}/100</div></div>
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">方法置信度</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.methodConfidence }}</div></div>
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">通过阈值</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.passThreshold }}</div></div>
+            </div>
+            <div class="mt-3 rounded-xl border border-amber-100 bg-white px-4 py-3">
+              <div class="text-xs font-semibold text-slate-500">结论</div>
+              <div class="mt-1 text-sm font-semibold" :class="selectedExecutionDetail.evaluation.passed ? 'text-emerald-700' : 'text-red-700'">{{ selectedExecutionDetail.evaluation.passed ? '评估通过' : '评估未通过' }}</div>
+              <div class="mt-2 text-sm leading-relaxed text-slate-700">主因：{{ selectedExecutionDetail.evaluation.failureReason }}</div>
+              <div class="mt-2 text-sm leading-relaxed text-slate-700">回流目标：{{ selectedExecutionDetail.evaluation.feedbackTarget }}</div>
+              <div v-if="selectedExecutionDetail.evaluation.feedbackAction" class="mt-1 text-sm leading-relaxed text-slate-700">建议动作：{{ selectedExecutionDetail.evaluation.feedbackAction }}</div>
+            </div>
+            <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span>🧪</span><span>性能指标拆解</span></div>
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">超调</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.overshoot }}</div></div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">调节时间</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.settlingTime }}</div></div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">稳态误差</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.steadyStateError }}</div></div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">振荡次数</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.oscillationCount }}</div></div>
+                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">置信度折算分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.confidenceAsScore }}</div></div>
+              </div>
+              <div v-if="selectedExecutionDetail.evaluation.initialPid" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">首次评估 PID</div>
+                <div class="mt-2 text-sm text-slate-700">Kp={{ formatNumber(selectedExecutionDetail.evaluation.initialPid.Kp, 4) }} / Ki={{ formatNumber(selectedExecutionDetail.evaluation.initialPid.Ki, 4) }} / Kd={{ formatNumber(selectedExecutionDetail.evaluation.initialPid.Kd, 4) }}</div>
+              </div>
+              <div v-if="selectedExecutionDetail.evaluation.autoRefineResult?.applied || selectedExecutionDetail.evaluation.modelRetryResult?.applied" class="mt-4 grid gap-3 md:grid-cols-2">
+                <div v-if="selectedExecutionDetail.evaluation.autoRefineResult?.applied" class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div class="text-xs font-semibold text-slate-500">自动细调结果</div>
+                  <div class="mt-2 text-sm text-slate-700">综合评分 {{ formatNumber(selectedExecutionDetail.evaluation.autoRefineResult.base_final_rating, 2) }} → {{ formatNumber(selectedExecutionDetail.evaluation.autoRefineResult.refined_final_rating, 2) }}</div>
+                </div>
+                <div v-if="selectedExecutionDetail.evaluation.modelRetryResult?.applied" class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div class="text-xs font-semibold text-slate-500">模型/窗口回试</div>
+                  <div class="mt-2 text-sm text-slate-700">窗口 {{ selectedExecutionDetail.evaluation.modelRetryResult.window_source || '-' }} / 评分 {{ formatNumber(selectedExecutionDetail.evaluation.modelRetryResult.final_rating, 2) }}</div>
+                </div>
+              </div>
             </div>
           </div>
 

@@ -8,11 +8,17 @@ from typing import Any, Dict
 DEFAULT_MODEL_NAME = "qwen-plus"
 DEFAULT_MODEL_API_URL = ""
 DEFAULT_MODEL_API_KEY = ""
+DEFAULT_MODEL_TIMEOUT_CONNECT = "20"
+DEFAULT_MODEL_TIMEOUT_READ = "120"
+DEFAULT_MODEL_TIMEOUT_WRITE = "60"
+DEFAULT_MODEL_TIMEOUT_POOL = "30"
+DEFAULT_ENABLE_LLM_ORCHESTRATION = "1"
 DEFAULT_HISTORY_DATA_API_URL = (
     "http://holli-pid-agent.hollysys-project.sit-cloud.ieccloud.hollicube.com/api/agent/history-data-raw"
 )
 DEFAULT_KNOWLEDGE_GRAPH_API_URL = "http://graphrag.dicp.sixseven.ltd:5924/api/query"
 DEFAULT_KNOWLEDGE_GRAPH_ID = "build_20260317_003858"
+DEFAULT_ENABLE_KNOWLEDGE_EXPERT = "1"
 
 ENV_FILE_PATH = Path(__file__).resolve().parents[2] / ".env"
 
@@ -46,17 +52,32 @@ def _env_value(key: str, fallback: str = "") -> str:
     return fallback
 
 
+def _env_bool(key: str, fallback: str = "0") -> bool:
+    raw = str(_env_value(key, fallback)).strip().lower()
+    if raw in {"1", "true", "yes", "y", "on"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(raw)
+
+
 def get_runtime_system_config() -> Dict[str, Any]:
     return {
         "model": {
             "name": _env_value("MODEL", DEFAULT_MODEL_NAME),
             "api_url": _env_value("MODEL_API_URL", DEFAULT_MODEL_API_URL),
             "api_key": _env_value("MODEL_API_KEY", DEFAULT_MODEL_API_KEY),
+            "timeout_connect_seconds": float(_env_value("MODEL_TIMEOUT_CONNECT", DEFAULT_MODEL_TIMEOUT_CONNECT) or 0),
+            "timeout_read_seconds": float(_env_value("MODEL_TIMEOUT_READ", DEFAULT_MODEL_TIMEOUT_READ) or 0),
+            "timeout_write_seconds": float(_env_value("MODEL_TIMEOUT_WRITE", DEFAULT_MODEL_TIMEOUT_WRITE) or 0),
+            "timeout_pool_seconds": float(_env_value("MODEL_TIMEOUT_POOL", DEFAULT_MODEL_TIMEOUT_POOL) or 0),
+            "enable_llm_orchestration": _env_bool("ENABLE_LLM_ORCHESTRATION", DEFAULT_ENABLE_LLM_ORCHESTRATION),
         },
         "integration": {
             "history_data_api_url": _env_value("HISTORY_DATA_API_URL", DEFAULT_HISTORY_DATA_API_URL),
             "knowledge_graph_api_url": _env_value("KNOWLEDGE_GRAPH_API_URL", DEFAULT_KNOWLEDGE_GRAPH_API_URL),
             "knowledge_graph_id": _env_value("KNOWLEDGE_GRAPH_ID", DEFAULT_KNOWLEDGE_GRAPH_ID),
+            "enable_knowledge_expert": _env_bool("ENABLE_KNOWLEDGE_EXPERT", DEFAULT_ENABLE_KNOWLEDGE_EXPERT),
         },
     }
 
@@ -71,6 +92,21 @@ def update_runtime_system_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         "MODEL": str(model_payload.get("name") or _env_value("MODEL", DEFAULT_MODEL_NAME)).strip(),
         "MODEL_API_URL": str(model_payload.get("api_url") or _env_value("MODEL_API_URL", DEFAULT_MODEL_API_URL)).strip(),
         "MODEL_API_KEY": str(model_payload.get("api_key") or _env_value("MODEL_API_KEY", DEFAULT_MODEL_API_KEY)).strip(),
+        "MODEL_TIMEOUT_CONNECT": str(
+            model_payload.get("timeout_connect_seconds") or _env_value("MODEL_TIMEOUT_CONNECT", DEFAULT_MODEL_TIMEOUT_CONNECT)
+        ).strip(),
+        "MODEL_TIMEOUT_READ": str(
+            model_payload.get("timeout_read_seconds") or _env_value("MODEL_TIMEOUT_READ", DEFAULT_MODEL_TIMEOUT_READ)
+        ).strip(),
+        "MODEL_TIMEOUT_WRITE": str(
+            model_payload.get("timeout_write_seconds") or _env_value("MODEL_TIMEOUT_WRITE", DEFAULT_MODEL_TIMEOUT_WRITE)
+        ).strip(),
+        "MODEL_TIMEOUT_POOL": str(
+            model_payload.get("timeout_pool_seconds") or _env_value("MODEL_TIMEOUT_POOL", DEFAULT_MODEL_TIMEOUT_POOL)
+        ).strip(),
+        "ENABLE_LLM_ORCHESTRATION": "1"
+        if bool(model_payload.get("enable_llm_orchestration", _env_bool("ENABLE_LLM_ORCHESTRATION", DEFAULT_ENABLE_LLM_ORCHESTRATION)))
+        else "0",
         "HISTORY_DATA_API_URL": str(
             integration_payload.get("history_data_api_url")
             or _env_value("HISTORY_DATA_API_URL", DEFAULT_HISTORY_DATA_API_URL)
@@ -79,6 +115,9 @@ def update_runtime_system_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             integration_payload.get("knowledge_graph_api_url")
             or _env_value("KNOWLEDGE_GRAPH_API_URL", DEFAULT_KNOWLEDGE_GRAPH_API_URL)
         ).strip(),
+        "ENABLE_KNOWLEDGE_EXPERT": "1"
+        if bool(integration_payload.get("enable_knowledge_expert", _env_bool("ENABLE_KNOWLEDGE_EXPERT", DEFAULT_ENABLE_KNOWLEDGE_EXPERT)))
+        else "0",
     }
 
     for key, value in updates.items():
@@ -102,6 +141,16 @@ def get_model_runtime_config() -> Dict[str, str]:
     }
 
 
+def get_model_timeout_config() -> Dict[str, float]:
+    config = get_runtime_system_config()["model"]
+    return {
+        "connect": float(config.get("timeout_connect_seconds", float(DEFAULT_MODEL_TIMEOUT_CONNECT))),
+        "read": float(config.get("timeout_read_seconds", float(DEFAULT_MODEL_TIMEOUT_READ))),
+        "write": float(config.get("timeout_write_seconds", float(DEFAULT_MODEL_TIMEOUT_WRITE))),
+        "pool": float(config.get("timeout_pool_seconds", float(DEFAULT_MODEL_TIMEOUT_POOL))),
+    }
+
+
 def get_history_data_api_url() -> str:
     return str(get_runtime_system_config()["integration"]["history_data_api_url"])
 
@@ -112,3 +161,11 @@ def get_knowledge_graph_runtime_config() -> Dict[str, str]:
         "graph_api_url": str(config["knowledge_graph_api_url"]),
         "graph_id": str(config["knowledge_graph_id"]),
     }
+
+
+def is_knowledge_expert_enabled() -> bool:
+    return bool(get_runtime_system_config()["integration"].get("enable_knowledge_expert", True))
+
+
+def is_llm_orchestration_enabled() -> bool:
+    return bool(get_runtime_system_config()["model"].get("enable_llm_orchestration", True))

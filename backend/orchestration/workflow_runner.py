@@ -21,6 +21,44 @@ from orchestration.constants import DISPLAY_AGENT_NAMES
 from services.system_config_service import is_knowledge_expert_enabled
 
 
+def _display_agent(agent_key: str) -> str:
+    return DISPLAY_AGENT_NAMES.get(agent_key, agent_key)
+
+
+def _guess_text_event_agent(
+    *,
+    event_agent: str | None,
+    content: str,
+    current_turn_data: Dict[str, Any] | None,
+) -> str | None:
+    text = str(content or "").strip()
+    if not text:
+        return event_agent
+
+    current_agent = str((current_turn_data or {}).get("agent") or "").strip()
+    tool_names = {
+        str(tool.get("tool_name") or "").strip()
+        for tool in ((current_turn_data or {}).get("tools") or [])
+        if isinstance(tool, dict)
+    }
+
+    evaluation_agent = _display_agent("evaluation_expert")
+    pid_agent = _display_agent("pid_expert")
+
+    # If the current turn already contains the evaluation tool, keep any follow-up
+    # narrative on the evaluation agent even when upstream source metadata is noisy.
+    if "tool_evaluate_pid" in tool_names:
+        return evaluation_agent
+
+    if any(keyword in text for keyword in ("评估智能体报告", "最终评估", "PID整定质量评估", "评估结果：", "评估完成")):
+        return evaluation_agent
+
+    if any(keyword in text for keyword in ("PID整定结果总结", "整定策略", "推荐PID参数", "交接给评估智能体")):
+        return pid_agent if current_agent != evaluation_agent else evaluation_agent
+
+    return event_agent
+
+
 def _build_task_message(
     *,
     csv_path: str,
@@ -88,8 +126,12 @@ def _build_display_result(result_data: Dict[str, Any], *, current_tool_name: str
             "final_rating": initial_eval_result.get("final_rating", 0.0),
             "failure_reason": initial_assessment.get("failure_reason", ""),
             "feedback_target": initial_assessment.get("feedback_target", ""),
+            "feedback_target_display": result_data.get("feedback_target_display", ""),
             "feedback_action": initial_assessment.get("feedback_action", ""),
             "evaluated_pid": initial_assessment.get("evaluated_pid", {}),
+            "performance_details": result_data.get("performance_details", {}),
+            "final_details": result_data.get("final_details", {}),
+            "model_type": result_data.get("model_type", ""),
         }
 
     display_result: Dict[str, Any] = {}
@@ -218,6 +260,11 @@ async def run_multi_agent_collaboration(
     persist_experience_record: Callable[[Dict[str, Any]], str],
     register_experience_reuse: Callable[..., Dict[str, Any]] | None,
     to_jsonable: Callable[[Any], Any],
+    task_session_id: str = "",
+    uploaded_file_name: str = "",
+    uploaded_file_hash: str = "",
+    uploaded_original_file_path: str = "",
+    task_artifact_dir: str = "",
 ) -> AsyncGenerator[Dict[str, Any], None]:
     shared_data_store.clear()
     shared_data_store["loop_name"] = loop_name
@@ -225,6 +272,16 @@ async def run_multi_agent_collaboration(
     shared_data_store["plant_type"] = plant_type
     shared_data_store["scenario"] = scenario
     shared_data_store["control_object"] = control_object
+    if task_session_id:
+        shared_data_store["task_session_id"] = task_session_id
+    if uploaded_file_name:
+        shared_data_store["uploaded_file_name"] = uploaded_file_name
+    if uploaded_file_hash:
+        shared_data_store["uploaded_file_hash"] = uploaded_file_hash
+    if uploaded_original_file_path:
+        shared_data_store["uploaded_original_file_path"] = uploaded_original_file_path
+    if task_artifact_dir:
+        shared_data_store["task_artifact_dir"] = task_artifact_dir
     if selected_loop_prefix is not None:
         shared_data_store["selected_loop_prefix"] = selected_loop_prefix
     if selected_window_index is not None:
@@ -444,6 +501,14 @@ async def run_multi_agent_collaboration(
                                             "samplingTime": sampling_time,
                                             "candidateWindows": candidate_windows,
                                             "qualityMetrics": result_data.get("quality_metrics") or {},
+                                            "artifacts": {
+                                                "taskId": shared_data.get("task_session_id", ""),
+                                                "artifactDirectory": shared_data.get("task_artifact_dir", ""),
+                                                "uploadedOriginalCsvPath": shared_data.get("uploaded_original_file_path", ""),
+                                                "processedCsvPath": shared_data.get("processed_csv_path", ""),
+                                                "uploadedFileName": shared_data.get("uploaded_file_name", ""),
+                                                "uploadedFileHash": shared_data.get("uploaded_file_hash", ""),
+                                            },
                                         },
                                         "model": {
                                             "modelType": "",
@@ -496,10 +561,20 @@ async def run_multi_agent_collaboration(
                                             "stepEventDetails": shared_data.get("step_events") or [],
                                             "samplingTime": shared_data.get("sampling_time", 1.0),
                                             "historyRange": {
-                                                "startTime": shared_data.get("start_time", start_time),
-                                                "endTime": shared_data.get("end_time", end_time),
+                                                "startTime": (shared_data.get("history_range") or {}).get("start_time")
+                                                or shared_data.get("start_time", start_time),
+                                                "endTime": (shared_data.get("history_range") or {}).get("end_time")
+                                                or shared_data.get("end_time", end_time),
                                             },
                                             "qualityMetrics": quality_metrics,
+                                            "artifacts": {
+                                                "taskId": shared_data.get("task_session_id", ""),
+                                                "artifactDirectory": shared_data.get("task_artifact_dir", ""),
+                                                "uploadedOriginalCsvPath": shared_data.get("uploaded_original_file_path", ""),
+                                                "processedCsvPath": shared_data.get("processed_csv_path", ""),
+                                                "uploadedFileName": shared_data.get("uploaded_file_name", ""),
+                                                "uploadedFileHash": shared_data.get("uploaded_file_hash", ""),
+                                            },
                                         },
                                         "model": {
                                             "modelType": shared_data.get("model_type", result_data.get("model_type", "")),
@@ -562,10 +637,20 @@ async def run_multi_agent_collaboration(
                                     "samplingTime": shared_data.get("sampling_time", 1.0),
                                     "selectedWindow": shared_data.get("selected_window", {}),
                                     "historyRange": {
-                                        "startTime": shared_data.get("start_time", start_time),
-                                        "endTime": shared_data.get("end_time", end_time),
+                                        "startTime": (shared_data.get("history_range") or {}).get("start_time")
+                                        or shared_data.get("start_time", start_time),
+                                        "endTime": (shared_data.get("history_range") or {}).get("end_time")
+                                        or shared_data.get("end_time", end_time),
                                     },
                                     "qualityMetrics": quality_metrics,
+                                    "artifacts": {
+                                        "taskId": shared_data.get("task_session_id", ""),
+                                        "artifactDirectory": shared_data.get("task_artifact_dir", ""),
+                                        "uploadedOriginalCsvPath": shared_data.get("uploaded_original_file_path", ""),
+                                        "processedCsvPath": shared_data.get("processed_csv_path", ""),
+                                        "uploadedFileName": shared_data.get("uploaded_file_name", ""),
+                                        "uploadedFileHash": shared_data.get("uploaded_file_hash", ""),
+                                    },
                                 },
                                 "model": {
                                     "modelType": shared_data.get("model_type", "FOPDT"),
@@ -675,6 +760,11 @@ async def run_multi_agent_collaboration(
 
             if isinstance(event, TextMessage):
                 if event.content and getattr(event, "source", None) != "user":
+                    event_agent = _guess_text_event_agent(
+                        event_agent=event_agent,
+                        content=event.content,
+                        current_turn_data=current_turn_data,
+                    )
                     if event_agent and event_agent != last_agent:
                         if current_turn_data is not None:
                             finalized = finalize_agent_turn(current_turn_data)
@@ -747,10 +837,20 @@ async def run_multi_agent_collaboration(
                 "samplingTime": shared_data.get("sampling_time", 1.0),
                 "selectedWindow": shared_data.get("selected_window", {}),
                 "historyRange": {
-                    "startTime": shared_data.get("start_time", start_time),
-                    "endTime": shared_data.get("end_time", end_time),
+                    "startTime": (shared_data.get("history_range") or {}).get("start_time")
+                    or shared_data.get("start_time", start_time),
+                    "endTime": (shared_data.get("history_range") or {}).get("end_time")
+                    or shared_data.get("end_time", end_time),
                 },
                 "qualityMetrics": quality_metrics,
+                "artifacts": {
+                    "taskId": shared_data.get("task_session_id", ""),
+                    "artifactDirectory": shared_data.get("task_artifact_dir", ""),
+                    "uploadedOriginalCsvPath": shared_data.get("uploaded_original_file_path", ""),
+                    "processedCsvPath": shared_data.get("processed_csv_path", ""),
+                    "uploadedFileName": shared_data.get("uploaded_file_name", ""),
+                    "uploadedFileHash": shared_data.get("uploaded_file_hash", ""),
+                },
             },
             "model": {
                 "modelType": shared_data.get("model_type", "FOPDT"),

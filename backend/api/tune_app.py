@@ -7,9 +7,11 @@ import math
 import os
 import tempfile
 import uuid
+from collections import OrderedDict
 from typing import Any, AsyncGenerator, Callable, Dict
 
 import httpx
+import pandas as pd
 from fastapi import FastAPI, File, Form, Header, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -37,6 +39,7 @@ from memory.experience_service import (
     rebuild_experience_center_index,
     retrieve_experience_guidance,
 )
+from services.data_service import build_time_range_overview
 from services.data_service import load_pid_dataset
 from services.pid_tuning_service import _build_model_params_for_evaluation
 from services.system_config_service import (
@@ -45,6 +48,7 @@ from services.system_config_service import (
 )
 from skills.data_analysis_skills import _read_csv_with_fallback, detect_pid_loops, fetch_history_data_csv
 from skills.rating import ModelRating
+from state.task_artifacts import persist_uploaded_csv
 from state.workflow_task_store import WorkflowTaskStore
 
 RunCollaborationFn = Callable[..., AsyncGenerator[Dict[str, Any], None]]
@@ -59,6 +63,87 @@ LOOP_TYPE_ALIASES = {
     "level": "level",
     "液位": "level",
 }
+
+PID_CHART_CACHE_MAX_ITEMS = 64
+_pid_chart_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+PID_DATASET_CACHE_MAX_ITEMS = 16
+_pid_dataset_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+
+
+def _build_pid_chart_cache_key(
+    *,
+    task_session_id: str,
+    loop_uri: str,
+    start_time: str,
+    end_time: str,
+    window: int,
+    max_points: int,
+    csv_path: str = "",
+    selected_loop_prefix: str = "",
+) -> str:
+    file_mtime = 0.0
+    if csv_path and os.path.exists(csv_path):
+        try:
+            file_mtime = os.path.getmtime(csv_path)
+        except Exception:
+            file_mtime = 0.0
+    payload = {
+        "task_session_id": str(task_session_id or ""),
+        "loop_uri": str(loop_uri or ""),
+        "start_time": str(start_time or ""),
+        "end_time": str(end_time or ""),
+        "window": int(window or 1),
+        "max_points": int(max_points or 240),
+        "csv_path": str(csv_path or ""),
+        "csv_mtime": file_mtime,
+        "selected_loop_prefix": str(selected_loop_prefix or ""),
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _get_pid_chart_cache(key: str) -> Dict[str, Any] | None:
+    cached = _pid_chart_cache.get(key)
+    if cached is None:
+        return None
+    _pid_chart_cache.move_to_end(key)
+    return dict(cached)
+
+
+def _set_pid_chart_cache(key: str, value: Dict[str, Any]) -> None:
+    _pid_chart_cache[key] = dict(value)
+    _pid_chart_cache.move_to_end(key)
+    while len(_pid_chart_cache) > PID_CHART_CACHE_MAX_ITEMS:
+        _pid_chart_cache.popitem(last=False)
+
+
+def _build_pid_dataset_cache_key(*, csv_path: str, selected_loop_prefix: str = "") -> str:
+    file_mtime = 0.0
+    if csv_path and os.path.exists(csv_path):
+        try:
+            file_mtime = os.path.getmtime(csv_path)
+        except Exception:
+            file_mtime = 0.0
+    payload = {
+        "csv_path": str(csv_path or ""),
+        "csv_mtime": file_mtime,
+        "selected_loop_prefix": str(selected_loop_prefix or ""),
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _get_pid_dataset_cache(key: str) -> Dict[str, Any] | None:
+    cached = _pid_dataset_cache.get(key)
+    if cached is None:
+        return None
+    _pid_dataset_cache.move_to_end(key)
+    return cached
+
+
+def _set_pid_dataset_cache(key: str, value: Dict[str, Any]) -> None:
+    _pid_dataset_cache[key] = value
+    _pid_dataset_cache.move_to_end(key)
+    while len(_pid_dataset_cache) > PID_DATASET_CACHE_MAX_ITEMS:
+        _pid_dataset_cache.popitem(last=False)
 
 
 def _map_workflow_error(exc: Exception | str) -> Dict[str, Any]:
@@ -151,10 +236,12 @@ class ModelConnectivityTestPayload(BaseModel):
 
 
 class PidChartDataRequest(BaseModel):
-    loop_uri: str = Field(..., description="回路 URI")
+    task_session_id: str = Field("", description="任务会话 ID")
+    loop_uri: str = Field("", description="回路 URI")
     start_time: str = Field(..., description="开始时间")
     end_time: str = Field(..., description="结束时间")
     window: int = Field(1, description="历史数据时间戳间隔（秒）")
+    max_points: int = Field(240, description="图表最大采样点数")
 
 
 class PidPredictionPointPayload(BaseModel):
@@ -318,9 +405,19 @@ def create_app(
         window: int,
         selected_loop_prefix: str | None = None,
         selected_window_index: int | None = None,
+        task_session_id: str = "",
+        uploaded_file_name: str = "",
+        uploaded_file_hash: str = "",
+        uploaded_original_file_path: str = "",
+        task_artifact_dir: str = "",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         async for event in run_multi_agent_collaboration(
             csv_path=csv_path,
+            task_session_id=task_session_id,
+            uploaded_file_name=uploaded_file_name,
+            uploaded_file_hash=uploaded_file_hash,
+            uploaded_original_file_path=uploaded_original_file_path,
+            task_artifact_dir=task_artifact_dir,
             loop_name=loop_name,
             loop_type=loop_type,
             plant_type=plant_type,
@@ -404,6 +501,7 @@ def create_app(
     async def tune_stream(
         request: Request,
         file: UploadFile = File(None),
+        task_session_id: str = Form(""),
         loop_name: str = Form(...),
         loop_type: str = Form("flow"),
         plant_type: str = Form("distillation_column"),
@@ -418,11 +516,24 @@ def create_app(
         selected_window_index: int | None = Form(default=None),
     ) -> StreamingResponse:
         csv_path = ""
+        uploaded_file_name = ""
+        uploaded_file_hash = ""
+        uploaded_original_file_path = ""
+        task_artifact_dir = ""
+        cleanup_csv_path = False
         if file is not None:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
-                content = await file.read()
-                tmp_file.write(content)
-                csv_path = tmp_file.name
+            content = await file.read()
+            archived_upload = persist_uploaded_csv(
+                task_id=task_session_id or "",
+                original_filename=file.filename or "uploaded.csv",
+                content=content,
+            )
+            task_session_id = str(archived_upload.get("task_id") or task_session_id or uuid.uuid4().hex)
+            uploaded_file_name = str(archived_upload.get("uploaded_file_name") or file.filename or "")
+            uploaded_file_hash = str(archived_upload.get("uploaded_file_hash") or "")
+            uploaded_original_file_path = str(archived_upload.get("original_file_path") or "")
+            task_artifact_dir = str(archived_upload.get("artifact_dir") or "")
+            csv_path = uploaded_original_file_path
 
         async def event_generator() -> AsyncGenerator[str, None]:
             event_count = 0
@@ -433,6 +544,11 @@ def create_app(
             try:
                 async for event in _workflow_event_generator(
                     csv_path=csv_path,
+                    task_session_id=task_session_id,
+                    uploaded_file_name=uploaded_file_name,
+                    uploaded_file_hash=uploaded_file_hash,
+                    uploaded_original_file_path=uploaded_original_file_path,
+                    task_artifact_dir=task_artifact_dir,
                     loop_name=loop_name,
                     loop_type=loop_type,
                     plant_type=plant_type,
@@ -486,7 +602,7 @@ def create_app(
                     f"[tune_stream] close loop={loop_name} event_count={event_count} "
                     f"client_disconnected={await request.is_disconnected()}"
                 )
-                if csv_path and os.path.exists(csv_path):
+                if cleanup_csv_path and csv_path and os.path.exists(csv_path):
                     os.remove(csv_path)
 
         return StreamingResponse(
@@ -1104,28 +1220,110 @@ def create_app(
     @app.post("/api/tuning/pid-chart-data")
     async def tuning_pid_chart_data(payload: PidChartDataRequest) -> JSONResponse:
         csv_path = ""
+        should_cleanup = False
         try:
-            csv_meta = fetch_history_data_csv(
-                loop_uri=payload.loop_uri,
-                start_time=payload.start_time,
-                end_time=payload.end_time,
-                window=payload.window,
+            max_points = max(240, int(payload.max_points or 240))
+            selected_loop_prefix = None
+            cache_key = ""
+            dataset_cache_key = ""
+
+            if str(payload.task_session_id or "").strip():
+                from state.frontend_sessions import get_frontend_sessions
+
+                sessions = get_frontend_sessions().get("items") or []
+                session = next(
+                    (
+                        item for item in sessions
+                        if str((item or {}).get("id") or "") == str(payload.task_session_id).strip()
+                    ),
+                    None,
+                )
+                if not session:
+                    raise ValueError(f"未找到任务会话: {payload.task_session_id}")
+
+                context = (session or {}).get("context") or {}
+                latest_result = (session or {}).get("latestResult") or {}
+                artifacts = ((latest_result.get("dataAnalysis") or {}).get("artifacts") or {})
+                csv_path = str(
+                    artifacts.get("uploadedOriginalCsvPath")
+                    or context.get("archivedOriginalFilePath")
+                    or artifacts.get("processedCsvPath")
+                    or context.get("archivedProcessedFilePath")
+                    or ""
+                )
+                selected_loop_prefix = str(context.get("selectedLoopPrefix") or "").strip() or None
+                if not csv_path or not os.path.exists(csv_path):
+                    raise ValueError("当前任务缺少可用的 CSV 归档文件")
+            else:
+                cache_key = _build_pid_chart_cache_key(
+                    task_session_id="",
+                    loop_uri=payload.loop_uri,
+                    start_time=payload.start_time,
+                    end_time=payload.end_time,
+                    window=int(payload.window or 1),
+                    max_points=max_points,
+                    csv_path="",
+                    selected_loop_prefix="",
+                )
+                cached = _get_pid_chart_cache(cache_key)
+                if cached is not None:
+                    return JSONResponse(cached)
+                csv_meta = fetch_history_data_csv(
+                    loop_uri=payload.loop_uri,
+                    start_time=payload.start_time,
+                    end_time=payload.end_time,
+                    window=payload.window,
+                )
+                csv_path = str(csv_meta.get("csv_path") or "")
+                should_cleanup = True
+
+            if not cache_key:
+                cache_key = _build_pid_chart_cache_key(
+                    task_session_id=payload.task_session_id,
+                    loop_uri=payload.loop_uri,
+                    start_time=payload.start_time,
+                    end_time=payload.end_time,
+                    window=int(payload.window or 1),
+                    max_points=max_points,
+                    csv_path=csv_path,
+                    selected_loop_prefix=selected_loop_prefix or "",
+                )
+                cached = _get_pid_chart_cache(cache_key)
+                if cached is not None:
+                    return JSONResponse(cached)
+
+            dataset_cache_key = _build_pid_dataset_cache_key(
+                csv_path=csv_path,
+                selected_loop_prefix=selected_loop_prefix or "",
             )
-            csv_path = str(csv_meta.get("csv_path") or "")
-            dataset = load_pid_dataset(csv_path)
+            dataset = _get_pid_dataset_cache(dataset_cache_key)
+            if dataset is None:
+                dataset = load_pid_dataset(csv_path, selected_loop_prefix=selected_loop_prefix, max_points=max_points)
+                _set_pid_dataset_cache(dataset_cache_key, dataset)
             overview = dataset.get("window_overview") or {}
-            return JSONResponse(
-                {
-                    "points": overview.get("points") or [],
-                    "x_axis": overview.get("x_axis") or "timestamp",
-                    "total_points": int(overview.get("total_points") or dataset.get("data_points") or 0),
-                    "sampling_time": float(dataset.get("sampling_time") or payload.window or 1),
-                    "window_start": overview.get("window_start"),
-                    "window_end": overview.get("window_end"),
-                    "start_time": overview.get("start_time"),
-                    "end_time": overview.get("end_time"),
-                }
-            )
+            cleaned_df = dataset.get("cleaned_df")
+
+            if cleaned_df is not None and len(cleaned_df) and "timestamp" in cleaned_df.columns:
+                overview = build_time_range_overview(
+                    cleaned_df,
+                    dataset.get("selected_window") or {},
+                    start_time=payload.start_time,
+                    end_time=payload.end_time,
+                    max_points=max_points,
+                )
+
+            response_payload = {
+                "points": overview.get("points") or [],
+                "x_axis": overview.get("x_axis") or "timestamp",
+                "total_points": int(overview.get("total_points") or dataset.get("data_points") or 0),
+                "sampling_time": float(dataset.get("sampling_time") or payload.window or 1),
+                "window_start": overview.get("window_start"),
+                "window_end": overview.get("window_end"),
+                "start_time": overview.get("start_time"),
+                "end_time": overview.get("end_time"),
+            }
+            _set_pid_chart_cache(cache_key, response_payload)
+            return JSONResponse(response_payload)
         except Exception as exc:
             return JSONResponse(
                 {
@@ -1135,7 +1333,7 @@ def create_app(
                 status_code=400,
             )
         finally:
-            if csv_path and os.path.exists(csv_path):
+            if should_cleanup and csv_path and os.path.exists(csv_path):
                 try:
                     os.remove(csv_path)
                 except Exception:

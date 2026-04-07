@@ -94,6 +94,45 @@ def _summarize_raw_model(model_type: str, model_params: Dict[str, Any]) -> str:
     )
 
 
+def _derive_evaluation_failure_reason(result: Dict[str, Any]) -> str:
+    explicit = str(result.get("failure_reason") or "").strip()
+    if explicit:
+        return explicit
+
+    performance_details = result.get("performance_details") or {}
+    final_details = result.get("final_details") or {}
+    performance_score = result.get("performance_score")
+    final_rating = result.get("final_rating")
+    method_confidence = result.get("method_confidence")
+
+    reasons: List[str] = []
+    if performance_details.get("is_stable") is False:
+        reasons.append("闭环仿真未稳定")
+    if isinstance(performance_details.get("settling_time"), (int, float)) and float(performance_details.get("settling_time")) < 0:
+        reasons.append("调节时间未收敛")
+    if isinstance(performance_details.get("steady_state_error"), (int, float)) and float(performance_details.get("steady_state_error")) > 5.0:
+        reasons.append(f"稳态误差 {float(performance_details.get('steady_state_error')):.2f}% 过大")
+    if isinstance(performance_details.get("overshoot"), (int, float)) and float(performance_details.get("overshoot")) > 20.0:
+        reasons.append(f"超调 {float(performance_details.get('overshoot')):.2f}% 过大")
+    if isinstance(performance_details.get("oscillation_count"), (int, float)) and int(performance_details.get("oscillation_count")) > 5:
+        reasons.append(f"振荡次数 {int(performance_details.get('oscillation_count'))} 偏多")
+    if isinstance(method_confidence, (int, float)) and float(method_confidence) < 0.35:
+        reasons.append(f"模型置信度 {float(method_confidence):.3f} 偏低")
+    if isinstance(performance_score, (int, float)) and float(performance_score) < 5.0:
+        reasons.append(f"性能评分 {float(performance_score):.2f} 偏低")
+    if (
+        isinstance(final_rating, (int, float))
+        and isinstance(performance_score, (int, float))
+        and isinstance(final_details.get("confidence_as_score"), (int, float))
+        and float(final_rating) < float(performance_score)
+    ):
+        reasons.append(
+            f"综合评分 {float(final_rating):.2f} 低于性能评分 {float(performance_score):.2f}，主要受方法置信度拖累"
+        )
+
+    return "；".join(reasons) if reasons else "综合评分未达阈值"
+
+
 def build_agent_response(
     agent_name: str,
     tools: List[Dict[str, Any]],
@@ -212,12 +251,50 @@ def build_agent_response(
             )
         target_display = latest_result.get("feedback_target_display") or latest_result.get("feedback_target") or "后续智能体"
         model_type = str(latest_result.get("model_type") or latest_result.get("evaluated_model_type") or "").upper()
-        model_hint = f" 当前按 {model_type} 模型完成闭环评估。" if model_type else ""
-        failure_reason = latest_result.get("failure_reason") or "未知原因"
+        model_hint = f"FO" if model_type == "FO" else model_type
+        failure_reason = _derive_evaluation_failure_reason(latest_result)
         feedback_action = latest_result.get("feedback_action", "")
+        performance_details = latest_result.get("performance_details") or {}
+        final_details = latest_result.get("final_details") or {}
+        initial_assessment = latest_result.get("initial_assessment") or {}
+        evaluated_pid = initial_assessment.get("evaluated_pid") or latest_result.get("evaluated_pid") or {}
+        overshoot = _format_float(performance_details.get("overshoot"), 2)
+        settling_time = _format_float(performance_details.get("settling_time"), 2)
+        steady_state_error = _format_float(performance_details.get("steady_state_error"), 2)
+        oscillation_count = _format_float(performance_details.get("oscillation_count"), 0)
+        is_stable = performance_details.get("is_stable")
+        stable_text = "稳定" if is_stable is True else "不稳定" if is_stable is False else "待确认"
+        confidence_as_score = _format_float(final_details.get("confidence_as_score"), 2)
+        pid_line = ""
+        if evaluated_pid:
+            pid_line = (
+                f"- **首次评估 PID 参数**："
+                f"Kp={_format_float(evaluated_pid.get('Kp'), 4)}, "
+                f"Ki={_format_float(evaluated_pid.get('Ki'), 4)}, "
+                f"Kd={_format_float(evaluated_pid.get('Kd'), 4)}\n"
+            )
         return (
-            f"首次评估未通过，主因：{failure_reason}。"
-            f"建议下一步回流给 {target_display}，{feedback_action}。{model_hint}"
+            f"**评估智能体报告：PID整定质量评估**\n\n"
+            f"## 一、评估结论\n"
+            f"- **结论**：未通过\n"
+            f"- **性能评分**：{_format_float(latest_result.get('performance_score'), 2)}/10\n"
+            f"- **综合评分**：{_format_float(latest_result.get('final_rating'), 2)}/10\n"
+            f"- **方法置信度**：{_format_float(latest_result.get('method_confidence'), 3)}\n"
+            f"- **通过阈值**：{_format_float(latest_result.get('pass_threshold', 7.0), 2)}\n"
+            f"- **评估模型**：{model_hint or '未标注'}\n\n"
+            f"## 二、主因分析\n"
+            f"- **未通过主因**：{failure_reason}\n"
+            f"- **闭环稳定性**：{stable_text}\n"
+            f"- **置信度折算分**：{confidence_as_score}\n\n"
+            f"## 三、关键性能指标\n"
+            f"- **超调**：{overshoot}%\n"
+            f"- **调节时间**：{settling_time} s\n"
+            f"- **稳态误差**：{steady_state_error}%\n"
+            f"- **振荡次数**：{oscillation_count}\n"
+            f"{pid_line}\n"
+            f"## 四、建议动作\n"
+            f"- **回流目标**：{target_display}\n"
+            f"- **建议动作**：{feedback_action or '建议先根据评估结论继续优化，再重新评估。'}"
         )
 
     return ""
@@ -257,12 +334,17 @@ def finalize_agent_turn(
         and (latest_result.get("feedback_target") or latest_result.get("passed") is False)
     )
     if force_generated:
-        current_turn_data["response"] = generated or existing_response
+        if generated:
+            current_turn_data["summary"] = generated
+        if not existing_response or len(existing_response.strip()) < 24:
+            current_turn_data["response"] = generated or existing_response
         return current_turn_data
 
     if not existing_response or existing_response in {"完成", "APPROVE"}:
         current_turn_data["response"] = generated or existing_response
-    elif generated and len(existing_response) < 12:
+    if generated:
+        current_turn_data["summary"] = generated
+    if generated and len(existing_response) < 12:
         current_turn_data["response"] = f"{existing_response}\n{generated}"
 
     return current_turn_data

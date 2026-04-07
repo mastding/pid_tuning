@@ -78,6 +78,11 @@ createApp({
       csvDetectedLoops: [],
       csvSelectedLoopPrefix: '',
       csvRecommendedLoopPrefix: '',
+      csvUploadedFileName: '',
+      csvUploadedFileHash: '',
+      csvArchivedOriginalPath: '',
+      csvArchivedProcessedPath: '',
+      csvArtifactDirectory: '',
       historyWindow: 1,
       historyPanelCollapsed: false,
       loopType: 'flow',
@@ -207,13 +212,38 @@ createApp({
       ],
       selectedStrategyLabCandidateId: 'distillation_candidate_demo',
       strategyLabCompareCandidateId: '',
-      pidAnalysisRemotePayload: null,
-      pidAnalysisRemoteLoading: false,
+      pidAnalysisRemotePayloads: {
+        history: null,
+        candidate: null,
+        fit: null,
+        replay: null
+      },
+      pidAnalysisRemoteLoadingKeys: {
+        history: false,
+        candidate: false,
+        fit: false,
+        replay: false
+      },
       pidAnalysisPrediction: null,
       pidAnalysisPredictionKey: '',
       pidAnalysisPredictionLoading: false,
       pidAnalysisPredictionError: '',
       pidAnalysisShowPrediction: true,
+      loopAnalysisTaskSelectionId: '',
+      selectedCandidateWindowKey: '',
+      selectedFitWindowSource: '',
+      pidChartRanges: {
+        history: { start: '', end: '' },
+        candidate: { start: '', end: '' },
+        fit: { start: '', end: '' },
+        replay: { start: '', end: '' }
+      },
+      pidChartRangeDrafts: {
+        history: { start: '', end: '' },
+        candidate: { start: '', end: '' },
+        fit: { start: '', end: '' },
+        replay: { start: '', end: '' }
+      },
       experienceDetailDrawerOpen: false,
       strategyLabCandidateDrawerOpen: false,
       strategyLabGenerateModalOpen: false,
@@ -227,6 +257,7 @@ createApp({
       systemConfigTestOk: false,
       systemConfigShowApiKey: false,
       chartRenderScheduler: null,
+      pidChartRenderRetryHandle: 0,
       systemConfig: {
         model: {
           name: '',
@@ -256,6 +287,10 @@ createApp({
       selectedDataAnalysisExplain: null,
       identificationExplainOpen: false,
       selectedIdentificationExplain: null,
+      pidTuningExplainOpen: false,
+      selectedPidTuningExplain: null,
+      evaluationExplainOpen: false,
+      selectedEvaluationExplain: null,
       executionDetailDrawerOpen: false,
       selectedExecutionDetail: null,
       caseLibraryLoading: false,
@@ -352,7 +387,14 @@ createApp({
             dataSourceLabel: this.dataSource === 'history' ? '历史接口' : 'CSV 上传',
             startTime: usingCsv ? (this.csvDerivedStartTime || '') : this.startTime,
             endTime: usingCsv ? (this.csvDerivedEndTime || '') : this.endTime,
-            historyWindow: usingCsv ? '' : this.historyWindow
+            historyWindow: usingCsv ? '' : this.historyWindow,
+            selectedLoopPrefix: usingCsv ? (this.csvSelectedLoopPrefix || '') : '',
+            recommendedLoopPrefix: usingCsv ? (this.csvRecommendedLoopPrefix || '') : '',
+            uploadedFileName: usingCsv ? (this.csvUploadedFileName || this.uploadedFile?.name || '') : '',
+            uploadedFileHash: usingCsv ? (this.csvUploadedFileHash || '') : '',
+            archivedOriginalFilePath: usingCsv ? (this.csvArchivedOriginalPath || '') : '',
+            archivedProcessedFilePath: usingCsv ? (this.csvArchivedProcessedPath || '') : '',
+            artifactDirectory: usingCsv ? (this.csvArtifactDirectory || '') : ''
           };
         },
 
@@ -381,7 +423,44 @@ createApp({
           this.endTime = context.endTime ?? this.endTime;
           this.csvDerivedStartTime = context.startTime ?? this.csvDerivedStartTime;
           this.csvDerivedEndTime = context.endTime ?? this.csvDerivedEndTime;
+          this.csvSelectedLoopPrefix = context.selectedLoopPrefix ?? this.csvSelectedLoopPrefix;
+          this.csvRecommendedLoopPrefix = context.recommendedLoopPrefix ?? this.csvRecommendedLoopPrefix;
+          this.csvUploadedFileName = context.uploadedFileName ?? this.csvUploadedFileName;
+          this.csvUploadedFileHash = context.uploadedFileHash ?? this.csvUploadedFileHash;
+          this.csvArchivedOriginalPath = context.archivedOriginalFilePath ?? this.csvArchivedOriginalPath;
+          this.csvArchivedProcessedPath = context.archivedProcessedFilePath ?? this.csvArchivedProcessedPath;
+          this.csvArtifactDirectory = context.artifactDirectory ?? this.csvArtifactDirectory;
           this.historyWindow = Number(context.historyWindow ?? this.historyWindow ?? 1) || 1;
+        },
+
+        reconcileStaleRunningSessions() {
+          const now = Date.now();
+          let changed = false;
+          this.taskSessions = (this.taskSessions || []).map((session) => {
+            if (String(session?.status || '') !== 'running') return session;
+            const updatedAtTs = this.parseTaskSessionTime(session?.updatedAt || session?.createdAt);
+            if (!updatedAtTs || now - updatedAtTs < 30000) return session;
+            changed = true;
+            return {
+              ...session,
+              status: 'failed',
+              updatedAt: new Date().toLocaleString(),
+              error: session?.error || {
+                message: 'stream_interrupted',
+                code: 'stream_interrupted',
+                type: 'interrupted',
+                detail: '检测到历史任务会话长时间停留在运行中，已自动标记为中断。'
+              },
+              interruption: session?.interruption || {
+                stage: '',
+                agent: '',
+                detail: '检测到历史任务会话长时间停留在运行中，已自动标记为中断。'
+              }
+            };
+          });
+          if (changed) {
+            this.saveTaskSessions();
+          }
         },
 
         async saveTaskSessions() {
@@ -407,7 +486,8 @@ createApp({
             status: overrides.status || existing.status || (latestResultMessage ? 'completed' : (this.loading ? 'running' : 'draft')),
             context: {
               ...(existing.context || {}),
-              ...this.currentTaskContextSnapshot()
+              ...this.currentTaskContextSnapshot(),
+              ...((overrides && overrides.context) || {})
             },
             messages: JSON.parse(JSON.stringify(this.messages || [])),
             messageIdCounter: this.messageIdCounter,
@@ -450,6 +530,7 @@ createApp({
           }
           try {
             this.taskSessions = Array.isArray(parsed.items) ? parsed.items : [];
+            this.reconcileStaleRunningSessions();
             this.selectedTaskSessionId = parsed.selectedTaskSessionId || (this.taskSessions[0]?.id || '');
             this.taskSessionCounter = Number(parsed.taskSessionCounter) || this.taskSessions.length;
             const selected = this.taskSessions.find(item => item.id === this.selectedTaskSessionId) || this.taskSessions[0] || null;
@@ -1701,7 +1782,7 @@ createApp({
             .filter(Boolean);
         },
 
-        buildPidAnalysisChartPayload(result) {
+        buildPidAnalysisBasePayload(result) {
           const overview = result?.model?.windowOverview || {};
           const fitPreview = result?.model?.fitPreview || {};
           const latestDataAnalysis = this.latestDataAnalysisResult() || {};
@@ -1709,22 +1790,32 @@ createApp({
           const sourceCandidates = [
             {
               points: overview.points,
-              xAxisTitle: overview.x_axis === 'timestamp' ? '时间' : '采样点'
+              xAxisTitle: overview.x_axis === 'timestamp' ? '时间' : '采样点',
+              xAxisType: overview.x_axis === 'timestamp' ? 'timestamp' : 'index',
+              windowStart: overview.window_start,
+              windowEnd: overview.window_end
             },
             {
               points: fitPreview.points,
-              xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点'
+              xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点',
+              xAxisType: fitPreview.x_axis === 'timestamp' ? 'timestamp' : 'index'
             },
             {
               points: latestDataAnalysis.window_overview?.points,
-              xAxisTitle: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? '时间' : '采样点'
+              xAxisTitle: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? '时间' : '采样点',
+              xAxisType: latestDataAnalysis.window_overview?.x_axis === 'timestamp' ? 'timestamp' : 'index',
+              windowStart: latestDataAnalysis.window_overview?.window_start,
+              windowEnd: latestDataAnalysis.window_overview?.window_end
             }
           ];
 
           const matchedSource = sourceCandidates
             .map(source => ({
               points: this.normalizePidAnalysisPoints(source.points),
-              xAxisTitle: source.xAxisTitle
+              xAxisTitle: source.xAxisTitle,
+              xAxisType: source.xAxisType,
+              windowStart: source.windowStart,
+              windowEnd: source.windowEnd
             }))
             .find(source => source.points.length);
 
@@ -1733,9 +1824,295 @@ createApp({
           return {
             points: matchedSource.points,
             xAxisTitle: matchedSource.xAxisTitle || '时间',
-            leftAxisTitle: `PV / SV（${this.strategyLabLoopTypeLabel(this.loopType)}）`,
-            rightAxisTitle: 'MV (%)'
+            xAxisType: matchedSource.xAxisType || 'index',
+            leftAxisTitle: `PV / SV (${this.strategyLabLoopTypeLabel(this.loopType)})`,
+            rightAxisTitle: 'MV (%)',
+            windowStart: matchedSource.windowStart,
+            windowEnd: matchedSource.windowEnd
           };
+        },
+
+        chartRangeState(chartKey) {
+          return this.pidChartRanges?.[chartKey] || { start: '', end: '' };
+        },
+
+        chartRangeDraftState(chartKey) {
+          return this.pidChartRangeDrafts?.[chartKey] || { start: '', end: '' };
+        },
+
+        chartRangeInputType(payload) {
+          return payload?.xAxisType === 'timestamp' ? 'datetime-local' : 'number';
+        },
+
+        normalizeChartRangeValue(value, payload) {
+          if (value === null || value === undefined) return '';
+          const text = String(value).trim();
+          if (!text) return '';
+          if (payload?.xAxisType !== 'timestamp') return text;
+          if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) return text;
+          const parsed = Date.parse(text);
+          if (!Number.isFinite(parsed)) return '';
+          const date = new Date(parsed);
+          const pad = (num) => String(num).padStart(2, '0');
+          return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        },
+
+        chartPointAxisValue(point, payload) {
+          if (!point) return NaN;
+          if (payload?.xAxisType === 'timestamp') {
+            return Date.parse(point.label || '');
+          }
+          return Number(point.index);
+        },
+
+        chartBounds(payload) {
+          if (!payload?.points?.length) return { start: '', end: '' };
+          const first = payload.points[0];
+          const last = payload.points[payload.points.length - 1];
+          return {
+            start: this.normalizeChartRangeValue(payload?.xAxisType === 'timestamp' ? first?.label : first?.index, payload),
+            end: this.normalizeChartRangeValue(payload?.xAxisType === 'timestamp' ? last?.label : last?.index, payload)
+          };
+        },
+
+        updatePidChartRange(chartKey, field, value) {
+          if (!this.pidChartRangeDrafts?.[chartKey]) return;
+          this.pidChartRangeDrafts[chartKey][field] = value;
+        },
+
+        confirmPidChartRange(chartKey) {
+          if (!this.pidChartRanges?.[chartKey] || !this.pidChartRangeDrafts?.[chartKey]) return;
+          this.pidChartRanges[chartKey] = {
+            start: this.pidChartRangeDrafts[chartKey].start || '',
+            end: this.pidChartRangeDrafts[chartKey].end || ''
+          };
+          this.schedulePidAnalysisChartRender({ focusChartKey: chartKey, forceRemote: true });
+        },
+
+        clearPidChartRange(chartKey) {
+          if (!this.pidChartRanges?.[chartKey] || !this.pidChartRangeDrafts?.[chartKey]) return;
+          this.pidChartRanges[chartKey].start = '';
+          this.pidChartRanges[chartKey].end = '';
+          this.pidChartRangeDrafts[chartKey].start = '';
+          this.pidChartRangeDrafts[chartKey].end = '';
+          this.schedulePidAnalysisChartRender({ focusChartKey: chartKey, forceRemote: true });
+        },
+
+        applyLoopAnalysisTaskSelection() {
+          const nextId = String(this.loopAnalysisTaskSelectionId || '').trim();
+          if (!nextId) return;
+          const sameSession = nextId === String(this.selectedTaskSessionId || '');
+          if (sameSession) {
+            const session = this.taskSessions.find(item => String(item?.id || '') === nextId);
+            if (session) {
+              this.hydrateTaskSession(session);
+              this.schedulePidAnalysisChartRender();
+            }
+            return;
+          }
+          this.selectTaskSession(nextId, 'tuning-loop-analysis');
+        },
+
+        applyPidChartRange(payload, chartKey) {
+          if (!payload?.points?.length) return payload;
+          const range = this.chartRangeState(chartKey);
+          const startRaw = this.normalizeChartRangeValue(range?.start, payload);
+          const endRaw = this.normalizeChartRangeValue(range?.end, payload);
+          if (!startRaw && !endRaw) return payload;
+
+          const startValue = payload.xAxisType === 'timestamp' ? Date.parse(startRaw) : Number(startRaw);
+          const endValue = payload.xAxisType === 'timestamp' ? Date.parse(endRaw) : Number(endRaw);
+          const hasStart = Number.isFinite(startValue);
+          const hasEnd = Number.isFinite(endValue);
+          if (!hasStart && !hasEnd) return payload;
+
+          const points = payload.points.filter((point) => {
+            const axisValue = this.chartPointAxisValue(point, payload);
+            if (!Number.isFinite(axisValue)) return false;
+            if (hasStart && axisValue < startValue) return false;
+            if (hasEnd && axisValue > endValue) return false;
+            return true;
+          });
+
+          if (!points.length) return null;
+          return {
+            ...payload,
+            points
+          };
+        },
+
+        candidateWindowSourceKey(event, idx) {
+          const explicit = String(event?.window_source || event?.name || event?.source || '').trim();
+          if (explicit) return explicit;
+          const normalizedType = String(event?.type || '').trim().toLowerCase();
+          const base = normalizedType === 'mv_peak' ? 'mv_peak' : 'step_event';
+          return `${base}_${idx + 1}`;
+        },
+
+        buildWindowLabelParts(event, idx, identifiable) {
+          const source = this.candidateWindowSourceKey(event, idx);
+          const eventType = this.describeStepEventType(event?.type);
+          const quality = Number(event?.window_quality_score);
+          const parts = [source, eventType];
+          if (Number.isFinite(quality)) parts.push(`Q ${this.formatNumber(quality, 3)}`);
+          if (identifiable) parts.push('可辨识');
+          return parts.join(' · ');
+        },
+
+        pickBestAttemptForWindow(attempts, sourceKey) {
+          return [...(attempts || [])]
+            .filter(item => String(item?.window_source || '') === String(sourceKey))
+            .sort((a, b) => {
+              const performanceGap = Number(b?.benchmark_performance_score || b?.performance_score || 0)
+                - Number(a?.benchmark_performance_score || a?.performance_score || 0);
+              if (Math.abs(performanceGap) > 1e-9) return performanceGap;
+              return Number(b?.confidence || 0) - Number(a?.confidence || 0);
+            })[0] || null;
+        },
+
+        slicePidAnalysisPoints(points, startIndex, endIndex, padding = 0) {
+          if (!Array.isArray(points) || !points.length) return [];
+          const start = Number.isFinite(Number(startIndex)) ? Number(startIndex) - Number(padding || 0) : -Infinity;
+          const end = Number.isFinite(Number(endIndex)) ? Number(endIndex) + Number(padding || 0) : Infinity;
+          return points.filter((point) => {
+            const idx = Number(point?.index);
+            return Number.isFinite(idx) && idx >= start && idx <= end;
+          });
+        },
+
+        simulateModelPreview(modelType, mvSeries, modelParams, dt) {
+          if (!Array.isArray(mvSeries) || !mvSeries.length) return [];
+          const type = String(modelType || '').trim().toUpperCase();
+          const gain = Number(modelParams?.K ?? modelParams?.k ?? 0);
+          const tau = Math.max(Number(modelParams?.T ?? modelParams?.tau ?? 0), 1e-6);
+          const delay = Math.max(Number(modelParams?.L ?? modelParams?.theta ?? 0), 0);
+          const tau2 = Math.max(Number(modelParams?.T2 ?? modelParams?.tau2 ?? tau), 1e-6);
+          const dtSafe = Math.max(Number(dt || 1), 1e-6);
+          const delaySteps = Math.max(0, Math.round(delay / dtSafe));
+          const delayedMv = mvSeries.map((_, idx) => {
+            const sourceIdx = idx - delaySteps;
+            return sourceIdx >= 0 ? Number(mvSeries[sourceIdx] || 0) : Number(mvSeries[0] || 0);
+          });
+
+          if (type === 'IPDT') {
+            let y = 0;
+            return delayedMv.map((mv) => {
+              y += gain * mv * dtSafe;
+              return y;
+            });
+          }
+
+          if (type === 'SOPDT') {
+            let x1 = 0;
+            let x2 = 0;
+            return delayedMv.map((mv) => {
+              x1 += ((gain * mv) - x1) * (dtSafe / tau);
+              x2 += (x1 - x2) * (dtSafe / tau2);
+              return x2;
+            });
+          }
+
+          let y = 0;
+          return delayedMv.map((mv) => {
+            y += ((gain * mv) - y) * (dtSafe / tau);
+            return y;
+          });
+        },
+
+        buildCandidateWindowChartPayload(basePayload, selectedWindow) {
+          if (!basePayload?.points?.length || !selectedWindow) return null;
+          const startIndex = Number(selectedWindow.windowStartIndex);
+          const endIndex = Number(selectedWindow.windowEndIndex);
+          const eventStartIndex = Number(selectedWindow.eventStartIndex);
+          const eventEndIndex = Number(selectedWindow.eventEndIndex);
+          const padding = Number.isFinite(startIndex) && Number.isFinite(endIndex)
+            ? Math.max(5, Math.round((endIndex - startIndex) * 0.25))
+            : 0;
+          const points = this.slicePidAnalysisPoints(basePayload.points, startIndex, endIndex, padding);
+          if (!points.length) return null;
+          return {
+            ...basePayload,
+            points,
+            highlightRanges: [
+              Number.isFinite(startIndex) && Number.isFinite(endIndex)
+                ? {
+                    startIndex,
+                    endIndex,
+                    startLabel: selectedWindow.windowStartTime || '',
+                    endLabel: selectedWindow.windowEndTime || '',
+                    label: '候选窗口',
+                    color: 'rgba(14, 165, 233, 0.16)'
+                  }
+                : null,
+              Number.isFinite(eventStartIndex) && Number.isFinite(eventEndIndex)
+                ? {
+                    startIndex: eventStartIndex,
+                    endIndex: eventEndIndex,
+                    startLabel: selectedWindow.eventStartTime || '',
+                    endLabel: selectedWindow.eventEndTime || '',
+                    label: '阶跃事件',
+                    color: 'rgba(16, 185, 129, 0.14)'
+                  }
+                : null
+            ].filter(Boolean)
+          };
+        },
+
+        buildIdentificationWindowFitPayload(result, basePayload, selectedFitWindow) {
+          if (!selectedFitWindow) return this.buildPidFitChartPayload(result);
+
+          const selectedSource = String(selectedFitWindow.source || '');
+          const currentSelectedSource = String(result?.model?.selectedWindowSource || result?.model?.windowSource || '');
+          if (!basePayload?.points?.length && selectedSource === currentSelectedSource) {
+            return this.buildPidFitChartPayload(result);
+          }
+          if (!basePayload?.points?.length) return null;
+
+          const startIndex = Number(selectedFitWindow.windowStartIndex);
+          const endIndex = Number(selectedFitWindow.windowEndIndex);
+          const pointsBase = this.slicePidAnalysisPoints(basePayload.points, startIndex, endIndex, 0);
+          if (!pointsBase.length) return null;
+
+          const dt =
+            Number(result?.dataAnalysis?.samplingTime)
+            || Number(result?.dataAnalysis?.sampling_time_sec)
+            || Number(this.historyWindow || 1)
+            || 1;
+          const preview = this.simulateModelPreview(
+            selectedFitWindow.modelType,
+            pointsBase.map(point => point.mv),
+            selectedFitWindow.modelParams || {},
+            dt
+          );
+          if (!preview.length) return null;
+
+          const pv0 = Number(pointsBase[0]?.pv || 0);
+          const points = pointsBase.map((point, idx) => ({
+            ...point,
+            pv_fit: pv0 + (Number(preview[idx]) || 0)
+          }));
+
+          return {
+            ...basePayload,
+            points,
+            leftAxisTitle: `PV（辨识窗口，${this.strategyLabLoopTypeLabel(this.loopType)}）`,
+            rightAxisTitle: 'MV (%)',
+            showFit: true,
+            showSV: false,
+            showMV: true,
+            highlightRanges: Number.isFinite(startIndex) && Number.isFinite(endIndex)
+              ? [{
+                  startIndex,
+                  endIndex,
+                  label: '辨识窗口',
+                  color: 'rgba(99, 102, 241, 0.14)'
+                }]
+              : []
+          };
+        },
+
+        buildPidAnalysisChartPayload(result) {
+          return this.buildPidAnalysisBasePayload(result);
         },
 
         buildPidFitChartPayload(result) {
@@ -1745,6 +2122,7 @@ createApp({
           return {
             points,
             xAxisTitle: fitPreview.x_axis === 'timestamp' ? '时间' : '采样点',
+            xAxisType: fitPreview.x_axis === 'timestamp' ? 'timestamp' : 'index',
             leftAxisTitle: `PV（拟合窗口，${this.strategyLabLoopTypeLabel(this.loopType)}）`,
             rightAxisTitle: 'MV (%)',
             showFit: true,
@@ -1753,49 +2131,108 @@ createApp({
           };
         },
 
-        async loadPidAnalysisRemotePayload() {
+        hasManualChartRange(chartKey) {
+          const range = this.chartRangeState(chartKey);
+          return Boolean(String(range?.start || '').trim() || String(range?.end || '').trim());
+        },
+
+        shouldHydrateCandidateWindowRemotely(payload) {
+          return Array.isArray(payload?.points) && payload.points.length > 0 && payload.points.length < 12;
+        },
+
+        chartRemoteDefaultBounds(chartKey, fallbackPayload = null) {
+          if (chartKey === 'candidate' && this.selectedCandidateWindowOption) {
+            return {
+              start: this.normalizeChartRangeValue(this.selectedCandidateWindowOption.windowStartTime, { xAxisType: 'timestamp' }),
+              end: this.normalizeChartRangeValue(this.selectedCandidateWindowOption.windowEndTime, { xAxisType: 'timestamp' })
+            };
+          }
+          return fallbackPayload ? this.chartBounds(fallbackPayload) : { start: '', end: '' };
+        },
+
+        chartRemoteFallbackPayload(chartKey, fallbackPayload = null) {
+          if (fallbackPayload) return fallbackPayload;
+          if (chartKey === 'candidate') {
+            const base = this.pidAnalysisBasePayload || this.pidAnalysisBaseLocalPayload || null;
+            return base ? {
+              ...base,
+              highlightRanges: this.selectedCandidateWindowOption ? [
+                {
+                  startIndex: Number(this.selectedCandidateWindowOption.windowStartIndex),
+                  endIndex: Number(this.selectedCandidateWindowOption.windowEndIndex),
+                  startLabel: this.selectedCandidateWindowOption.windowStartTime || '',
+                  endLabel: this.selectedCandidateWindowOption.windowEndTime || '',
+                  color: 'rgba(14, 165, 233, 0.16)'
+                },
+                {
+                  startIndex: Number(this.selectedCandidateWindowOption.eventStartIndex),
+                  endIndex: Number(this.selectedCandidateWindowOption.eventEndIndex),
+                  startLabel: this.selectedCandidateWindowOption.eventStartTime || '',
+                  endLabel: this.selectedCandidateWindowOption.eventEndTime || '',
+                  color: 'rgba(16, 185, 129, 0.14)'
+                }
+              ].filter((item) => Number.isFinite(item.startIndex) && Number.isFinite(item.endIndex)) : []
+            } : null;
+          }
+          return null;
+        },
+
+        toBackendChartTime(value, payload) {
+          const normalized = this.normalizeChartRangeValue(value, payload);
+          if (!normalized || payload?.xAxisType !== 'timestamp') return normalized;
+          return `${normalized.replace('T', ' ')}:00`;
+        },
+
+        buildRemotePidChartPayload(payload, fallbackPayload = null) {
+          const points = this.normalizePidAnalysisPoints(payload?.points);
+          if (!points.length) return null;
+          return {
+            ...(fallbackPayload || {}),
+            points,
+            xAxisTitle: payload?.x_axis === 'timestamp' ? '时间' : '采样点',
+            xAxisType: payload?.x_axis === 'timestamp' ? 'timestamp' : 'index',
+            leftAxisTitle: fallbackPayload?.leftAxisTitle || `PV / SV（${this.strategyLabLoopTypeLabel(this.loopType)}）`,
+            rightAxisTitle: fallbackPayload?.rightAxisTitle || 'MV (%)'
+          };
+        },
+
+        async loadPidAnalysisRemotePayload(chartKey = 'history', fallbackPayload = null) {
           const session = this.selectedTaskSession;
           const context = session?.context || {};
-          if ((context.dataSource || this.dataSource) === 'csv') {
-            this.pidAnalysisRemotePayload = null;
-            return null;
-          }
+          const isCsv = (context.dataSource || this.dataSource) === 'csv';
           const loopUri = context.loopUri || this.loopUri;
-          const startTime = context.startTime || this.startTime;
-          const endTime = context.endTime || this.endTime;
           const window = Number(context.historyWindow || this.historyWindow || 1) || 1;
+          const resolvedFallbackPayload = this.chartRemoteFallbackPayload(chartKey, fallbackPayload);
+          const payloadForBounds = resolvedFallbackPayload || this.pidAnalysisBaseLocalPayload || null;
+          const payloadBounds = this.chartRemoteDefaultBounds(chartKey, payloadForBounds);
+          const range = this.chartRangeState(chartKey);
+          const startTime = this.toBackendChartTime(range?.start || payloadBounds.start || context.startTime || this.startTime, payloadForBounds || { xAxisType: 'timestamp' });
+          const endTime = this.toBackendChartTime(range?.end || payloadBounds.end || context.endTime || this.endTime, payloadForBounds || { xAxisType: 'timestamp' });
 
-          if (!loopUri || !startTime || !endTime) {
-            this.pidAnalysisRemotePayload = null;
+          if (!startTime || !endTime || (!isCsv && !loopUri)) {
+            this.pidAnalysisRemotePayloads[chartKey] = null;
             return null;
           }
 
-          this.pidAnalysisRemoteLoading = true;
+          this.pidAnalysisRemoteLoadingKeys[chartKey] = true;
           try {
             const payload = await fetchPidChartData({
-              loop_uri: loopUri,
+              task_session_id: session?.id || '',
+              loop_uri: isCsv ? '' : loopUri,
               start_time: startTime,
               end_time: endTime,
-              window
+              window,
+              max_points: 1000
             });
-            const points = this.normalizePidAnalysisPoints(payload?.points);
-            if (!points.length) {
-              this.pidAnalysisRemotePayload = null;
-              return null;
-            }
-            this.pidAnalysisRemotePayload = {
-              points,
-              xAxisTitle: payload?.x_axis === 'timestamp' ? '时间' : '采样点',
-              leftAxisTitle: `PV / SV（${this.strategyLabLoopTypeLabel(this.loopType)}）`,
-              rightAxisTitle: 'MV (%)'
-            };
-            return this.pidAnalysisRemotePayload;
+            const normalizedPayload = this.buildRemotePidChartPayload(payload, payloadForBounds);
+            this.pidAnalysisRemotePayloads[chartKey] = normalizedPayload;
+            return normalizedPayload;
           } catch (error) {
-            console.warn('Failed to load remote PID chart payload:', error);
-            this.pidAnalysisRemotePayload = null;
+            console.warn(`Failed to load remote PID chart payload for ${chartKey}:`, error);
+            this.pidAnalysisRemotePayloads[chartKey] = null;
             return null;
           } finally {
-            this.pidAnalysisRemoteLoading = false;
+            this.pidAnalysisRemoteLoadingKeys[chartKey] = false;
           }
         },
 
@@ -1937,12 +2374,14 @@ createApp({
         renderPidAnalysisChart() {
           if (!window.PidAnalysisChart) return;
           const historyElement = document.getElementById('pid-analysis-chart-history') || document.getElementById('pid-analysis-chart');
+          const candidateElement = document.getElementById('pid-analysis-chart-candidate');
           const replayElement = document.getElementById('pid-analysis-chart-replay');
           const fitElement = document.getElementById('pid-analysis-chart-fit');
           const allowed = this.currentPage === 'tuning' && this.shellSection === 'tuning-loop-analysis';
 
           if (!allowed) {
             destroyPidAnalysisChart(historyElement);
+            destroyPidAnalysisChart(candidateElement);
             destroyPidAnalysisChart(replayElement);
             destroyPidAnalysisChart(fitElement);
             return;
@@ -1952,6 +2391,12 @@ createApp({
             renderPidAnalysisChart(historyElement, this.pidAnalysisChartPayload);
           } else if (historyElement) {
             destroyPidAnalysisChart(historyElement);
+          }
+
+          if (candidateElement && this.pidCandidateWindowChartPayload) {
+            renderPidAnalysisChart(candidateElement, this.pidCandidateWindowChartPayload);
+          } else if (candidateElement) {
+            destroyPidAnalysisChart(candidateElement);
           }
 
           if (replayElement && this.pidReplayChartPayload) {
@@ -1967,25 +2412,113 @@ createApp({
           }
         },
 
-        async schedulePidAnalysisChartRender() {
-          const localPayload = this.buildPidAnalysisChartPayload(this.latestTuningResultData);
+        triggerPidChartDelayedReflow() {
+          if (this.pidChartRenderRetryHandle) {
+            window.clearTimeout(this.pidChartRenderRetryHandle);
+            this.pidChartRenderRetryHandle = 0;
+          }
+          if (!(this.currentPage === 'tuning' && this.shellSection === 'tuning-loop-analysis')) {
+            return;
+          }
+          this.pidChartRenderRetryHandle = window.setTimeout(() => {
+            this.pidChartRenderRetryHandle = 0;
+            this.renderPidAnalysisChart();
+          }, 120);
+        },
+
+        async schedulePidAnalysisChartRender(options = {}) {
+          const focusChartKey = typeof options === 'string' ? options : (options?.focusChartKey || '');
+          const forceRemote = Boolean(options?.forceRemote);
           const shouldLoadRemote = this.currentPage === 'tuning'
             && this.shellSection === 'tuning-loop-analysis'
             && this.selectedTaskSession;
-          if (!localPayload && shouldLoadRemote) {
-            await this.loadPidAnalysisRemotePayload();
-          } else if (localPayload) {
-            this.pidAnalysisRemotePayload = null;
+          if (!shouldLoadRemote) {
+            this.pidAnalysisRemotePayloads = {
+              history: null,
+              candidate: null,
+              fit: null,
+              replay: null
+            };
           }
-          if (this.currentPage === 'tuning' && this.shellSection === 'tuning-loop-analysis' && this.pidAnalysisChartPayload) {
-            await this.loadPidAnalysisPrediction(this.pidAnalysisChartPayload);
+          if (!this.selectedCandidateWindowKey && this.candidateWindowOptions.length) {
+            this.selectedCandidateWindowKey = this.candidateWindowOptions[0].key;
           }
+          if (!this.selectedFitWindowSource && this.fitWindowOptions.length) {
+            this.selectedFitWindowSource = this.fitWindowOptions[0].source;
+          }
+          const localPayload = this.pidAnalysisBaseLocalPayload;
+          if (shouldLoadRemote) {
+            const shouldReloadHistory = !localPayload || this.hasManualChartRange('history') || forceRemote && (!focusChartKey || focusChartKey === 'history');
+            if (shouldReloadHistory) {
+              await this.loadPidAnalysisRemotePayload('history', localPayload);
+            } else if (!this.hasManualChartRange('history')) {
+              this.pidAnalysisRemotePayloads.history = null;
+            }
+
+            const basePayload = this.pidAnalysisRemotePayloads.history || localPayload;
+            const candidateFallback = this.buildCandidateWindowChartPayload(basePayload, this.selectedCandidateWindowOption);
+            const fitFallback = this.buildIdentificationWindowFitPayload(this.latestTuningResultData, basePayload, this.selectedFitWindowOption);
+            const replayFallback = this.pidReplayBasePayload;
+            const refreshAllDependents = !focusChartKey || focusChartKey === 'history';
+            const remoteJobs = [];
+
+            if (
+              (refreshAllDependents || focusChartKey === 'candidate')
+              && this.selectedCandidateWindowOption
+              && (
+                this.hasManualChartRange('candidate')
+                || !candidateFallback
+                || this.shouldHydrateCandidateWindowRemotely(candidateFallback)
+              )
+            ) {
+              remoteJobs.push(this.loadPidAnalysisRemotePayload('candidate', candidateFallback));
+            } else if (!this.hasManualChartRange('candidate')) {
+              this.pidAnalysisRemotePayloads.candidate = null;
+            }
+
+            if ((refreshAllDependents || focusChartKey === 'fit') && this.hasManualChartRange('fit') && fitFallback) {
+              remoteJobs.push(this.loadPidAnalysisRemotePayload('fit', fitFallback));
+            } else if (!this.hasManualChartRange('fit')) {
+              this.pidAnalysisRemotePayloads.fit = null;
+            }
+
+            if ((refreshAllDependents || focusChartKey === 'replay') && this.hasManualChartRange('replay') && replayFallback) {
+              remoteJobs.push(this.loadPidAnalysisRemotePayload('replay', replayFallback));
+            } else if (!this.hasManualChartRange('replay')) {
+              this.pidAnalysisRemotePayloads.replay = null;
+            }
+
+            if (remoteJobs.length) {
+              await Promise.all(remoteJobs);
+            }
+          }
+          if (this.currentPage === 'tuning' && this.shellSection === 'tuning-loop-analysis' && this.pidAnalysisBasePayload) {
+            await this.loadPidAnalysisPrediction(this.pidAnalysisBasePayload);
+          }
+          ['history', 'candidate', 'fit', 'replay'].forEach((chartKey) => {
+            const payloadMap = {
+              history: this.pidAnalysisChartPayload,
+              candidate: this.pidCandidateWindowChartPayload,
+              fit: this.pidFitChartPayload,
+              replay: this.pidReplayChartPayload
+            };
+            const payload = payloadMap[chartKey];
+            const bounds = this.chartBounds(payload);
+            if (!this.pidChartRangeDrafts?.[chartKey]) return;
+            if (!String(this.pidChartRangeDrafts[chartKey].start || '').trim()) {
+              this.pidChartRangeDrafts[chartKey].start = bounds.start || '';
+            }
+            if (!String(this.pidChartRangeDrafts[chartKey].end || '').trim()) {
+              this.pidChartRangeDrafts[chartKey].end = bounds.end || '';
+            }
+          });
           this.$nextTick(() => {
             if (typeof this.chartRenderScheduler === 'function') {
               this.chartRenderScheduler(() => this.renderPidAnalysisChart());
             } else {
               this.renderPidAnalysisChart();
             }
+            this.triggerPidChartDelayedReflow();
           });
         },
 
@@ -2017,6 +2550,8 @@ createApp({
           if (!msg) return null;
           const dataAnalysis = this.buildDataAnalysisExplainPayload(msg);
           const identification = this.buildIdentificationExplainPayload(msg);
+          const pidTuning = this.buildPidTuningExplainPayload(msg);
+          const evaluation = this.buildEvaluationExplainPayload(msg);
           return {
             id: msg.id,
             agent: msg.agent || '智能体',
@@ -2025,6 +2560,8 @@ createApp({
             response: msg.response || msg.content || '',
             dataAnalysis,
             identification,
+            pidTuning,
+            evaluation,
             tools: Array.isArray(msg.tools)
               ? msg.tools.map(tool => ({
                   name: tool.tool_name || 'tool',
@@ -2131,6 +2668,131 @@ createApp({
         closeIdentificationExplain() {
           this.identificationExplainOpen = false;
           this.selectedIdentificationExplain = null;
+        },
+
+        hasPidTuningExplain(msg) {
+          const result = this.getToolResult(msg, 'tool_tune_pid');
+          if (result && typeof result === 'object') return true;
+          return String(msg?.agent || '') === 'PID专家智能体' && Boolean(this.latestTuningResultData?.pidParams);
+        },
+
+        buildPidTuningExplainPayload(msg) {
+          const toolResult = this.getToolResult(msg, 'tool_tune_pid') || {};
+          const latestPid = this.latestTuningResultData?.pidParams || {};
+          const latestModel = this.latestTuningResultData?.model || {};
+          const experienceGuidance = toolResult.experience_guidance || latestPid.experienceGuidance || {};
+          const knowledgeGuidance = toolResult.expert_knowledge_guidance || this.latestTuningResultData?.knowledge?.guidance || {};
+          const selectionInputs = toolResult.selection_inputs || {};
+          const knowledgeRules = Array.isArray(knowledgeGuidance?.matched_rules) ? knowledgeGuidance.matched_rules : [];
+          const knowledgeConstraints = Array.isArray(knowledgeGuidance?.constraints) ? knowledgeGuidance.constraints : [];
+          const strategyUsed = toolResult.strategy_used || toolResult.strategy || latestPid.strategyUsed || latestPid.strategy || '';
+          const kp = toolResult.Kp ?? latestPid.Kp;
+          const ki = toolResult.Ki ?? latestPid.Ki;
+          const kd = toolResult.Kd ?? latestPid.Kd;
+          if (![kp, ki, kd].some(value => Number.isFinite(Number(value)))) return null;
+          return {
+            kp: this.formatNumber(Number(kp), 4),
+            ki: this.formatNumber(Number(ki), 4),
+            kd: this.formatNumber(Number(kd), 4),
+            strategyRequested: selectionInputs.strategy_requested || selectionInputs.method || latestPid.strategyRequested || 'AUTO',
+            strategyUsed: this.strategyDisplayLabel(strategyUsed || 'AUTO'),
+            selectionReason: toolResult.selection_reason || latestPid.selectionReason || latestPid.tuningSummary || '系统会结合辨识模型、经验 guidance 和知识约束综合选择整定策略。',
+            tuningSummary: latestPid.tuningSummary || msg?.response || '',
+            modelType: this.modelTypeLabel(selectionInputs.model_type || latestModel.modelType || ''),
+            modelParamsSummary: this.summarizeModelParams(toolResult.selected_model_params || selectionInputs.selected_model_params || latestModel),
+            experienceSummary: experienceGuidance?.guidance || experienceGuidance?.summary?.guidance || '',
+            preferredStrategy: this.strategyDisplayLabel(experienceGuidance?.preferred_strategy || knowledgeGuidance?.preferred_strategy || ''),
+            recommendedScaleText: (
+              Number.isFinite(Number(experienceGuidance?.recommended_kp_scale))
+              || Number.isFinite(Number(experienceGuidance?.recommended_ki_scale))
+              || Number.isFinite(Number(experienceGuidance?.recommended_kd_scale))
+            )
+              ? [
+                  Number.isFinite(Number(experienceGuidance?.recommended_kp_scale)) ? `Kp×${this.formatNumber(Number(experienceGuidance.recommended_kp_scale), 2)}` : '',
+                  Number.isFinite(Number(experienceGuidance?.recommended_ki_scale)) ? `Ki×${this.formatNumber(Number(experienceGuidance.recommended_ki_scale), 2)}` : '',
+                  Number.isFinite(Number(experienceGuidance?.recommended_kd_scale)) ? `Kd×${this.formatNumber(Number(experienceGuidance.recommended_kd_scale), 2)}` : ''
+                ].filter(Boolean).join(' / ')
+              : '',
+            knowledgeRules,
+            knowledgeConstraints,
+            knowledgeRuleTitles: knowledgeRules.map(item => item?.title || item?.name || String(item || '')).filter(Boolean),
+            knowledgeConstraintTitles: knowledgeConstraints.map(item => item?.title || item?.name || String(item || '')).filter(Boolean)
+          };
+        },
+
+        openPidTuningExplain(msg) {
+          const payload = this.buildPidTuningExplainPayload(msg);
+          if (!payload) return;
+          this.selectedPidTuningExplain = payload;
+          this.pidTuningExplainOpen = true;
+        },
+
+        closePidTuningExplain() {
+          this.pidTuningExplainOpen = false;
+          this.selectedPidTuningExplain = null;
+        },
+
+        hasEvaluationExplain(msg) {
+          const result = this.getToolResult(msg, 'tool_evaluate_pid');
+          if (result && typeof result === 'object') return true;
+          return String(msg?.agent || '') === '评估智能体' && Boolean(this.latestTuningResultData?.evaluation);
+        },
+
+        buildEvaluationExplainPayload(msg) {
+          const toolResult = this.getToolResult(msg, 'tool_evaluate_pid');
+          const latestEvaluation = this.latestTuningResultData?.evaluation || {};
+          const payload = (toolResult && typeof toolResult === 'object' && (
+            Object.prototype.hasOwnProperty.call(toolResult, 'passed')
+            || Object.prototype.hasOwnProperty.call(toolResult, 'performance_score')
+            || Object.prototype.hasOwnProperty.call(toolResult, 'final_rating')
+          )) ? toolResult : latestEvaluation;
+          if (!payload || typeof payload !== 'object' || !Object.keys(payload).length) return null;
+          const performanceDetails = payload.performance_details || latestEvaluation.performance_details || {};
+          const finalDetails = payload.final_details || latestEvaluation.final_details || {};
+          const initialPid = payload.initial_assessment?.evaluated_pid || latestEvaluation.initial_assessment?.evaluated_pid || null;
+          const autoRefineResult = payload.auto_refine_result || latestEvaluation.auto_refine_result || {};
+          const modelRetryResult = payload.model_retry_result || latestEvaluation.model_retry_result || {};
+          return {
+            passed: payload.passed === true,
+            passThreshold: this.formatNumber(Number(payload.pass_threshold ?? latestEvaluation.pass_threshold ?? 7), 2),
+            performanceScore: this.formatScore100(Number(payload.performance_score ?? latestEvaluation.performance_score), 1),
+            finalRating: this.formatScore100(Number(payload.final_rating ?? latestEvaluation.final_rating), 1),
+            methodConfidence: this.formatPercent(Number(payload.method_confidence ?? latestEvaluation.method_confidence), 1),
+            failureReason: this.deriveEvaluationFailureReason({ ...latestEvaluation, ...payload }),
+            feedbackTarget: payload.feedback_target_display || payload.feedback_target || latestEvaluation.feedback_target_display || latestEvaluation.feedback_target || '-',
+            feedbackAction: payload.feedback_action || latestEvaluation.feedback_action || '',
+            overshoot: this.formatNumber(Number(performanceDetails.overshoot), 2),
+            settlingTime: Number.isFinite(Number(performanceDetails.settling_time)) ? `${this.formatNumber(Number(performanceDetails.settling_time), 2)} s` : '-',
+            steadyStateError: Number.isFinite(Number(performanceDetails.steady_state_error)) ? `${this.formatNumber(Number(performanceDetails.steady_state_error), 2)}%` : '-',
+            oscillationCount: Number.isFinite(Number(performanceDetails.oscillation_count)) ? String(Number(performanceDetails.oscillation_count)) : '-',
+            decayRatio: this.formatNumber(Number(performanceDetails.decay_ratio), 3),
+            confidenceAsScore: Number.isFinite(Number(finalDetails.confidence_as_score)) ? this.formatNumber(Number(finalDetails.confidence_as_score), 2) : '-',
+            stabilityText: performanceDetails.is_stable === true ? '稳定' : performanceDetails.is_stable === false ? '不稳定' : '-',
+            initialPid,
+            initialPidText: initialPid
+              ? `Kp=${this.formatNumber(Number(initialPid.Kp), 4)} / Ki=${this.formatNumber(Number(initialPid.Ki), 4)} / Kd=${this.formatNumber(Number(initialPid.Kd), 4)}`
+              : '',
+            autoRefineResult,
+            autoRefineSummary: autoRefineResult?.applied
+              ? `已自动细调，输出 Kp=${this.formatNumber(Number(autoRefineResult?.output_pid?.Kp), 4)} / Ki=${this.formatNumber(Number(autoRefineResult?.output_pid?.Ki), 4)} / Kd=${this.formatNumber(Number(autoRefineResult?.output_pid?.Kd), 4)}`
+              : (autoRefineResult?.reason || ''),
+            modelRetryResult,
+            modelRetrySummary: modelRetryResult?.applied
+              ? `已触发模型回试，最终评分 ${this.formatScore100(Number(modelRetryResult?.final_rating), 1)}/100`
+              : (modelRetryResult?.reason || '')
+          };
+        },
+
+        openEvaluationExplain(msg) {
+          const payload = this.buildEvaluationExplainPayload(msg);
+          if (!payload) return;
+          this.selectedEvaluationExplain = payload;
+          this.evaluationExplainOpen = true;
+        },
+
+        closeEvaluationExplain() {
+          this.evaluationExplainOpen = false;
+          this.selectedEvaluationExplain = null;
         },
 
         async openHelpCenter() {
@@ -2443,12 +3105,31 @@ createApp({
           }
         },
 
+        async computeUploadedFileHash(file) {
+          if (!file || !window.crypto?.subtle) return '';
+          try {
+            const buffer = await file.arrayBuffer();
+            const digest = await window.crypto.subtle.digest('SHA-256', buffer);
+            return [...new Uint8Array(digest)]
+              .map(byte => byte.toString(16).padStart(2, '0'))
+              .join('');
+          } catch (error) {
+            console.warn('Failed to compute uploaded file hash:', error);
+            return '';
+          }
+        },
+
         async handleFileUpload(event) {
           this.uploadedFile = event.target.files[0];
           this.csvLoopInspectError = '';
           this.csvDetectedLoops = [];
           this.csvSelectedLoopPrefix = '';
           this.csvRecommendedLoopPrefix = '';
+          this.csvUploadedFileName = this.uploadedFile?.name || '';
+          this.csvUploadedFileHash = this.uploadedFile ? await this.computeUploadedFileHash(this.uploadedFile) : '';
+          this.csvArchivedOriginalPath = '';
+          this.csvArchivedProcessedPath = '';
+          this.csvArtifactDirectory = '';
           if (!this.uploadedFile) return;
           await this.inspectUploadedCsvLoops();
         },
@@ -2487,6 +3168,11 @@ createApp({
           this.csvDetectedLoops = [];
           this.csvSelectedLoopPrefix = '';
           this.csvRecommendedLoopPrefix = '';
+          this.csvUploadedFileName = '';
+          this.csvUploadedFileHash = '';
+          this.csvArchivedOriginalPath = '';
+          this.csvArchivedProcessedPath = '';
+          this.csvArtifactDirectory = '';
           if (this.$refs.fileInput) {
             this.$refs.fileInput.value = '';
           }
@@ -2598,6 +3284,43 @@ createApp({
           }
         },
 
+        currentExecutionAgentName() {
+          const latestAgentMessage = [...(this.messages || [])]
+            .reverse()
+            .find(msg => msg?.agent && (msg.type === 'agent_turn' || msg.type === 'thought'));
+          return latestAgentMessage?.agent || this.executionOverview?.currentAgent || '';
+        },
+
+        buildInterruptedTaskSessionPatch(code, detail, extra = {}) {
+          return {
+            status: 'failed',
+            error: {
+              message: code,
+              code,
+              type: 'interrupted',
+              detail,
+              ...extra
+            },
+            interruption: {
+              stage: this.executionOverview?.currentStage || '',
+              agent: this.currentExecutionAgentName(),
+              detail
+            }
+          };
+        },
+
+        extractTaskArtifactContext(payload) {
+          const artifacts = payload?.artifacts || payload?.dataAnalysis?.artifacts || {};
+          if (!artifacts || typeof artifacts !== 'object') return {};
+          return {
+            uploadedFileName: artifacts.uploadedFileName || '',
+            uploadedFileHash: artifacts.uploadedFileHash || '',
+            archivedOriginalFilePath: artifacts.uploadedOriginalCsvPath || artifacts.original_file_path || '',
+            archivedProcessedFilePath: artifacts.processedCsvPath || artifacts.processed_file_path || '',
+            artifactDirectory: artifacts.artifactDirectory || artifacts.artifact_dir || ''
+          };
+        },
+
         async consumeSSEStream(response, options = {}) {
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
@@ -2690,15 +3413,16 @@ createApp({
                   type: 'assistant',
                   content: `❌ 错误：${message}`
                 });
-                this.syncCurrentTaskSession({
-                  status: 'failed',
-                  error: {
-                    message: 'stream_ended_without_result',
-                    code: 'stream_ended',
-                    type: 'stream_ended_without_result',
-                    detail: message
-                  }
-                });
+                this.syncCurrentTaskSession(
+                  this.buildInterruptedTaskSessionPatch(
+                    'stream_ended_without_result',
+                    message,
+                    {
+                      code: 'stream_ended',
+                      type: 'stream_ended_without_result'
+                    }
+                  )
+                );
               }
               break;
             }
@@ -2729,7 +3453,7 @@ createApp({
 
           this.loading = true;
           this.loadingMessage = usingUploadedCsv ? '正在上传文件...' : '正在获取历史数据...';
-          this.createTaskSession();
+          const taskSession = this.createTaskSession();
           this.shellSection = 'tuning-process';
           this.professionalReportDrawerOpen = false;
           if (usingUploadedCsv) {
@@ -2760,6 +3484,7 @@ window: ${this.historyWindow || 1}
           });
 
           const formData = new FormData();
+          formData.append('task_session_id', taskSession.id);
           if (usingUploadedCsv) {
             formData.append('file', this.uploadedFile);
             const selectedLoopPrefix = String(this.csvSelectedLoopPrefix || '').trim();
@@ -2802,21 +3527,24 @@ window: ${this.historyWindow || 1}
               type: 'assistant',
               content: `❌ 错误：${msg}`
             });
-            this.syncCurrentTaskSession({
-              status: 'failed',
-              error: {
-                message: raw || 'request_failed',
-                code: isTimeout ? 'stream_read_timeout' : (error?.name || 'request_failed'),
-                type: isTimeout ? 'timeout' : 'request_failed',
-                detail
-              }
-            });
+            this.syncCurrentTaskSession(
+              this.buildInterruptedTaskSessionPatch(
+                raw || 'request_failed',
+                detail,
+                {
+                  code: isTimeout ? 'stream_read_timeout' : (error?.name || 'request_failed'),
+                  type: isTimeout ? 'timeout' : 'request_failed'
+                }
+              )
+            );
           } finally {
             this.loading = false;
             this.progressSteps.forEach(step => step.active = false);
             this._activeTuneAbortController = null;
+            const existingStatus = this.selectedTaskSession?.status || '';
+            const fallbackStatus = this.latestTuningResultData ? 'completed' : (this.messages.length ? 'failed' : 'draft');
             this.syncCurrentTaskSession({
-              status: this.latestTuningResultData ? 'completed' : (this.messages.length ? 'failed' : 'draft')
+              status: existingStatus === 'running' ? fallbackStatus : (existingStatus || fallbackStatus)
             });
           }
         },
@@ -2824,6 +3552,16 @@ window: ${this.historyWindow || 1}
         handleSSEMessage(data) {
           if (data.type === 'agent_turn') {
             this.updateProgress(data.agent);
+            const toolArtifacts = (data.tools || [])
+              .map(tool => this.extractTaskArtifactContext(tool?.result || tool))
+              .find(item => Object.values(item || {}).some(Boolean)) || null;
+            if (toolArtifacts) {
+              if (toolArtifacts.uploadedFileName) this.csvUploadedFileName = toolArtifacts.uploadedFileName;
+              if (toolArtifacts.uploadedFileHash) this.csvUploadedFileHash = toolArtifacts.uploadedFileHash;
+              if (toolArtifacts.archivedOriginalFilePath) this.csvArchivedOriginalPath = toolArtifacts.archivedOriginalFilePath;
+              if (toolArtifacts.archivedProcessedFilePath) this.csvArchivedProcessedPath = toolArtifacts.archivedProcessedFilePath;
+              if (toolArtifacts.artifactDirectory) this.csvArtifactDirectory = toolArtifacts.artifactDirectory;
+            }
             this.addMessage({
               type: 'agent_turn',
               agent: data.agent,
@@ -2834,6 +3572,9 @@ window: ${this.historyWindow || 1}
               response: data.response || '',
               collapsed: false
             });
+            if (toolArtifacts) {
+              this.syncCurrentTaskSession({ context: toolArtifacts });
+            }
           } else if (data.type === 'thought') {
             this.addMessage({
               type: 'thought',
@@ -2864,6 +3605,12 @@ window: ${this.historyWindow || 1}
               content: data.content
             });
           } else if (data.type === 'result') {
+            const resultArtifacts = this.extractTaskArtifactContext(data.data);
+            if (resultArtifacts.uploadedFileName) this.csvUploadedFileName = resultArtifacts.uploadedFileName;
+            if (resultArtifacts.uploadedFileHash) this.csvUploadedFileHash = resultArtifacts.uploadedFileHash;
+            if (resultArtifacts.archivedOriginalFilePath) this.csvArchivedOriginalPath = resultArtifacts.archivedOriginalFilePath;
+            if (resultArtifacts.archivedProcessedFilePath) this.csvArchivedProcessedPath = resultArtifacts.archivedProcessedFilePath;
+            if (resultArtifacts.artifactDirectory) this.csvArtifactDirectory = resultArtifacts.artifactDirectory;
             this.addMessage({
               type: 'result',
               data: data.data,
@@ -2880,6 +3627,7 @@ window: ${this.historyWindow || 1}
             }
             this.syncCurrentTaskSession({
               status: 'completed',
+              context: resultArtifacts,
               latestResult: data.data
             });
           } else if (data.type === 'error') {
@@ -2904,6 +3652,11 @@ window: ${this.historyWindow || 1}
                 code: data.error_code || '',
                 type: data.error_type || '',
                 detail: data.error_detail || ''
+              },
+              interruption: {
+                stage: this.executionOverview?.currentStage || '',
+                agent: data.agent || this.currentExecutionAgentName(),
+                detail: data.error_detail || data.message || ''
               }
             });
           }
@@ -3397,6 +4150,48 @@ window: ${this.historyWindow || 1}
             : normalized;
         },
 
+        deriveEvaluationFailureReason(payload) {
+          const explicit = String(payload?.failure_reason || '').trim();
+          if (explicit) return explicit;
+          const details = payload?.performance_details || {};
+          const finalDetails = payload?.final_details || {};
+          const reasons = [];
+          if (details?.is_stable === false) reasons.push('闭环仿真未稳定');
+          if (Number.isFinite(Number(details?.settling_time)) && Number(details.settling_time) < 0) reasons.push('调节时间未收敛');
+          if (Number.isFinite(Number(details?.steady_state_error)) && Number(details.steady_state_error) > 5) reasons.push(`稳态误差 ${this.formatNumber(details.steady_state_error, 2)}% 过大`);
+          if (Number.isFinite(Number(details?.overshoot)) && Number(details.overshoot) > 20) reasons.push(`超调 ${this.formatNumber(details.overshoot, 2)}% 过大`);
+          if (Number.isFinite(Number(details?.oscillation_count)) && Number(details.oscillation_count) > 5) reasons.push(`振荡次数 ${Number(details.oscillation_count)} 偏多`);
+          if (Number.isFinite(Number(payload?.method_confidence)) && Number(payload.method_confidence) < 0.35) reasons.push(`模型置信度 ${this.formatNumber(payload.method_confidence, 3)} 偏低`);
+          if (Number.isFinite(Number(payload?.performance_score)) && Number(payload.performance_score) < 5) reasons.push(`性能评分 ${this.formatNumber(payload.performance_score, 2)} 偏低`);
+          if (
+            Number.isFinite(Number(payload?.final_rating))
+            && Number.isFinite(Number(payload?.performance_score))
+            && Number.isFinite(Number(finalDetails?.confidence_as_score))
+            && Number(payload.final_rating) < Number(payload.performance_score)
+          ) {
+            reasons.push('综合评分主要受方法置信度拖累');
+          }
+          return reasons.join('；') || '综合评分未达阈值';
+        },
+
+        buildEvaluationSummaryText(payload) {
+          if (!payload || typeof payload !== 'object') return '';
+          const passed = payload?.passed === true;
+          const perfText = Number.isFinite(Number(payload?.performance_score)) ? this.formatNumber(payload.performance_score, 2) : '-';
+          const confidenceText = Number.isFinite(Number(payload?.method_confidence)) ? this.formatNumber(payload.method_confidence, 3) : '-';
+          const ratingText = Number.isFinite(Number(payload?.final_rating)) ? this.formatNumber(payload.final_rating, 2) : '-';
+          if (passed) return `性能评分 ${perfText}，方法置信度 ${confidenceText}，最终评分 ${ratingText}，评估通过。`;
+          const target = String(payload?.feedback_target_display || payload?.feedback_target || '').trim();
+          const action = String(payload?.feedback_action || '').trim();
+          const reason = this.deriveEvaluationFailureReason(payload);
+          return [
+            `性能评分 ${perfText}，方法置信度 ${confidenceText}，最终评分 ${ratingText}`,
+            `未通过主因：${reason}`,
+            target ? `建议回流给 ${target}` : '',
+            action ? `动作：${action}` : ''
+          ].filter(Boolean).join('；');
+        },
+
         executionStageName(agentName, msg = null) {
           const name = String(agentName || '');
           const toolNames = Array.isArray(msg?.tools)
@@ -3413,6 +4208,19 @@ window: ${this.historyWindow || 1}
 
         executionSummaryForMessage(msg) {
           if (!msg) return '\u5f53\u524d\u6b65\u9aa4\u6b63\u5728\u5904\u7406\u4e2d\u3002';
+          if (String(msg.agent || '') === '评估智能体') {
+            const tool = Array.isArray(msg.tools) ? msg.tools.find(item => item?.tool_name === 'tool_evaluate_pid') : null;
+            const toolPayload = this.parseToolPayload(tool?.result);
+            const summaryPayload = toolPayload && typeof toolPayload === 'object' && (
+              Object.prototype.hasOwnProperty.call(toolPayload, 'passed')
+              || Object.prototype.hasOwnProperty.call(toolPayload, 'performance_score')
+              || Object.prototype.hasOwnProperty.call(toolPayload, 'final_rating')
+            )
+              ? toolPayload
+              : (this.latestTuningResultData?.evaluation || null);
+            const evaluationSummary = this.buildEvaluationSummaryText(summaryPayload);
+            if (evaluationSummary) return this.truncateText(evaluationSummary, 160);
+          }
           const fromSummary = this.truncateText(msg.summary, 120);
           if (fromSummary) return fromSummary;
           const fromResponse = this.truncateText(msg.response || msg.content, 120);
@@ -4216,6 +5024,55 @@ window: ${this.historyWindow || 1}
             context.dataSourceLabel || (context.dataSource === 'history' ? '历史接口' : 'CSV 上传')
           ].filter(Boolean).join(' · ');
         },
+        selectedTaskSessionTraceRows() {
+          const context = this.selectedTaskSession?.context || {};
+          if ((context.dataSource || '') !== 'csv') return [];
+          const hash = String(context.uploadedFileHash || '').trim();
+          return [
+            {
+              label: '上传文件',
+              value: context.uploadedFileName || '-',
+              monospace: false,
+              fullValue: context.uploadedFileName || '-'
+            },
+            {
+              label: '选中回路',
+              value: context.selectedLoopPrefix || '-',
+              monospace: true,
+              fullValue: context.selectedLoopPrefix || '-'
+            },
+            {
+              label: '推荐回路',
+              value: context.recommendedLoopPrefix || '-',
+              monospace: true,
+              fullValue: context.recommendedLoopPrefix || '-'
+            },
+            {
+              label: '文件指纹',
+              value: hash ? `${hash.slice(0, 12)}...${hash.slice(-8)}` : '-',
+              monospace: true,
+              fullValue: hash || '-'
+            },
+            {
+              label: '鍘熷鍓湰璺緞',
+              value: context.archivedOriginalFilePath || '-',
+              monospace: true,
+              fullValue: context.archivedOriginalFilePath || '-'
+            },
+            {
+              label: '鍒嗘瀽鍓湰璺緞',
+              value: context.archivedProcessedFilePath || '-',
+              monospace: true,
+              fullValue: context.archivedProcessedFilePath || '-'
+            },
+            {
+              label: '褰掓。鐩綍',
+              value: context.artifactDirectory || '-',
+              monospace: true,
+              fullValue: context.artifactDirectory || '-'
+            }
+          ].filter(item => item.value && item.value !== '-');
+        },
         taskInputMessage() {
           return this.messages.find(msg => msg.type === 'user') || null;
         },
@@ -4299,6 +5156,13 @@ window: ${this.historyWindow || 1}
             dataSourceLabel: item.context?.dataSourceLabel || (item.context?.dataSource === 'history' ? '历史接口' : 'CSV 上传'),
             scenarioLabel: item.context?.scenarioLabel || this.scenarioLabel(item.context?.scenario),
             controlObjectLabel: item.context?.controlObjectLabel || this.controlObjectLabel(item.context?.controlObject),
+            selectedLoopPrefix: item.context?.selectedLoopPrefix || '',
+            recommendedLoopPrefix: item.context?.recommendedLoopPrefix || '',
+            uploadedFileName: item.context?.uploadedFileName || '',
+            uploadedFileHash: item.context?.uploadedFileHash || '',
+            uploadedFileHashShort: item.context?.uploadedFileHash
+              ? `${String(item.context.uploadedFileHash).slice(0, 12)}...${String(item.context.uploadedFileHash).slice(-8)}`
+              : '',
             scoreLabel: item.latestResult ? `${this.formatScore100(item.latestResult?.evaluation?.final_rating, 1)}/100` : '-',
             errorTooltip: item.status === 'failed'
               ? [
@@ -4329,7 +5193,11 @@ window: ${this.historyWindow || 1}
               item.context?.loopName,
               item.scenarioLabel,
               item.controlObjectLabel,
-              item.dataSourceLabel
+              item.dataSourceLabel,
+              item.selectedLoopPrefix,
+              item.recommendedLoopPrefix,
+              item.uploadedFileName,
+              item.uploadedFileHash
             ].filter(Boolean).join(' ').toLowerCase();
             return haystack.includes(keyword);
           });
@@ -4377,11 +5245,102 @@ window: ${this.historyWindow || 1}
             ? `${this.formatScore100(this.latestTuningResultData.evaluation?.final_rating, 1)}/100`
             : '待评估';
         },
+        pidAnalysisBaseLocalPayload() {
+          return this.buildPidAnalysisChartPayload(this.latestTuningResultData) || null;
+        },
+        pidAnalysisBasePayload() {
+          return this.pidAnalysisRemotePayloads.history || this.pidAnalysisBaseLocalPayload;
+        },
+        candidateWindowOptions() {
+          const result = this.latestDataAnalysisResult() || this.latestTuningResultData?.dataAnalysis || {};
+          const candidateWindows = Array.isArray(result?.candidate_windows) ? result.candidate_windows : [];
+          const attempts = Array.isArray(this.latestTuningResultData?.model?.attempts) ? this.latestTuningResultData.model.attempts : [];
+          const identifiableSources = new Set(
+            attempts
+              .filter(item => item?.success !== false && String(item?.model_type || '').toUpperCase() !== 'WINDOW_FILTER')
+              .map(item => String(item?.window_source || ''))
+          );
+          return candidateWindows.map((event, idx) => {
+            const key = this.candidateWindowSourceKey(event, idx);
+            return {
+              key,
+              label: this.buildWindowLabelParts(event, idx, identifiableSources.has(key)),
+              identifiable: identifiableSources.has(key),
+              typeLabel: this.describeStepEventType(event?.type),
+              windowStartIndex: Number(event?.window_start_idx),
+              windowEndIndex: Number(event?.window_end_idx),
+              eventStartIndex: Number(event?.start_idx),
+              eventEndIndex: Number(event?.end_idx),
+              windowStartTime: event?.window_start_time || '',
+              windowEndTime: event?.window_end_time || '',
+              eventStartTime: event?.start_time || event?.event_start_time || '',
+              eventEndTime: event?.end_time || event?.event_end_time || '',
+              qualityScore: Number(event?.window_quality_score),
+              usableForId: event?.window_usable_for_id === true,
+              bestAttempt: this.pickBestAttemptForWindow(attempts, key)
+            };
+          });
+        },
+        effectiveSelectedCandidateWindowKey() {
+          return this.selectedCandidateWindowKey || this.candidateWindowOptions[0]?.key || '';
+        },
+        selectedCandidateWindowOption() {
+          return this.candidateWindowOptions.find(item => item.key === this.effectiveSelectedCandidateWindowKey) || null;
+        },
+        fitWindowOptions() {
+          const attempts = Array.isArray(this.latestTuningResultData?.model?.attempts) ? this.latestTuningResultData.model.attempts : [];
+          const grouped = new Map();
+          attempts
+            .filter(item => item?.success !== false && String(item?.model_type || '').toUpperCase() !== 'WINDOW_FILTER')
+            .forEach((item, idx) => {
+              const source = String(item?.window_source || '').trim();
+              if (!source) return;
+              const current = grouped.get(source);
+              if (!current) {
+                grouped.set(source, { item, idx });
+                return;
+              }
+              const currentPerf = Number(current.item?.benchmark_performance_score || current.item?.performance_score || 0);
+              const nextPerf = Number(item?.benchmark_performance_score || item?.performance_score || 0);
+              if (nextPerf > currentPerf) grouped.set(source, { item, idx });
+            });
+          return [...grouped.entries()].map(([source, payload]) => ({
+            source,
+            label: `#${payload.idx + 1} ${source} · ${payload.item?.model_type || '模型'}`,
+            modelType: payload.item?.model_type || '模型',
+            normalizedRmse: Number(payload.item?.normalized_rmse),
+            r2: Number(payload.item?.r2_score),
+            confidence: Number(payload.item?.confidence),
+            windowStartIndex: Number(payload.item?.window_start_idx ?? payload.item?.window_start),
+            windowEndIndex: Number(payload.item?.window_end_idx ?? payload.item?.window_end),
+            modelParams: payload.item?.model_params || {
+              K: payload.item?.K,
+              T: payload.item?.T,
+              L: payload.item?.L
+            }
+          }));
+        },
+        effectiveSelectedFitWindowSource() {
+          return this.selectedFitWindowSource || this.fitWindowOptions[0]?.source || '';
+        },
+        selectedFitWindowOption() {
+          return this.fitWindowOptions.find(item => item.source === this.effectiveSelectedFitWindowSource) || null;
+        },
         pidAnalysisChartPayload() {
-          return this.buildPidAnalysisChartPayload(this.latestTuningResultData) || this.pidAnalysisRemotePayload;
+          const source = this.pidAnalysisRemotePayloads.history || this.pidAnalysisBasePayload;
+          return this.pidAnalysisRemotePayloads.history ? source : this.applyPidChartRange(source, 'history');
+        },
+        pidCandidateWindowChartPayload() {
+          const remotePayload = this.pidAnalysisRemotePayloads.candidate;
+          if (remotePayload) return remotePayload;
+          const payload = this.buildCandidateWindowChartPayload(this.pidAnalysisBasePayload, this.selectedCandidateWindowOption);
+          return this.applyPidChartRange(payload, 'candidate');
         },
         pidFitChartPayload() {
-          return this.buildPidFitChartPayload(this.latestTuningResultData);
+          const remotePayload = this.pidAnalysisRemotePayloads.fit;
+          if (remotePayload) return remotePayload;
+          const payload = this.buildIdentificationWindowFitPayload(this.latestTuningResultData, this.pidAnalysisBasePayload, this.selectedFitWindowOption);
+          return this.applyPidChartRange(payload, 'fit');
         },
         pidAnalysisChartPayloadWithPrediction() {
           const base = this.pidAnalysisChartPayload;
@@ -4403,8 +5362,8 @@ window: ${this.historyWindow || 1}
         pidAnalysisMetrics() {
           return this.buildPidAnalysisMetrics(this.pidAnalysisChartPayload);
         },
-        pidReplayChartPayload() {
-          const base = this.pidAnalysisChartPayload;
+        pidReplayBasePayload() {
+          const base = this.pidAnalysisBasePayload;
           if (!base?.points?.length) return null;
           const key = this.buildPidAnalysisPredictionKey(base);
           const prediction = this.pidAnalysisPrediction;
@@ -4438,9 +5397,14 @@ window: ${this.historyWindow || 1}
           return {
             ...base,
             points,
-            leftAxisTitle: `PV(回放) / SV（${this.strategyLabLoopTypeLabel(this.loopType)}）`,
-            rightAxisTitle: 'MV(回放) (%)'
+            leftAxisTitle: `PV（回放）/ SV（${this.strategyLabLoopTypeLabel(this.loopType)}）`,
+            rightAxisTitle: 'MV（回放）(%)'
           };
+        },
+        pidReplayChartPayload() {
+          const remotePayload = this.pidAnalysisRemotePayloads.replay;
+          if (remotePayload) return remotePayload;
+          return this.applyPidChartRange(this.pidReplayBasePayload, 'replay');
         },
         pidReplayMetrics() {
           return this.buildPidAnalysisMetrics(this.pidReplayChartPayload);
@@ -4460,7 +5424,27 @@ window: ${this.historyWindow || 1}
           this.schedulePidAnalysisChartRender();
         },
         selectedTaskSessionId() {
+          this.loopAnalysisTaskSelectionId = this.selectedTaskSessionId || '';
+          this.selectedCandidateWindowKey = '';
+          this.selectedFitWindowSource = '';
+          this.pidChartRanges.history = { start: '', end: '' };
+          this.pidChartRanges.candidate = { start: '', end: '' };
+          this.pidChartRanges.fit = { start: '', end: '' };
+          this.pidChartRanges.replay = { start: '', end: '' };
+          this.pidChartRangeDrafts.history = { start: '', end: '' };
+          this.pidChartRangeDrafts.candidate = { start: '', end: '' };
+          this.pidChartRangeDrafts.fit = { start: '', end: '' };
+          this.pidChartRangeDrafts.replay = { start: '', end: '' };
           this.schedulePidAnalysisChartRender();
+        },
+        selectedCandidateWindowKey() {
+          const option = this.selectedCandidateWindowOption;
+          const start = this.normalizeChartRangeValue(option?.windowStartTime || '', { xAxisType: 'timestamp' });
+          const end = this.normalizeChartRangeValue(option?.windowEndTime || '', { xAxisType: 'timestamp' });
+          this.pidChartRanges.candidate = { start, end };
+          this.pidChartRangeDrafts.candidate = { start, end };
+          this.pidAnalysisRemotePayloads.candidate = null;
+          this.schedulePidAnalysisChartRender({ focusChartKey: 'candidate', forceRemote: true });
         },
         latestTuningResultData: {
           handler() {
@@ -4478,6 +5462,7 @@ window: ${this.historyWindow || 1}
       async mounted() {
         this.chartRenderScheduler = createRafScheduler();
         await this.loadTaskSessions();
+        this.loopAnalysisTaskSelectionId = this.selectedTaskSessionId || '';
         this.loadStrategyLabState();
         const available = this.shellSecondaryItemsFor(this.currentPage).map(item => item.id);
         const requested = this.initialShellSection;
@@ -4488,9 +5473,17 @@ window: ${this.historyWindow || 1}
         this.schedulePidAnalysisChartRender();
       },
       beforeUnmount() {
+        if (this.pidChartRenderRetryHandle) {
+          window.clearTimeout(this.pidChartRenderRetryHandle);
+          this.pidChartRenderRetryHandle = 0;
+        }
         const historyElement = document.getElementById('pid-analysis-chart-history') || document.getElementById('pid-analysis-chart');
+        const candidateElement = document.getElementById('pid-analysis-chart-candidate');
         const replayElement = document.getElementById('pid-analysis-chart-replay');
+        const fitElement = document.getElementById('pid-analysis-chart-fit');
         destroyPidAnalysisChart(historyElement);
+        destroyPidAnalysisChart(candidateElement);
         destroyPidAnalysisChart(replayElement);
+        destroyPidAnalysisChart(fitElement);
       }
     }).mount('#app');
