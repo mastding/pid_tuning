@@ -28,6 +28,7 @@ DEFAULT_HISTORY_DATA_API_URL = (
 DEFAULT_KNOWLEDGE_GRAPH_API_URL = "http://graphrag.dicp.sixseven.ltd:5924/api/query"
 DEFAULT_KNOWLEDGE_GRAPH_ID = "build_20260317_003858"
 DEFAULT_ENABLE_KNOWLEDGE_EXPERT = "1"
+DEFAULT_ENABLE_EXPERIENCE_DISTILLATION = "1"
 
 ENV_FILE_PATH = Path(__file__).resolve().parents[2] / ".env"
 
@@ -97,6 +98,7 @@ def get_runtime_system_config() -> Dict[str, Any]:
             "knowledge_graph_api_url": _env_value("KNOWLEDGE_GRAPH_API_URL", DEFAULT_KNOWLEDGE_GRAPH_API_URL),
             "knowledge_graph_id": _env_value("KNOWLEDGE_GRAPH_ID", DEFAULT_KNOWLEDGE_GRAPH_ID),
             "enable_knowledge_expert": _env_bool("ENABLE_KNOWLEDGE_EXPERT", DEFAULT_ENABLE_KNOWLEDGE_EXPERT),
+            "enable_experience_distillation": _env_bool("ENABLE_EXPERIENCE_DISTILLATION", DEFAULT_ENABLE_EXPERIENCE_DISTILLATION),
         },
     }
 
@@ -136,6 +138,9 @@ def update_runtime_system_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         ).strip(),
         "ENABLE_KNOWLEDGE_EXPERT": "1"
         if bool(integration_payload.get("enable_knowledge_expert", _env_bool("ENABLE_KNOWLEDGE_EXPERT", DEFAULT_ENABLE_KNOWLEDGE_EXPERT)))
+        else "0",
+        "ENABLE_EXPERIENCE_DISTILLATION": "1"
+        if bool(integration_payload.get("enable_experience_distillation", _env_bool("ENABLE_EXPERIENCE_DISTILLATION", DEFAULT_ENABLE_EXPERIENCE_DISTILLATION)))
         else "0",
     }
 

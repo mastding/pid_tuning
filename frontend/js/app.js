@@ -272,7 +272,8 @@ createApp({
         integration: {
           history_data_api_url: '',
           knowledge_graph_api_url: '',
-          enable_knowledge_expert: true
+          enable_knowledge_expert: true,
+          enable_experience_distillation: true
         }
       },
       helpCenterOpen: false,
@@ -737,9 +738,10 @@ createApp({
               { id: 'strategy-candidates', label: '\u5019\u9009\u5217\u8868' }
             ],
             'system-config': [
-              { id: 'system-model', label: '\u6a21\u578b\u914d\u7f6e' },
-              { id: 'system-service', label: '\u670d\u52a1\u63a5\u5165' },
-              { id: 'system-summary', label: '\u5f53\u524d\u6458\u8981' }
+              { id: 'system-model', label: '模型配置' },
+              { id: 'system-agent', label: '智能体配置' },
+              { id: 'system-service', label: '服务接入' },
+              { id: 'system-summary', label: '当前摘要' }
             ]
           };
           return map[page] || [];
@@ -910,7 +912,7 @@ createApp({
               this.selectedStrategyLabCandidateId = this.strategyLabCandidates[0].id;
             }
             if (this.selectedStrategyLabCandidateId) {
-              await this.selectStrategyLabCandidate(this.selectedStrategyLabCandidateId);
+              await this.selectStrategyLabCandidate(this.selectedStrategyLabCandidateId, false);
             }
             if (this.strategyLabCompareCandidateId && !this.strategyLabCandidates.find(item => item.id === this.strategyLabCompareCandidateId)) {
               this.strategyLabCompareCandidateId = '';
@@ -927,7 +929,7 @@ createApp({
           this.shellSection = firstSection ? firstSection.id : '';
           if (page === 'experience') {
             await this.loadExperienceCenter();
-            this.shellSection = 'experience-list';
+            this.shellSection = 'experience-overview';
           }
           if (page === 'case-library') {
             await this.loadCaseLibraryCenter();
@@ -1412,7 +1414,7 @@ createApp({
             .replaceAll('If baseline gaps mention missing pair detection or fallback behavior, address those gaps explicitly in diagnostics.', '如果基线缺口提到缺少双向配对检测或回退行为，请在诊断中明确回应这些问题。')
             .replaceAll('If baseline 缺口 mention missing pair detection or fallback behavior, address those 缺口 explicitly in diagnostics.', '如果基线缺口提到缺少双向配对检测或回退行为，请在诊断中明确回应这些问题。');
         },
-        async selectStrategyLabCandidate(candidateId) {
+        async selectStrategyLabCandidate(candidateId, shouldOpenDrawer = true) {
           this.selectedStrategyLabCandidateId = candidateId;
           if (this.strategyLabCompareCandidateId === candidateId) {
             this.strategyLabCompareCandidateId = '';
@@ -1427,10 +1429,10 @@ createApp({
           } catch (error) {
             console.error('Failed to load strategy lab candidate detail:', error);
           }
-          if (this.currentPage === 'strategy-lab') {
+          if (shouldOpenDrawer && this.currentPage === 'strategy-lab') {
             this.shellSection = 'strategy-candidates';
+            this.strategyLabCandidateDrawerOpen = true;
           }
-          this.strategyLabCandidateDrawerOpen = true;
           this.saveStrategyLabState();
         },
 
@@ -3047,8 +3049,8 @@ createApp({
             this.selectedExperience = payload.item || null;
             if (switchSection && this.currentPage === 'experience') {
               this.shellSection = 'experience-list';
+              this.experienceDetailDrawerOpen = true;
             }
-            this.experienceDetailDrawerOpen = true;
           } catch (error) {
             console.error('Failed to load experience detail:', error);
             this.selectedExperience = null;

@@ -8,14 +8,6 @@
 </head>
 <body>
   <div id="app" class="app-shell">
-    <button
-      @click="openHelpCenter"
-      class="fixed top-5 right-6 z-40 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-lg hover:bg-slate-50 transition-all"
-    >
-      <span>?</span>
-      <span>帮助中心</span>
-    </button>
-
     <div v-if="helpCenterOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 md:p-6">
       <div class="flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
         <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
@@ -353,6 +345,15 @@
           <span>dev-pid</span>
         </div>
       </div>
+
+      <button
+        @click="openHelpCenter"
+        class="mx-4 mb-3 w-auto px-4 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all inline-flex items-center gap-2 justify-center"
+        title="查看帮助文档和系统说明"
+      >
+        <span class="text-base">?</span>
+        <span>帮助中心</span>
+      </button>
     </aside>
 
     <section class="shell-main">
@@ -1390,6 +1391,67 @@
               <div class="mt-1">本体知识图谱服务地址：{{ systemConfig.integration.knowledge_graph_api_url || '-' }}</div>
             </div>
           </div>
+
+          <div v-else-if="shellSection === 'system-agent'" class="space-y-6">
+            <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">智能体配置</h3>
+                <p class="text-xs text-slate-500 mt-1">配置整定流程中的智能体行为和能力开关。</p>
+              </div>
+              <div class="p-5 space-y-6">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <div class="font-semibold text-slate-800">LLM编排</div>
+                      <p class="text-xs text-slate-500 mt-1">启用多智能体LLM编排，由大模型动态协调各整定阶段的智能体执行。</p>
+                    </div>
+                    <label class="ml-4 relative inline-flex items-center cursor-pointer">
+                      <input v-model="systemConfig.model.enable_llm_orchestration" type="checkbox" class="sr-only peer">
+                      <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <div class="font-semibold text-slate-800">知识专家</div>
+                      <p class="text-xs text-slate-500 mt-1">启用知识专家智能体，从本体知识图谱检索PID整定规则和约束条件。</p>
+                    </div>
+                    <label class="ml-4 relative inline-flex items-center cursor-pointer">
+                      <input v-model="systemConfig.integration.enable_knowledge_expert" type="checkbox" class="sr-only peer">
+                      <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <div class="font-semibold text-slate-800">经验沉淀与检索</div>
+                      <p class="text-xs text-slate-500 mt-1">启用经验沉淀机制，学习和复用历史PID整定调试经验，加速未来相似工况的整定过程。</p>
+                    </div>
+                    <label class="ml-4 relative inline-flex items-center cursor-pointer">
+                      <input v-model="systemConfig.integration.enable_experience_distillation" type="checkbox" class="sr-only peer">
+                      <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap gap-3">
+                  <button @click="saveSystemConfig" :disabled="systemConfigSaving" class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:bg-slate-300">
+                    {{ systemConfigSaving ? '保存中...' : '保存配置' }}
+                  </button>
+                  <button @click="loadSystemConfig" :disabled="systemConfigLoading" class="shell-inline-action">
+                    {{ systemConfigLoading ? '加载中...' : '重新加载' }}
+                  </button>
+                </div>
+                <div v-if="systemConfigMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 whitespace-pre-line">
+                  {{ systemConfigMessage }}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div v-if="currentPage === 'experience'" class="space-y-6">
@@ -2286,6 +2348,54 @@
               <div class="mt-1">模型服务地址：{{ systemConfig.model.api_url || '-' }}</div>
               <div class="mt-1">历史数据服务地址：{{ systemConfig.integration.history_data_api_url || '-' }}</div>
               <div class="mt-1">本体知识图谱服务地址：{{ systemConfig.integration.knowledge_graph_api_url || '-' }}</div>
+            </div>
+          </div>
+
+          <div v-else-if="shellSection === 'system-agent'" class="space-y-6">
+            <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-200">
+                <h3 class="text-lg font-bold text-slate-800">智能体配置</h3>
+                <p class="text-xs text-slate-500 mt-1">配置多智能体编排系统的行为和能力开关。</p>
+              </div>
+              <div class="p-5 space-y-6">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                      <div class="font-semibold text-slate-800">LLM编排引擎</div>
+                      <p class="text-xs text-slate-500 mt-1">启用后，多智能体流程由大模型动态协调。禁用则使用确定性本地流程。</p>
+                    </div>
+                    <label class="ml-4 relative inline-flex items-center cursor-pointer">
+                      <input v-model="systemConfig.model.enable_llm_orchestration" type="checkbox" class="sr-only peer">
+                      <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                      <div class="font-semibold text-slate-800">知识专家智能体</div>
+                      <p class="text-xs text-slate-500 mt-1">启用后，在整定前从知识图谱检索PID整定规则、约束和风险提示。</p>
+                    </div>
+                    <label class="ml-4 relative inline-flex items-center cursor-pointer">
+                      <input v-model="systemConfig.integration.enable_knowledge_expert" type="checkbox" class="sr-only peer">
+                      <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap gap-3">
+                  <button @click="saveSystemConfig" :disabled="systemConfigSaving" class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:bg-slate-300">
+                    {{ systemConfigSaving ? '保存中...' : '保存配置' }}
+                  </button>
+                  <button @click="loadSystemConfig" :disabled="systemConfigLoading" class="shell-inline-action">
+                    {{ systemConfigLoading ? '加载中...' : '重新加载' }}
+                  </button>
+                </div>
+                <div v-if="systemConfigMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 whitespace-pre-line">
+                  {{ systemConfigMessage }}
+                </div>
+              </div>
             </div>
           </div>
         </div>
