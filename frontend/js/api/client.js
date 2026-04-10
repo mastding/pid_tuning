@@ -2,7 +2,9 @@ export const resolveApiBase = () => {
   const seeded = window.PID_API_BASE;
   if (seeded && typeof seeded === 'string') return seeded.replace(/\/$/, '');
   const { protocol, hostname } = window.location;
-  return `${protocol}//${hostname}:3443`;
+  // 使用vite定义的后端端口，如果不存在则默认4443
+  const backendPort = typeof __BACKEND_PORT__ !== 'undefined' ? __BACKEND_PORT__ : '4443';
+  return `${protocol}//${hostname}:${backendPort}`;
 };
 
 export const apiUrl = (path) => `${resolveApiBase()}${path.startsWith('/') ? path : `/${path}`}`;

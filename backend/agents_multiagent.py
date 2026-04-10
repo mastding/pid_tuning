@@ -42,9 +42,11 @@ from services.tool_adapter_service import (
 )
 from services.system_config_service import (
     DEFAULT_KNOWLEDGE_GRAPH_ID,
+    get_backend_port_config,
     get_knowledge_graph_runtime_config,
     get_model_runtime_config,
     get_model_timeout_config,
+    get_server_port_config,
     is_knowledge_expert_enabled,
     is_llm_orchestration_enabled,
 )
@@ -871,6 +873,12 @@ if __name__ == "__main__":
     import uvicorn
 
     load_dotenv()
+    
+    # 获取后端服务器配置
+    backend_config = get_backend_port_config()
+    backend_host = backend_config["host"]
+    backend_port = backend_config["port"]
+    
     llm_config = get_model_runtime_config()
     app = create_app(
         run_multi_agent_collaboration=run_multi_agent_collaboration,
@@ -880,5 +888,5 @@ if __name__ == "__main__":
         default_history_end_time=DEFAULT_HISTORY_END_TIME,
     )
     print("Starting PID Tuning Multi-Agent System...")
-    print("API endpoint: http://0.0.0.0:3443/api/tune_stream")
-    uvicorn.run(app, host="0.0.0.0", port=3443)
+    print(f"API endpoint: http://{backend_host}:{backend_port}/api/tune_stream")
+    uvicorn.run(app, host=backend_host, port=backend_port)

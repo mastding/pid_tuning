@@ -5,6 +5,13 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+# ============ 服务端口配置 ============
+DEFAULT_BACKEND_PORT = "4443"
+DEFAULT_BACKEND_HOST = "0.0.0.0"
+DEFAULT_FRONTEND_PORT = "5873"
+DEFAULT_FRONTEND_HOST = "127.0.0.1"
+
+# ============ LLM 模型配置 ============
 DEFAULT_MODEL_NAME = "qwen-plus"
 DEFAULT_MODEL_API_URL = ""
 DEFAULT_MODEL_API_KEY = ""
@@ -13,6 +20,8 @@ DEFAULT_MODEL_TIMEOUT_READ = "120"
 DEFAULT_MODEL_TIMEOUT_WRITE = "60"
 DEFAULT_MODEL_TIMEOUT_POOL = "30"
 DEFAULT_ENABLE_LLM_ORCHESTRATION = "1"
+
+# ============ 外部集成配置 ============
 DEFAULT_HISTORY_DATA_API_URL = (
     "http://holli-pid-agent.hollysys-project.sit-cloud.ieccloud.hollicube.com/api/agent/history-data-raw"
 )
@@ -63,6 +72,16 @@ def _env_bool(key: str, fallback: str = "0") -> bool:
 
 def get_runtime_system_config() -> Dict[str, Any]:
     return {
+        "server": {
+            "backend": {
+                "host": _env_value("BACKEND_HOST", DEFAULT_BACKEND_HOST),
+                "port": int(_env_value("BACKEND_PORT", DEFAULT_BACKEND_PORT)),
+            },
+            "frontend": {
+                "host": _env_value("FRONTEND_HOST", DEFAULT_FRONTEND_HOST),
+                "port": int(_env_value("FRONTEND_PORT", DEFAULT_FRONTEND_PORT)),
+            },
+        },
         "model": {
             "name": _env_value("MODEL", DEFAULT_MODEL_NAME),
             "api_url": _env_value("MODEL_API_URL", DEFAULT_MODEL_API_URL),
@@ -149,6 +168,26 @@ def get_model_timeout_config() -> Dict[str, float]:
         "write": float(config.get("timeout_write_seconds", float(DEFAULT_MODEL_TIMEOUT_WRITE))),
         "pool": float(config.get("timeout_pool_seconds", float(DEFAULT_MODEL_TIMEOUT_POOL))),
     }
+
+
+def get_server_port_config() -> Dict[str, Any]:
+    """获取后端和前端服务器端口配置"""
+    return {
+        "backend": {
+            "host": _env_value("BACKEND_HOST", DEFAULT_BACKEND_HOST),
+            "port": int(_env_value("BACKEND_PORT", DEFAULT_BACKEND_PORT)),
+        },
+        "frontend": {
+            "host": _env_value("FRONTEND_HOST", DEFAULT_FRONTEND_HOST),
+            "port": int(_env_value("FRONTEND_PORT", DEFAULT_FRONTEND_PORT)),
+        },
+    }
+
+
+def get_backend_port_config() -> Dict[str, Any]:
+    """获取后端服务器配置（用于启动uvicorn）"""
+    config = get_server_port_config()["backend"]
+    return config
 
 
 def get_history_data_api_url() -> str:

@@ -4,9 +4,23 @@ const ensureAppTemplate = async () => {
 
   if (host.childElementCount > 0) return;
 
-  const response = await fetch(`./app-template.html?v=${Date.now()}`, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const html = await response.text();
+  const candidatePaths = [
+    `./app-template.html?v=${Date.now()}`,
+    `./public/app-template.html?v=${Date.now()}`
+  ];
+
+  let html = '';
+  let lastError = '';
+  for (const path of candidatePaths) {
+    const response = await fetch(path, { cache: 'no-store' });
+    if (response.ok) {
+      html = await response.text();
+      break;
+    }
+    lastError = `HTTP ${response.status}`;
+  }
+
+  if (!html) throw new Error(lastError || 'app-template.html not found');
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const source = doc.getElementById('app');

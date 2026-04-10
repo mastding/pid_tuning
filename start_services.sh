@@ -5,22 +5,22 @@ echo "启动PID智能整定系统..."
 
 # 检查并停止已有服务（使用端口号查找）
 echo "检查现有服务..."
-BACKEND_PID=$(lsof -ti:3443 2>/dev/null)
+BACKEND_PID=$(lsof -ti:4443 2>/dev/null)
 if [ -n "$BACKEND_PID" ]; then
     echo "停止现有后端服务 (PID: $BACKEND_PID)..."
     kill $BACKEND_PID 2>/dev/null
     sleep 1
 fi
 
-FRONTEND_PID=$(lsof -ti:5273 2>/dev/null)
+FRONTEND_PID=$(lsof -ti:5873 2>/dev/null)
 if [ -n "$FRONTEND_PID" ]; then
     echo "停止现有前端服务 (PID: $FRONTEND_PID)..."
     kill $FRONTEND_PID 2>/dev/null
     sleep 1
 fi
 
-# 启动后端API (端口3443)
-echo "启动后端API (端口3443)..."
+# 启动后端API (端口4443)
+echo "启动后端API (端口4443)..."
 cd /d/code/pid_tuning/pid_tuning/backend
 nohup python agents_multiagent.py > agents_multiagent.log 2>&1 &
 BACKEND_NEW_PID=$!
@@ -29,10 +29,10 @@ echo "后端PID: $BACKEND_NEW_PID"
 # 等待后端启动
 sleep 3
 
-# 启动前端服务 (端口5273)
-echo "启动前端服务 (端口5273)..."
+# 启动前端服务 (端口5873)
+echo "启动前端服务 (端口5873)..."
 cd /d/code/pid_tuning/pid_tuning/frontend
-nohup python -m http.server 5273 > frontend.log 2>&1 &
+nohup python -m http.server 5873 > frontend.log 2>&1 &
 FRONTEND_NEW_PID=$!
 echo "前端PID: $FRONTEND_NEW_PID"
 
@@ -42,8 +42,8 @@ sleep 2
 # 验证服务状态
 echo ""
 echo "验证服务状态..."
-if lsof -i:3443 >/dev/null 2>&1; then
-    echo "✓ 后端API运行正常 (端口3443)"
+if lsof -i:4443 >/dev/null 2>&1; then
+    echo "✓ 后端API运行正常 (端口4443)"
 else
     echo "✗ 后端API启动失败"
     echo "查看日志: tail -f /d/code/pid_tuning/pid_tuning/backend/agents_multiagent.log"
