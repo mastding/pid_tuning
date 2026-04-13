@@ -80,12 +80,16 @@ def load_data_tool(
     csv_path: str,
     selected_loop_prefix: str | None = None,
     selected_window_index: int | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
     load_pid_dataset_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     prepared = load_pid_dataset_fn(
         csv_path,
         selected_loop_prefix=selected_loop_prefix,
         selected_window_index=selected_window_index,
+        start_time=start_time,
+        end_time=end_time,
     )
     artifact_payload: Dict[str, Any] = {}
     task_session_id = str(session_store.get("task_session_id") or "").strip()
@@ -119,6 +123,10 @@ def load_data_tool(
     session_store["selected_window"] = prepared["selected_window"]
     session_store["window_overview"] = prepared["window_overview"]
     session_store["history_range"] = prepared.get("history_range") or {}
+    if start_time is not None:
+        session_store["start_time"] = start_time
+    if end_time is not None:
+        session_store["end_time"] = end_time
 
     return {
         "data_points": prepared["data_points"],

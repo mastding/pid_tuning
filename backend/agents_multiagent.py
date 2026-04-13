@@ -215,12 +215,16 @@ async def tool_load_data(csv_path: str, selected_window_index: int | None = None
     if selected_window_index is None:
         selected_window_index = _shared_data_store.get("selected_window_index")
     selected_loop_prefix = _shared_data_store.get("selected_loop_prefix")
+    start_time = _shared_data_store.get("start_time")
+    end_time = _shared_data_store.get("end_time")
     result = await asyncio.to_thread(
         service_load_data_tool,
         session_store=_shared_data_store,
         csv_path=csv_path,
         selected_loop_prefix=selected_loop_prefix,
         selected_window_index=selected_window_index,
+        start_time=start_time,
+        end_time=end_time,
         load_pid_dataset_fn=load_pid_dataset,
     )
     return _to_jsonable(result)
@@ -399,6 +403,8 @@ async def run_multi_agent_collaboration(
         _shared_data_store["plant_type"] = plant_type
         _shared_data_store["scenario"] = scenario
         _shared_data_store["control_object"] = control_object
+        _shared_data_store["start_time"] = start_time
+        _shared_data_store["end_time"] = end_time
         if task_session_id:
             _shared_data_store["task_session_id"] = task_session_id
         if uploaded_file_name:

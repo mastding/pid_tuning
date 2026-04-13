@@ -45,3 +45,4 @@ frontend/.vite/
 
 # Local persisted task sessions
 backend/state/frontend_sessions.json
+backend/state/task_artifacts/

@@ -46,9 +46,16 @@ from services.system_config_service import (
     get_runtime_system_config,
     update_runtime_system_config,
 )
-from skills.data_analysis_skills import _read_csv_with_fallback, detect_pid_loops, fetch_history_data_csv
+from skills.data_analysis_skills import (
+    _read_csv_with_fallback,
+    clean_pid_dataframe,
+    detect_pid_loops,
+    fetch_history_data_csv,
+    get_timestamp_range,
+    slice_pid_dataframe_by_time_range,
+)
 from skills.rating import ModelRating
-from state.task_artifacts import persist_uploaded_csv
+from state.task_artifacts import persist_selected_range_csv, persist_uploaded_csv
 from state.workflow_task_store import WorkflowTaskStore
 
 RunCollaborationFn = Callable[..., AsyncGenerator[Dict[str, Any], None]]
@@ -534,6 +541,24 @@ def create_app(
             uploaded_original_file_path = str(archived_upload.get("original_file_path") or "")
             task_artifact_dir = str(archived_upload.get("artifact_dir") or "")
             csv_path = uploaded_original_file_path
+            try:
+                raw_df = _read_csv_with_fallback(uploaded_original_file_path)
+                cleaned_df = clean_pid_dataframe(raw_df, selected_loop_prefix=selected_loop_prefix)
+                ranged_df = slice_pid_dataframe_by_time_range(
+                    cleaned_df,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+                selected_range_meta = persist_selected_range_csv(
+                    task_id=task_session_id,
+                    ranged_df=ranged_df,
+                    selected_loop_prefix=selected_loop_prefix,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+                csv_path = str(selected_range_meta.get("selected_range_file_path") or csv_path)
+            except Exception:
+                csv_path = uploaded_original_file_path
 
         async def event_generator() -> AsyncGenerator[str, None]:
             event_count = 0
@@ -642,6 +667,7 @@ def create_app(
                         "loops": options,
                         "recommended_prefix": recommended_prefix,
                         "available_columns": [str(col) for col in raw_df.columns.tolist()],
+                        "time_range": get_timestamp_range(raw_df),
                     },
                 }
             )

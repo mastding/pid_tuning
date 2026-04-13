@@ -272,6 +272,8 @@ async def run_multi_agent_collaboration(
     shared_data_store["plant_type"] = plant_type
     shared_data_store["scenario"] = scenario
     shared_data_store["control_object"] = control_object
+    shared_data_store["start_time"] = start_time
+    shared_data_store["end_time"] = end_time
     if task_session_id:
         shared_data_store["task_session_id"] = task_session_id
     if uploaded_file_name:

@@ -60,3 +60,29 @@ def persist_processed_csv(
         "processed_rows": int(len(cleaned_df)) if cleaned_df is not None else 0,
         "processed_columns": [str(col) for col in getattr(cleaned_df, "columns", [])],
     }
+
+
+def persist_selected_range_csv(
+    *,
+    task_id: str | None,
+    ranged_df: Any,
+    selected_loop_prefix: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> Dict[str, Any]:
+    target = ensure_task_artifact_dir(task_id)
+    loop_part = _safe_segment(selected_loop_prefix or "all_loops", "all_loops")
+    start_part = _safe_segment(str(start_time or "start"), "start")
+    end_part = _safe_segment(str(end_time or "end"), "end")
+    saved_name = f"selected_range__{loop_part}__{start_part}__{end_part}.csv"
+    saved_path = Path(target["artifact_dir"]) / saved_name
+    ranged_df.to_csv(saved_path, index=False, encoding="utf-8-sig")
+    return {
+        **target,
+        "selected_range_file_name": saved_name,
+        "selected_range_file_path": str(saved_path),
+        "selected_range_rows": int(len(ranged_df)) if ranged_df is not None else 0,
+        "selected_range_columns": [str(col) for col in getattr(ranged_df, "columns", [])],
+        "selected_range_start_time": str(start_time or ""),
+        "selected_range_end_time": str(end_time or ""),
+    }

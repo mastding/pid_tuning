@@ -259,11 +259,15 @@ def load_pid_dataset(
     selected_loop_prefix: str | None = None,
     selected_window_index: int | None = None,
     max_points: int = 240,
+    start_time: str | None = None,
+    end_time: str | None = None,
 ) -> Dict[str, Any]:
     prepared = prepare_pid_dataset(
         csv_path,
         selected_loop_prefix=selected_loop_prefix,
         selected_window_index=selected_window_index,
+        start_time=start_time,
+        end_time=end_time,
     )
     cleaned_df = prepared["cleaned_df"]
     window_df = prepared["window_df"]

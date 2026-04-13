@@ -73,6 +73,7 @@ createApp({
       endTime: '1772553600000',
       csvDerivedStartTime: '',
       csvDerivedEndTime: '',
+      csvTimeRangeDirty: false,
       csvLoopInspecting: false,
       csvLoopInspectError: '',
       csvDetectedLoops: [],
@@ -766,7 +767,8 @@ createApp({
               integration: {
                 history_data_api_url: payload?.integration?.history_data_api_url || '',
                 knowledge_graph_api_url: payload?.integration?.knowledge_graph_api_url || '',
-                enable_knowledge_expert: payload?.integration?.enable_knowledge_expert !== false
+                enable_knowledge_expert: payload?.integration?.enable_knowledge_expert !== false,
+                enable_experience_distillation: payload?.integration?.enable_experience_distillation !== false
               }
             };
           } catch (error) {
@@ -3127,6 +3129,9 @@ createApp({
           this.csvDetectedLoops = [];
           this.csvSelectedLoopPrefix = '';
           this.csvRecommendedLoopPrefix = '';
+          this.csvTimeRangeDirty = false;
+          this.csvDerivedStartTime = '';
+          this.csvDerivedEndTime = '';
           this.csvUploadedFileName = this.uploadedFile?.name || '';
           this.csvUploadedFileHash = this.uploadedFile ? await this.computeUploadedFileHash(this.uploadedFile) : '';
           this.csvArchivedOriginalPath = '';
@@ -3152,6 +3157,11 @@ createApp({
             const loops = Array.isArray(payload?.loops) ? payload.loops : [];
             this.csvDetectedLoops = loops;
             this.csvRecommendedLoopPrefix = String(payload?.recommended_prefix || '').trim();
+            const timeRange = payload?.time_range || {};
+            if (!this.csvTimeRangeDirty || (!this.csvDerivedStartTime && !this.csvDerivedEndTime)) {
+              this.csvDerivedStartTime = this.normalizeChartRangeValue(timeRange?.start_time || '', { xAxisType: 'timestamp' });
+              this.csvDerivedEndTime = this.normalizeChartRangeValue(timeRange?.end_time || '', { xAxisType: 'timestamp' });
+            }
 
             if (loops.length === 1) {
               this.csvSelectedLoopPrefix = String(loops[0]?.prefix || '').trim();
@@ -3170,6 +3180,9 @@ createApp({
           this.csvDetectedLoops = [];
           this.csvSelectedLoopPrefix = '';
           this.csvRecommendedLoopPrefix = '';
+          this.csvTimeRangeDirty = false;
+          this.csvDerivedStartTime = '';
+          this.csvDerivedEndTime = '';
           this.csvUploadedFileName = '';
           this.csvUploadedFileHash = '';
           this.csvArchivedOriginalPath = '';
@@ -3178,6 +3191,16 @@ createApp({
           if (this.$refs.fileInput) {
             this.$refs.fileInput.value = '';
           }
+        },
+
+        handleCsvDerivedStartTimeInput(event) {
+          this.csvTimeRangeDirty = true;
+          this.csvDerivedStartTime = event?.target?.value || '';
+        },
+
+        handleCsvDerivedEndTimeInput(event) {
+          this.csvTimeRangeDirty = true;
+          this.csvDerivedEndTime = event?.target?.value || '';
         },
 
         progressStepLabel(step, idx) {
@@ -3435,12 +3458,26 @@ createApp({
           if (this.loading) return;
 
           const usingUploadedCsv = this.dataSource === 'csv';
+          const csvStartTime = this.normalizeChartRangeValue(this.csvDerivedStartTime || '', { xAxisType: 'timestamp' });
+          const csvEndTime = this.normalizeChartRangeValue(this.csvDerivedEndTime || '', { xAxisType: 'timestamp' });
           if (usingUploadedCsv && !this.uploadedFile) {
             this.addMessage({
               type: 'assistant',
               content: '请选择CSV文件后再开始整定。'
             });
             return;
+          }
+
+          if (usingUploadedCsv && csvStartTime && csvEndTime) {
+            const startMs = Date.parse(csvStartTime);
+            const endMs = Date.parse(csvEndTime);
+            if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs < startMs) {
+              this.addMessage({
+                type: 'assistant',
+                content: 'CSV 时间范围无效：结束时间不能早于开始时间。'
+              });
+              return;
+            }
           }
 
           if (!usingUploadedCsv) {
@@ -3458,10 +3495,6 @@ createApp({
           const taskSession = this.createTaskSession();
           this.shellSection = 'tuning-process';
           this.professionalReportDrawerOpen = false;
-          if (usingUploadedCsv) {
-            this.csvDerivedStartTime = '';
-            this.csvDerivedEndTime = '';
-          }
 
           this.addMessage({
             type: 'user',
@@ -3491,6 +3524,8 @@ window: ${this.historyWindow || 1}
             formData.append('file', this.uploadedFile);
             const selectedLoopPrefix = String(this.csvSelectedLoopPrefix || '').trim();
             if (selectedLoopPrefix) formData.append('selected_loop_prefix', selectedLoopPrefix);
+            if (csvStartTime) formData.append('start_time', this.toBackendChartTime(csvStartTime, { xAxisType: 'timestamp' }));
+            if (csvEndTime) formData.append('end_time', this.toBackendChartTime(csvEndTime, { xAxisType: 'timestamp' }));
           }
           formData.append('loop_name', this.loopName);
           formData.append('loop_type', this.loopType);
@@ -3624,8 +3659,8 @@ window: ${this.historyWindow || 1}
               const fitPreview = data.data?.model?.fitPreview || {};
               const startCandidate = historyRange.startTime ?? fitPreview.start_time ?? overview.start_time ?? '';
               const endCandidate = historyRange.endTime ?? fitPreview.end_time ?? overview.end_time ?? '';
-              this.csvDerivedStartTime = startCandidate === 0 ? '0' : (startCandidate ? String(startCandidate) : '');
-              this.csvDerivedEndTime = endCandidate === 0 ? '0' : (endCandidate ? String(endCandidate) : '');
+              this.csvDerivedStartTime = this.normalizeChartRangeValue(startCandidate === 0 ? '0' : (startCandidate ? String(startCandidate) : ''), { xAxisType: 'timestamp' });
+              this.csvDerivedEndTime = this.normalizeChartRangeValue(endCandidate === 0 ? '0' : (endCandidate ? String(endCandidate) : ''), { xAxisType: 'timestamp' });
             }
             this.syncCurrentTaskSession({
               status: 'completed',

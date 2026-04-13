@@ -3510,6 +3510,30 @@
                         <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">回路识别</div>
                         <div class="mt-2 text-sm text-slate-700">未检测到回路前缀列（如 prefix.pv / prefix.mv）。系统将按 PV/MV/SV 列名或别名自动解析，无需选择回路。</div>
                       </div>
+                      <div v-if="csvDerivedStartTime || csvDerivedEndTime" class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                        <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">整定时间范围</div>
+                        <div class="mt-1 text-sm leading-6 text-slate-700">后续候选窗口识别、模型辨识和 PID 整定只会使用这个时间段内的数据。</div>
+                        <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <label class="text-xs text-slate-500">
+                            <span class="mb-1 block font-semibold text-slate-600">开始时间</span>
+                            <input
+                              type="datetime-local"
+                              :value="csvDerivedStartTime"
+                              @input="handleCsvDerivedStartTimeInput"
+                              class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+                            >
+                          </label>
+                          <label class="text-xs text-slate-500">
+                            <span class="mb-1 block font-semibold text-slate-600">结束时间</span>
+                            <input
+                              type="datetime-local"
+                              :value="csvDerivedEndTime"
+                              @input="handleCsvDerivedEndTimeInput"
+                              class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+                            >
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   </template>
                 </div>

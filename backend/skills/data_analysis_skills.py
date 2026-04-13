@@ -453,6 +453,54 @@ def parse_timestamp_column(df: pd.DataFrame) -> pd.DataFrame:
     return df.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
 
 
+def get_timestamp_range(df: pd.DataFrame) -> Dict[str, str]:
+    if df is None or "timestamp" not in df.columns or len(df) == 0:
+        return {"start_time": "", "end_time": ""}
+
+    parsed = parse_timestamp_column(df.copy())
+    if parsed.empty or "timestamp" not in parsed.columns:
+        return {"start_time": "", "end_time": ""}
+
+    return {
+        "start_time": parsed["timestamp"].iloc[0].strftime("%Y-%m-%d %H:%M:%S"),
+        "end_time": parsed["timestamp"].iloc[-1].strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def slice_pid_dataframe_by_time_range(
+    df: pd.DataFrame,
+    *,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> pd.DataFrame:
+    if df is None or len(df) == 0 or "timestamp" not in df.columns:
+        return df.copy() if df is not None else df
+
+    start_dt = pd.to_datetime(start_time, errors="coerce")
+    end_dt = pd.to_datetime(end_time, errors="coerce")
+    if pd.isna(start_dt) and pd.isna(end_dt):
+        return df.copy().reset_index(drop=True)
+
+    sliced = df.copy()
+    if not pd.isna(start_dt):
+        sliced = sliced[sliced["timestamp"] >= start_dt]
+    if not pd.isna(end_dt):
+        sliced = sliced[sliced["timestamp"] <= end_dt]
+
+    sliced = sliced.reset_index(drop=True)
+    if sliced.empty:
+        raise ValueError(
+            "Selected time range does not contain any CSV data. "
+            f"start_time={start_time}, end_time={end_time}"
+        )
+    if len(sliced) < 20:
+        raise ValueError(
+            "Selected time range is too short for PID tuning. "
+            f"At least 20 rows are required, got {len(sliced)}."
+        )
+    return sliced
+
+
 def estimate_sampling_time(df: pd.DataFrame, fallback: float = 1.0) -> float:
     if "timestamp" not in df.columns or len(df) < 2:
         return fallback
@@ -758,9 +806,16 @@ def prepare_pid_dataset(
     csv_path: str,
     selected_loop_prefix: str | None = None,
     selected_window_index: int | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
 ) -> Dict:
     raw_df = _read_csv_with_fallback(csv_path)
     cleaned_df = clean_pid_dataframe(raw_df, selected_loop_prefix=selected_loop_prefix)
+    cleaned_df = slice_pid_dataframe_by_time_range(
+        cleaned_df,
+        start_time=start_time,
+        end_time=end_time,
+    )
     dt = estimate_sampling_time(cleaned_df)
 
     denoised_df = cleaned_df.copy()
