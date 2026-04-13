@@ -339,7 +339,6 @@ def fit_best_fopdt_window(
     loop_name = (loop_type or "flow").strip().lower()
     model_order = MODEL_ORDER_BY_LOOP_TYPE.get(loop_name, ["FOPDT", "FO", "SOPDT", "IPDT"])
 
-    best_stable_attempt: Dict[str, Any] | None = None
     filtered_candidates = 0
 
     def _robust_diff_noise(values: np.ndarray) -> float:
@@ -351,48 +350,38 @@ def fit_best_fopdt_window(
         mad = float(np.median(np.abs(diffs - med)))
         return mad
 
-    def _candidate_penalty(source: str) -> float:
-        if source == "full_cleaned":
-            return 0.25
-        return 0.0
+    def _identification_fit_score(*, r2_score: float, normalized_rmse: float) -> float:
+        r2_component = min(1.0, max(0.0, float(r2_score or 0.0)))
+        rmse_component = 1.0 - min(max(float(normalized_rmse or 0.0), 0.0), 1.0)
+        return float(10.0 * (0.65 * r2_component + 0.35 * rmse_component))
 
     def _is_better_attempt(
         *,
         current_best: Dict[str, Any] | None,
-        current_strategy: Dict[str, Any],
+        current_fit_score: float,
+        current_r2_score: float,
+        current_normalized_rmse: float,
         current_confidence: Dict[str, Any],
-        current_source: str,
-        current_quality_score: float,
     ) -> bool:
         if current_best is None:
             return True
 
-        best_strategy = current_best["benchmark"].get("best") or {}
         best_confidence = current_best["confidence"] or {}
-        best_source = str(current_best.get("source") or "")
-        best_quality_score = float(current_best.get("window_quality_score", 0.0) or 0.0)
-
-        current_perf = float(current_strategy.get("performance_score", 0.0))
-        best_perf = float(best_strategy.get("performance_score", 0.0))
-        current_final = float(current_strategy.get("final_rating", 0.0))
-        best_final = float(best_strategy.get("final_rating", 0.0))
+        best_fit_score = float(current_best.get("identification_fit_score", 0.0) or 0.0)
+        best_r2_score = float(current_best.get("r2_score", 0.0) or 0.0)
+        best_normalized_rmse = float(current_best.get("normalized_rmse", 0.0) or 0.0)
         current_conf = float(current_confidence.get("confidence", 0.0))
         best_conf = float(best_confidence.get("confidence", 0.0))
 
-        current_penalty = _candidate_penalty(str(current_source)) + max(0.0, 1.0 - float(current_quality_score)) * 0.6
-        best_penalty = _candidate_penalty(best_source) + max(0.0, 1.0 - best_quality_score) * 0.6
-        current_perf -= current_penalty
-        best_perf -= best_penalty
-
-        if current_perf > best_perf + 1e-9:
+        if current_fit_score > best_fit_score + 1e-9:
             return True
-        if abs(current_perf - best_perf) <= 1e-9:
-            if current_final > best_final + 1e-9:
+        if abs(current_fit_score - best_fit_score) <= 1e-9:
+            if current_r2_score > best_r2_score + 1e-9:
                 return True
-            if abs(current_final - best_final) <= 1e-9:
-                if current_quality_score > best_quality_score + 1e-9:
+            if abs(current_r2_score - best_r2_score) <= 1e-9:
+                if current_normalized_rmse < best_normalized_rmse - 1e-9:
                     return True
-                if abs(current_quality_score - best_quality_score) <= 1e-9 and current_conf > best_conf + 1e-9:
+                if abs(current_normalized_rmse - best_normalized_rmse) <= 1e-9 and current_conf > best_conf + 1e-9:
                     return True
         return False
 
@@ -699,6 +688,10 @@ def fit_best_fopdt_window(
                 selected_model_params=fitted_model,
             )
             best_strategy = benchmark.get("best") or {}
+            identification_fit_score = _identification_fit_score(
+                r2_score=float(fitted_model.get("r2_score", 0.0) or 0.0),
+                normalized_rmse=float(fitted_model.get("normalized_rmse", 0.0) or 0.0),
+            )
 
             attempt_result.update(
                 {
@@ -710,6 +703,7 @@ def fit_best_fopdt_window(
                     "normalized_rmse": float(fitted_model["normalized_rmse"]),
                     "raw_rmse": float(fitted_model["raw_rmse"]),
                     "r2_score": float(fitted_model["r2_score"]),
+                    "identification_fit_score": float(identification_fit_score),
                     "confidence": float(confidence["confidence"]),
                     "confidence_quality": confidence["quality"],
                     "benchmark_strategy": best_strategy.get("strategy", ""),
@@ -733,28 +727,19 @@ def fit_best_fopdt_window(
                 "attempt_result": attempt_result,
                 "window_quality": quality,
                 "window_quality_score": window_quality_score,
+                "identification_fit_score": float(identification_fit_score),
+                "r2_score": float(fitted_model.get("r2_score", 0.0) or 0.0),
+                "normalized_rmse": float(fitted_model.get("normalized_rmse", 0.0) or 0.0),
             }
 
             if _is_better_attempt(
                 current_best=best_attempt,
-                current_strategy=best_strategy,
+                current_fit_score=float(identification_fit_score),
+                current_r2_score=float(fitted_model.get("r2_score", 0.0) or 0.0),
+                current_normalized_rmse=float(fitted_model.get("normalized_rmse", 0.0) or 0.0),
                 current_confidence=confidence,
-                current_source=candidate["name"],
-                current_quality_score=window_quality_score,
             ):
                 best_attempt = packaged
-
-            if bool(best_strategy.get("is_stable", False)) and _is_better_attempt(
-                current_best=best_stable_attempt,
-                current_strategy=best_strategy,
-                current_confidence=confidence,
-                current_source=candidate["name"],
-                current_quality_score=window_quality_score,
-            ):
-                best_stable_attempt = packaged
-
-    if best_stable_attempt is not None:
-        best_attempt = best_stable_attempt
 
     if best_attempt is None:
         raise ValueError("所有候选辨识窗口中的 MV/PV 变化都过小，无法完成过程模型辨识")
@@ -785,12 +770,46 @@ def fit_best_fopdt_window(
 
     selection_reason = (
         f"已对候选窗口尝试 {', '.join(model_order)} 多种过程模型，"
-        f"综合闭环试算评分（优先稳定）最终选择 {selected_model_type} 作为当前最优辨识模型，并进入对应模型类型的 PID 试算。"
+        f"并依据 R² 与 NRMSE 组合得到的辨识拟合评分进行排序，最终选择 {selected_model_type} 作为当前最优辨识模型。"
     )
     if has_usable_windows:
         selection_reason = "已检测到可用于辨识的候选窗口，辨识阶段仅在可用窗口集合上进行多窗口多模型评估。" + selection_reason
 
     clean_selected_model_params = sanitize_selected_model_params(selected_model_type, best_model_params)
+
+    identification_candidates = sorted(
+        [
+            {
+                "window_source": str(attempt.get("window_source", "")),
+                "model_type": str(attempt.get("model_type", "")).upper(),
+                "selected_model_params": sanitize_selected_model_params(
+                    str(attempt.get("model_type", "")),
+                    attempt.get("selected_model_params") or {},
+                ),
+                "r2_score": float(attempt.get("r2_score", 0.0) or 0.0),
+                "normalized_rmse": float(attempt.get("normalized_rmse", 0.0) or 0.0),
+                "identification_fit_score": float(attempt.get("identification_fit_score", 0.0) or 0.0),
+                "confidence": float(attempt.get("confidence", 0.0) or 0.0),
+                "points": int(attempt.get("points", 0) or 0),
+                "window_start_index": int(attempt.get("window_start_index", 0) or 0),
+                "window_end_index": int(attempt.get("window_end_index", 0) or 0),
+                "event_type": str(attempt.get("event_type", "")),
+                "is_selected": (
+                    str(attempt.get("model_type", "")).upper() == selected_model_type
+                    and str(attempt.get("window_source", "")) == best_source
+                ),
+            }
+            for attempt in attempts
+            if attempt.get("success") is not False and str(attempt.get("model_type", "")).upper() != "WINDOW_FILTER"
+        ],
+        key=lambda item: (
+            float(item.get("identification_fit_score", 0.0) or 0.0),
+            float(item.get("r2_score", 0.0) or 0.0),
+            -float(item.get("normalized_rmse", 0.0) or 0.0),
+            float(item.get("confidence", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )[:5]
 
     return {
         "model_params": best_model_params,
@@ -804,8 +823,14 @@ def fit_best_fopdt_window(
         "next_actions": next_actions,
         "fit_preview": fit_preview,
         "selected_window": selected_window,
+        "selected_window_source": best_source,
         "selected_model_type": selected_model_type,
+        "identification_best_model_type": selected_model_type,
+        "identification_best_window_source": best_source,
+        "identification_candidates": identification_candidates,
         "selected_model_params": clean_selected_model_params,
         "tuning_model": tuning_model,
+        "identification_fit_score": float(best_attempt.get("identification_fit_score", 0.0) or 0.0),
+        "model_selection_reason": selection_reason,
         "selection_reason": selection_reason,
     }

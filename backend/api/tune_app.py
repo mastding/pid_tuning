@@ -229,6 +229,7 @@ class IntegrationConfigPayload(BaseModel):
     history_data_api_url: str = Field(..., description="历史数据服务地址")
     knowledge_graph_api_url: str = Field(..., description="本体知识图谱服务地址")
     enable_knowledge_expert: bool = Field(True, description="是否启用本体知识智能体（知识检索步骤）")
+    enable_experience_distillation: bool = Field(True, description="是否启用经验沉淀与检索")
 
 
 class SystemConfigPayload(BaseModel):

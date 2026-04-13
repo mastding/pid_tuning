@@ -1967,10 +1967,12 @@ createApp({
           return [...(attempts || [])]
             .filter(item => String(item?.window_source || '') === String(sourceKey))
             .sort((a, b) => {
-              const performanceGap = Number(b?.benchmark_performance_score || b?.performance_score || 0)
-                - Number(a?.benchmark_performance_score || a?.performance_score || 0);
-              if (Math.abs(performanceGap) > 1e-9) return performanceGap;
-              return Number(b?.confidence || 0) - Number(a?.confidence || 0);
+              const fitScoreGap = Number(b?.identification_fit_score || 0)
+                - Number(a?.identification_fit_score || 0);
+              if (Math.abs(fitScoreGap) > 1e-9) return fitScoreGap;
+              const r2Gap = Number(b?.r2_score || 0) - Number(a?.r2_score || 0);
+              if (Math.abs(r2Gap) > 1e-9) return r2Gap;
+              return Number(a?.normalized_rmse || 0) - Number(b?.normalized_rmse || 0);
             })[0] || null;
         },
 
@@ -2552,10 +2554,25 @@ createApp({
 
         buildExecutionDetailPayload(msg) {
           if (!msg) return null;
-          const dataAnalysis = this.buildDataAnalysisExplainPayload(msg);
-          const identification = this.buildIdentificationExplainPayload(msg);
-          const pidTuning = this.buildPidTuningExplainPayload(msg);
-          const evaluation = this.buildEvaluationExplainPayload(msg);
+          const agentName = String(msg.agent || '');
+          const hasDataAnalysisTool = Boolean(this.getToolResult(msg, 'tool_load_data'));
+          const hasIdentificationTool = Boolean(this.getToolResult(msg, 'tool_fit_fopdt'));
+          const hasPidTuningTool = Boolean(this.getToolResult(msg, 'tool_tune_pid'));
+          const hasEvaluationTool = Boolean(this.getToolResult(msg, 'tool_evaluate_pid'));
+          let dataAnalysis = null;
+          let identification = null;
+          let pidTuning = null;
+          let evaluation = null;
+
+          if (hasEvaluationTool || agentName === '评估智能体') {
+            evaluation = this.buildEvaluationExplainPayload(msg);
+          } else if (hasPidTuningTool || agentName === 'PID专家智能体') {
+            pidTuning = this.buildPidTuningExplainPayload(msg);
+          } else if (hasIdentificationTool || agentName === '系统辨识智能体') {
+            identification = this.buildIdentificationExplainPayload(msg);
+          } else if (hasDataAnalysisTool || agentName === '数据分析智能体') {
+            dataAnalysis = this.buildDataAnalysisExplainPayload(msg);
+          }
           return {
             id: msg.id,
             agent: msg.agent || '智能体',
@@ -2586,7 +2603,7 @@ createApp({
           if (attempt?.success === false) {
             return `该候选拟合失败：${attempt?.error || '模型拟合未成功'}`;
           }
-          return `系统在窗口 ${attempt?.window_source || '-'} 上拟合 ${attempt?.model_type || '-'} 模型，得到标准化RMSE=${this.formatNumber(attempt?.normalized_rmse, 3)}、R²=${this.formatNumber(attempt?.r2_score, 3)}、置信度=${this.formatPercent(attempt?.confidence, 1)}，并结合该模型对应的候选整定性能评分进行比较。`;
+          return `系统在窗口 ${attempt?.window_source || '-'} 上拟合 ${attempt?.model_type || '-'} 模型，得到标准化RMSE=${this.formatNumber(attempt?.normalized_rmse, 3)}、R²=${this.formatNumber(attempt?.r2_score, 3)}，并按辨识拟合评分 ${this.formatNumber(attempt?.identification_fit_score, 2)} 进行排序比较。`;
         },
 
         buildParameterExplanation(modelType, selectedModelParams) {
@@ -2610,9 +2627,10 @@ createApp({
           const result = this.getToolResult(msg, 'tool_fit_fopdt');
           if (!result) return null;
 
-          const modelType = String(result.model_type || '').toUpperCase() || '-';
+          const modelType = String(result.identification_best_model_type || result.model_type || '').toUpperCase() || '-';
           const selectedModelParams = result.selected_model_params || {};
           const attempts = Array.isArray(result.attempts) ? result.attempts.slice() : [];
+          const candidates = Array.isArray(result.identification_candidates) ? result.identification_candidates.slice() : [];
           const windowSourcesAll = new Set(attempts.map(item => String(item?.window_source || '')));
           const filteredWindowSources = new Set(
             attempts
@@ -2622,43 +2640,49 @@ createApp({
           const fittedAttemptsRaw = attempts.filter(item => String(item?.model_type || '').toUpperCase() !== 'WINDOW_FILTER');
           const fittedWindowSources = new Set(fittedAttemptsRaw.map(item => String(item?.window_source || '')));
 
-          const sortedAttempts = attempts
+          const sortedCandidates = (candidates.length ? candidates : attempts
+            .filter(item => item?.success !== false && String(item?.model_type || '').toUpperCase() !== 'WINDOW_FILTER'))
             .map((attempt, idx) => ({ ...attempt, _idx: idx }))
             .sort((a, b) => {
-              const aSuccess = a.success === false ? 0 : 1;
-              const bSuccess = b.success === false ? 0 : 1;
-              if (aSuccess !== bSuccess) return bSuccess - aSuccess;
-              const perfDiff = Number(b.benchmark_performance_score || 0) - Number(a.benchmark_performance_score || 0);
-              if (Math.abs(perfDiff) > 1e-9) return perfDiff;
-              return Number(b.confidence || 0) - Number(a.confidence || 0);
+              const fitDiff = Number(b.identification_fit_score || 0) - Number(a.identification_fit_score || 0);
+              if (Math.abs(fitDiff) > 1e-9) return fitDiff;
+              const r2Diff = Number(b.r2_score || 0) - Number(a.r2_score || 0);
+              if (Math.abs(r2Diff) > 1e-9) return r2Diff;
+              return Number(a.normalized_rmse || 0) - Number(b.normalized_rmse || 0);
             })
             .map((attempt, idx) => ({
               rank: idx + 1,
-              isSelected:
-                String(attempt.model_type || '').toUpperCase() === modelType &&
-                String(attempt.window_source || '') === String(result.selected_window_source || ''),
+              isSelected: Boolean(
+                attempt.is_selected
+                || (
+                  String(attempt.model_type || '').toUpperCase() === modelType &&
+                  String(attempt.window_source || '') === String(result.identification_best_window_source || result.selected_window_source || result.source || '')
+                )
+              ),
               modelType: String(attempt.model_type || '').toUpperCase() || '-',
               windowSource: attempt.window_source || '-',
               points: attempt.points ?? '-',
               normalizedRmse: this.formatNumber(attempt.normalized_rmse, 3),
               r2: this.formatNumber(attempt.r2_score, 3),
               confidence: this.formatPercent(attempt.confidence, 1),
-              performance: this.formatNumber(attempt.benchmark_performance_score, 2),
+              fitScore: this.formatNumber(attempt.identification_fit_score, 2),
               explanation: this.formatAttemptExplanation(attempt)
             }));
 
           return {
             modelType,
             modelParamsSummary: this.summarizeModelParams({ model_type: modelType, ...selectedModelParams }),
-            windowSource: result.selected_window_source || '-',
+            windowSource: result.identification_best_window_source || result.selected_window_source || result.source || '-',
             confidence: this.formatPercent(result.confidence, 1),
+            fitScore: this.formatNumber(result.identification_fit_score, 2),
+            candidateCount: candidates.length || fittedAttemptsRaw.length,
             windowCountTotal: windowSourcesAll.size,
             windowCountFitted: fittedWindowSources.size,
             windowCountFiltered: filteredWindowSources.size,
             attemptCountFitted: fittedAttemptsRaw.length,
-            selectionReason: result.model_selection_reason || '系统会在候选窗口上比较多种模型的拟合质量与后续整定表现，最终选取综合表现最优的模型。',
+            selectionReason: result.model_selection_reason || '系统会在可用于辨识的候选窗口上比较多种模型的拟合效果，并按辨识拟合评分选择当前最优模型。',
             parameterExplanation: this.buildParameterExplanation(modelType, selectedModelParams),
-            attempts: sortedAttempts
+            attempts: sortedCandidates
           };
         },
 
@@ -5337,9 +5361,9 @@ window: ${this.historyWindow || 1}
                 grouped.set(source, { item, idx });
                 return;
               }
-              const currentPerf = Number(current.item?.benchmark_performance_score || current.item?.performance_score || 0);
-              const nextPerf = Number(item?.benchmark_performance_score || item?.performance_score || 0);
-              if (nextPerf > currentPerf) grouped.set(source, { item, idx });
+              const currentFit = Number(current.item?.identification_fit_score || 0);
+              const nextFit = Number(item?.identification_fit_score || 0);
+              if (nextFit > currentFit) grouped.set(source, { item, idx });
             });
           return [...grouped.entries()].map(([source, payload]) => ({
             source,
@@ -5347,6 +5371,7 @@ window: ${this.historyWindow || 1}
             modelType: payload.item?.model_type || '模型',
             normalizedRmse: Number(payload.item?.normalized_rmse),
             r2: Number(payload.item?.r2_score),
+            fitScore: Number(payload.item?.identification_fit_score),
             confidence: Number(payload.item?.confidence),
             windowStartIndex: Number(payload.item?.window_start_idx ?? payload.item?.window_start),
             windowEndIndex: Number(payload.item?.window_end_idx ?? payload.item?.window_end),

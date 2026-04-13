@@ -211,5 +211,9 @@ def is_knowledge_expert_enabled() -> bool:
     return bool(get_runtime_system_config()["integration"].get("enable_knowledge_expert", True))
 
 
+def is_experience_distillation_enabled() -> bool:
+    return bool(get_runtime_system_config()["integration"].get("enable_experience_distillation", True))
+
+
 def is_llm_orchestration_enabled() -> bool:
     return bool(get_runtime_system_config()["model"].get("enable_llm_orchestration", True))

@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Mapping
 
 from memory.experience_service import retrieve_experience_guidance
 from services.identification_service import sanitize_selected_model_params
+from services.system_config_service import is_experience_distillation_enabled
 from state.task_artifacts import persist_processed_csv
 from services.knowledge_graph_service import (
     build_knowledge_context,
@@ -177,6 +178,9 @@ def fit_fopdt_tool(
     fit_preview = identification["fit_preview"]
     selected_window_payload = identification["selected_window"]
     selected_model_type = identification.get("selected_model_type", "FOPDT")
+    identification_candidates = identification.get("identification_candidates") or []
+    identification_best_model_type = identification.get("identification_best_model_type", selected_model_type)
+    identification_best_window_source = identification.get("identification_best_window_source", best_source)
     selected_model_params = sanitize_selected_model_params(
         identification.get("selected_model_type", "FOPDT"),
         identification.get("selected_model_params", best_model_params),
@@ -210,9 +214,12 @@ def fit_fopdt_tool(
     session_store["r2_score"] = float(best_model_params["r2_score"])
     session_store["model_confidence"] = best_confidence
     session_store["model_attempts"] = attempts
+    session_store["model_identification_candidates"] = identification_candidates
     session_store["model_reason_codes"] = reason_codes
     session_store["model_next_actions"] = next_actions
     session_store["model_selected_source"] = best_source
+    session_store["identification_best_model_type"] = identification_best_model_type
+    session_store["identification_best_window_source"] = identification_best_window_source
     session_store["fit_preview"] = fit_preview
     session_store["window_benchmark"] = (best_benchmark or {}).get("best", {})
     session_store["model_selection_reason"] = selection_reason
@@ -238,6 +245,9 @@ def fit_fopdt_tool(
         "rmse_score": float(best_confidence["rmse_score"]),
         "reason_codes": reason_codes,
         "next_actions": next_actions,
+        "identification_best_model_type": identification_best_model_type,
+        "identification_best_window_source": identification_best_window_source,
+        "identification_candidates": identification_candidates,
         "selected_window_source": best_source,
         "selected_window": selected_window_payload or session_store.get("selected_window", {}),
         "window_overview": session_store.get("window_overview", {"points": []}),
@@ -297,16 +307,29 @@ def tune_pid_tool(
     knowledge_summary = str(knowledge_guidance.get("summary") or "").strip()
     knowledge_rule_count = int(knowledge_guidance.get("matched_count") or 0)
 
-    experience_guidance = retrieve_experience_guidance(
-        loop_type=loop_type,
-        model_type=model_type,
-        K=active_K,
-        T=active_T,
-        L=active_L,
-        selected_model_params=selected_model_params,
-        limit=3,
-        candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
-    )
+    if is_experience_distillation_enabled():
+        experience_guidance = retrieve_experience_guidance(
+            loop_type=loop_type,
+            model_type=model_type,
+            K=active_K,
+            T=active_T,
+            L=active_L,
+            selected_model_params=selected_model_params,
+            limit=3,
+            candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
+        )
+    else:
+        experience_guidance = {
+            "matches": [],
+            "summary": {"disabled": True},
+            "guidance": "",
+            "preferred_strategy": "",
+            "preferred_model_type": "",
+            "preferred_refine_pattern": "",
+            "recommended_kp_scale": 1.0,
+            "recommended_ki_scale": 1.0,
+            "recommended_kd_scale": 1.0,
+        }
     if knowledge_preferred_strategy:
         experience_guidance = {
             **experience_guidance,
