@@ -579,9 +579,10 @@ async def run_multi_agent_collaboration(
                                             },
                                         },
                                         "model": {
-                                            "modelType": shared_data.get("model_type", result_data.get("model_type", "")),
+                                            "modelType": shared_data.get("identification_best_model_type", shared_data.get("model_type", result_data.get("model_type", ""))),
                                             "selectedModelParams": shared_data.get(
-                                                "selected_model_params", result_data.get("selected_model_params", {})
+                                                "identification_best_model_params",
+                                                shared_data.get("selected_model_params", result_data.get("selected_model_params", {})),
                                             ),
                                             "modelSelectionReason": shared_data.get(
                                                 "model_selection_reason", result_data.get("model_selection_reason", "")
@@ -597,9 +598,20 @@ async def run_multi_agent_collaboration(
                                             "reasonCodes": result_data.get("reason_codes", shared_data.get("reason_codes", [])),
                                             "nextActions": result_data.get("next_actions", shared_data.get("next_actions", [])),
                                             "selectedWindowSource": result_data.get(
-                                                "selected_window_source", shared_data.get("selected_window_source", "")
+                                                "identification_best_window_source",
+                                                shared_data.get("identification_best_window_source", shared_data.get("selected_window_source", "")),
                                             ),
                                             "attempts": result_data.get("attempts", shared_data.get("attempts", [])),
+                                            "identificationCandidates": result_data.get(
+                                                "identification_candidates", shared_data.get("model_identification_candidates", [])
+                                            ),
+                                            "tuningSelectedModelType": shared_data.get("tuning_selected_model_type", shared_data.get("model_type", "FOPDT")),
+                                            "tuningSelectedModelParams": shared_data.get(
+                                                "tuning_selected_model_params", shared_data.get("selected_model_params", {})
+                                            ),
+                                            "tuningSelectedWindowSource": shared_data.get(
+                                                "tuning_selected_window_source", shared_data.get("selected_window_source", "")
+                                            ),
                                             "fitPreview": result_data.get("fit_preview", shared_data.get("fit_preview", {"points": []})),
                                             "windowOverview": result_data.get(
                                                 "window_overview", shared_data.get("window_overview", {"points": []})
@@ -655,12 +667,16 @@ async def run_multi_agent_collaboration(
                                     },
                                 },
                                 "model": {
-                                    "modelType": shared_data.get("model_type", "FOPDT"),
-                                    "selectedModelParams": shared_data.get("selected_model_params", {}),
+                                    "modelType": shared_data.get("identification_best_model_type", shared_data.get("model_type", "FOPDT")),
+                                    "selectedModelParams": shared_data.get("identification_best_model_params", shared_data.get("selected_model_params", {})),
                                     "modelSelectionReason": shared_data.get("model_selection_reason", ""),
-                                    "K": shared_data.get("K", 0.0),
-                                    "T": shared_data.get("T", 0.0),
-                                    "L": shared_data.get("L", 0.0),
+                                    "K": (shared_data.get("identification_best_model_params", {}) or {}).get("K", shared_data.get("K", 0.0)),
+                                    "T": (shared_data.get("identification_best_model_params", {}) or {}).get(
+                                        "T",
+                                        ((shared_data.get("identification_best_model_params", {}) or {}).get("T1", 0.0) + (shared_data.get("identification_best_model_params", {}) or {}).get("T2", 0.0))
+                                        or shared_data.get("T", 0.0),
+                                    ),
+                                    "L": (shared_data.get("identification_best_model_params", {}) or {}).get("L", shared_data.get("L", 0.0)),
                                     "confidence": shared_data.get("confidence", 0.0),
                                     "residue": shared_data.get("residue", 0.0),
                                     "normalizedRmse": shared_data.get("normalized_rmse", shared_data.get("residue", 0.0)),
@@ -670,8 +686,12 @@ async def run_multi_agent_collaboration(
                                     "confidenceRecommendation": shared_data.get("confidence_recommendation", ""),
                                     "reasonCodes": shared_data.get("reason_codes", []),
                                     "nextActions": shared_data.get("next_actions", []),
-                                    "selectedWindowSource": shared_data.get("selected_window_source", ""),
+                                    "selectedWindowSource": shared_data.get("identification_best_window_source", shared_data.get("selected_window_source", "")),
                                     "attempts": shared_data.get("attempts", []),
+                                    "identificationCandidates": shared_data.get("model_identification_candidates", []),
+                                    "tuningSelectedModelType": shared_data.get("tuning_selected_model_type", shared_data.get("model_type", "FOPDT")),
+                                    "tuningSelectedModelParams": shared_data.get("tuning_selected_model_params", shared_data.get("selected_model_params", {})),
+                                    "tuningSelectedWindowSource": shared_data.get("tuning_selected_window_source", shared_data.get("selected_window_source", "")),
                                     "fitPreview": shared_data.get("fit_preview", {"points": []}),
                                     "windowOverview": shared_data.get("window_overview", {"points": []}),
                                 },
@@ -688,7 +708,13 @@ async def run_multi_agent_collaboration(
                                     "selectionReason": shared_data.get("selection_reason", ""),
                                     "selectionInputs": shared_data.get("selection_inputs", {}),
                                     "experienceGuidance": shared_data.get("experience_guidance", {}),
-                                    "candidateStrategies": shared_data.get("candidate_strategies", []),
+                                    "candidateStrategies": shared_data.get("pid_candidate_results", shared_data.get("candidate_strategies", [])),
+                                    "tuningModelCandidates": shared_data.get("pid_tuning_model_candidates", []),
+                                    "tuningSelectedModelType": shared_data.get("tuning_selected_model_type", shared_data.get("model_type", "FOPDT")),
+                                    "tuningSelectedModelParams": shared_data.get("tuning_selected_model_params", shared_data.get("selected_model_params", {})),
+                                    "tuningSelectedWindowSource": shared_data.get("tuning_selected_window_source", shared_data.get("selected_window_source", "")),
+                                    "identificationBestModelType": shared_data.get("identification_best_model_type", shared_data.get("model_type", "FOPDT")),
+                                    "identificationBestWindowSource": shared_data.get("identification_best_window_source", shared_data.get("selected_window_source", "")),
                                     "description": effective_pid_params.get("description", shared_data.get("description", "")),
                                 },
                                 "knowledge": {
@@ -855,12 +881,16 @@ async def run_multi_agent_collaboration(
                 },
             },
             "model": {
-                "modelType": shared_data.get("model_type", "FOPDT"),
-                "selectedModelParams": shared_data.get("selected_model_params", {}),
+                "modelType": shared_data.get("identification_best_model_type", shared_data.get("model_type", "FOPDT")),
+                "selectedModelParams": shared_data.get("identification_best_model_params", shared_data.get("selected_model_params", {})),
                 "modelSelectionReason": shared_data.get("model_selection_reason", ""),
-                "K": shared_data.get("K", 0.0),
-                "T": shared_data.get("T", 0.0),
-                "L": shared_data.get("L", 0.0),
+                "K": (shared_data.get("identification_best_model_params", {}) or {}).get("K", shared_data.get("K", 0.0)),
+                "T": (shared_data.get("identification_best_model_params", {}) or {}).get(
+                    "T",
+                    ((shared_data.get("identification_best_model_params", {}) or {}).get("T1", 0.0) + (shared_data.get("identification_best_model_params", {}) or {}).get("T2", 0.0))
+                    or shared_data.get("T", 0.0),
+                ),
+                "L": (shared_data.get("identification_best_model_params", {}) or {}).get("L", shared_data.get("L", 0.0)),
                 "confidence": shared_data.get("confidence", 0.0),
                 "residue": shared_data.get("residue", 0.0),
                 "normalizedRmse": shared_data.get("normalized_rmse", shared_data.get("residue", 0.0)),
@@ -870,8 +900,12 @@ async def run_multi_agent_collaboration(
                 "confidenceRecommendation": shared_data.get("confidence_recommendation", ""),
                 "reasonCodes": shared_data.get("reason_codes", []),
                 "nextActions": shared_data.get("next_actions", []),
-                "selectedWindowSource": shared_data.get("selected_window_source", ""),
+                "selectedWindowSource": shared_data.get("identification_best_window_source", shared_data.get("selected_window_source", "")),
                 "attempts": shared_data.get("attempts", []),
+                "identificationCandidates": shared_data.get("model_identification_candidates", []),
+                "tuningSelectedModelType": shared_data.get("tuning_selected_model_type", shared_data.get("model_type", "FOPDT")),
+                "tuningSelectedModelParams": shared_data.get("tuning_selected_model_params", shared_data.get("selected_model_params", {})),
+                "tuningSelectedWindowSource": shared_data.get("tuning_selected_window_source", shared_data.get("selected_window_source", "")),
                 "fitPreview": shared_data.get("fit_preview", {"points": []}),
                 "windowOverview": shared_data.get("window_overview", {"points": []}),
             },
@@ -888,7 +922,13 @@ async def run_multi_agent_collaboration(
                 "selectionReason": shared_data.get("selection_reason", ""),
                 "selectionInputs": shared_data.get("selection_inputs", {}),
                 "experienceGuidance": shared_data.get("experience_guidance", {}),
-                "candidateStrategies": shared_data.get("candidate_strategies", []),
+                "candidateStrategies": shared_data.get("pid_candidate_results", shared_data.get("candidate_strategies", [])),
+                "tuningModelCandidates": shared_data.get("pid_tuning_model_candidates", []),
+                "tuningSelectedModelType": shared_data.get("tuning_selected_model_type", shared_data.get("model_type", "FOPDT")),
+                "tuningSelectedModelParams": shared_data.get("tuning_selected_model_params", shared_data.get("selected_model_params", {})),
+                "tuningSelectedWindowSource": shared_data.get("tuning_selected_window_source", shared_data.get("selected_window_source", "")),
+                "identificationBestModelType": shared_data.get("identification_best_model_type", shared_data.get("model_type", "FOPDT")),
+                "identificationBestWindowSource": shared_data.get("identification_best_window_source", shared_data.get("selected_window_source", "")),
                 "description": effective_pid_params.get("description", shared_data.get("description", "")),
             },
             "knowledge": {

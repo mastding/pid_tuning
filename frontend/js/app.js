@@ -2711,6 +2711,9 @@ createApp({
           const experienceGuidance = toolResult.experience_guidance || latestPid.experienceGuidance || {};
           const knowledgeGuidance = toolResult.expert_knowledge_guidance || this.latestTuningResultData?.knowledge?.guidance || {};
           const selectionInputs = toolResult.selection_inputs || {};
+          const tuningModelCandidates = Array.isArray(toolResult.tuning_model_candidates)
+            ? toolResult.tuning_model_candidates
+            : (Array.isArray(latestPid.tuningModelCandidates) ? latestPid.tuningModelCandidates : []);
           const knowledgeRules = Array.isArray(knowledgeGuidance?.matched_rules) ? knowledgeGuidance.matched_rules : [];
           const knowledgeConstraints = Array.isArray(knowledgeGuidance?.constraints) ? knowledgeGuidance.constraints : [];
           const strategyUsed = toolResult.strategy_used || toolResult.strategy || latestPid.strategyUsed || latestPid.strategy || '';
@@ -2726,8 +2729,22 @@ createApp({
             strategyUsed: this.strategyDisplayLabel(strategyUsed || 'AUTO'),
             selectionReason: toolResult.selection_reason || latestPid.selectionReason || latestPid.tuningSummary || '系统会结合辨识模型、经验 guidance 和知识约束综合选择整定策略。',
             tuningSummary: latestPid.tuningSummary || msg?.response || '',
-            modelType: this.modelTypeLabel(selectionInputs.model_type || latestModel.modelType || ''),
-            modelParamsSummary: this.summarizeModelParams(toolResult.selected_model_params || selectionInputs.selected_model_params || latestModel),
+            modelType: this.modelTypeLabel(toolResult.tuning_selected_model_type || latestPid.tuningSelectedModelType || selectionInputs.tuning_selected_model_type || selectionInputs.model_type || latestModel.tuningSelectedModelType || latestModel.modelType || ''),
+            modelParamsSummary: this.summarizeModelParams(toolResult.tuning_selected_model_params || latestPid.tuningSelectedModelParams || toolResult.selected_model_params || selectionInputs.selected_model_params || latestModel.tuningSelectedModelParams || latestModel),
+            identificationBestModelType: this.modelTypeLabel(toolResult.identification_best_model_type || latestPid.identificationBestModelType || selectionInputs.identification_best_model_type || latestModel.modelType || ''),
+            identificationBestWindowSource: toolResult.identification_best_window_source || latestPid.identificationBestWindowSource || selectionInputs.identification_best_window_source || latestModel.selectedWindowSource || '-',
+            tuningSelectedWindowSource: toolResult.tuning_selected_window_source || latestPid.tuningSelectedWindowSource || selectionInputs.tuning_selected_window_source || latestModel.tuningSelectedWindowSource || '-',
+            tuningModelCandidates: tuningModelCandidates.map((item, idx) => ({
+              rank: idx + 1,
+              modelType: this.modelTypeLabel(item?.model_type || ''),
+              windowSource: item?.window_source || '-',
+              fitScore: this.formatNumber(item?.identification_fit_score, 2),
+              performanceScore: this.formatNumber(item?.best_performance_score, 2),
+              finalRating: this.formatNumber(item?.best_final_rating, 2),
+              bestStrategy: this.strategyDisplayLabel(item?.best_strategy || ''),
+              isStable: item?.is_stable === true,
+              modelParamsSummary: this.summarizeModelParams(item?.selected_model_params || {})
+            })),
             experienceSummary: experienceGuidance?.guidance || experienceGuidance?.summary?.guidance || '',
             preferredStrategy: this.strategyDisplayLabel(experienceGuidance?.preferred_strategy || knowledgeGuidance?.preferred_strategy || ''),
             recommendedScaleText: (

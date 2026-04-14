@@ -49,6 +49,120 @@ def _sanitize_selected_model_params(model_type: str, value: Any) -> Dict[str, An
     return sanitize_selected_model_params(model_type or str(params.get("model_type", "")), params)
 
 
+def _derive_tuning_metrics(model_type: str, selected_model_params: Dict[str, Any], fallback: Mapping[str, Any] | None = None) -> Dict[str, float]:
+    fallback = fallback or {}
+    normalized_model_type = str(model_type or selected_model_params.get("model_type", fallback.get("model_type", "FOPDT"))).upper()
+    params = _sanitize_selected_model_params(normalized_model_type, selected_model_params) or dict(selected_model_params or {})
+
+    if normalized_model_type == "SOPDT":
+        active_k = _safe_float(params.get("K"), _safe_float(fallback.get("K")))
+        t1 = _safe_float(params.get("T1"), _safe_float(params.get("T"), _safe_float(fallback.get("T"), 1.0)))
+        t2 = _safe_float(params.get("T2"), _safe_float(params.get("T"), _safe_float(fallback.get("T"), 1.0)))
+        active_t = t1 + t2
+        if active_t <= 0:
+            active_t = _safe_float(fallback.get("T"), 1.0)
+        active_l = _safe_float(params.get("L"), _safe_float(fallback.get("L")))
+    elif normalized_model_type == "IPDT":
+        active_k = _safe_float(params.get("K"), _safe_float(fallback.get("K")))
+        active_l = _safe_float(params.get("L"), _safe_float(fallback.get("L"), 1.0))
+        active_t = max(_safe_float(fallback.get("T"), 1.0), active_l, 1e-3)
+    elif normalized_model_type == "FO":
+        active_k = _safe_float(params.get("K"), _safe_float(fallback.get("K")))
+        active_t = _safe_float(params.get("T"), _safe_float(fallback.get("T"), 1.0))
+        active_l = 0.0
+    else:
+        active_k = _safe_float(params.get("K"), _safe_float(fallback.get("K")))
+        active_t = _safe_float(params.get("T"), _safe_float(fallback.get("T"), 1.0))
+        active_l = _safe_float(params.get("L"), _safe_float(fallback.get("L")))
+
+    return {
+        "model_type": normalized_model_type,
+        "K": float(active_k),
+        "T": float(active_t),
+        "L": float(active_l),
+        "selected_model_params": _sanitize_selected_model_params(normalized_model_type, params) or params,
+    }
+
+
+def _build_experience_guidance(
+    *,
+    loop_type: str,
+    model_type: str,
+    selected_model_params: Dict[str, Any],
+    active_k: float,
+    active_t: float,
+    active_l: float,
+    knowledge_preferred_strategy: str,
+    knowledge_summary: str,
+) -> Dict[str, Any]:
+    if is_experience_distillation_enabled():
+        experience_guidance = retrieve_experience_guidance(
+            loop_type=loop_type,
+            model_type=model_type,
+            K=active_k,
+            T=active_t,
+            L=active_l,
+            selected_model_params=selected_model_params,
+            limit=3,
+            candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
+        )
+    else:
+        experience_guidance = {
+            "matches": [],
+            "summary": {"disabled": True},
+            "guidance": "",
+            "preferred_strategy": "",
+            "preferred_model_type": "",
+            "preferred_refine_pattern": "",
+            "recommended_kp_scale": 1.0,
+            "recommended_ki_scale": 1.0,
+            "recommended_kd_scale": 1.0,
+        }
+
+    if knowledge_preferred_strategy:
+        experience_guidance = {
+            **experience_guidance,
+            "preferred_strategy": knowledge_preferred_strategy,
+            "guidance": "；".join(
+                part
+                for part in [
+                    str(experience_guidance.get("guidance") or "").strip(),
+                    knowledge_summary,
+                ]
+                if part
+            ),
+            "summary": {
+                **dict(experience_guidance.get("summary") or {}),
+                "preferred_strategy": knowledge_preferred_strategy,
+                "preferred_model_type": model_type,
+            },
+        }
+    return experience_guidance
+
+
+def _is_better_tuning_selection(candidate: Dict[str, Any], best: Dict[str, Any] | None) -> bool:
+    if best is None:
+        return True
+
+    current_best = best.get("best_candidate") or {}
+    current = candidate.get("best_candidate") or {}
+    current_score = _safe_float(current.get("performance_score")) + _safe_float(current.get("experience_bonus"))
+    best_score = _safe_float(current_best.get("performance_score")) + _safe_float(current_best.get("experience_bonus"))
+    if current_score > best_score + 1e-9:
+        return True
+    if abs(current_score - best_score) <= 1e-9:
+        current_final = _safe_float(current.get("final_rating"))
+        best_final = _safe_float(current_best.get("final_rating"))
+        if current_final > best_final + 1e-9:
+            return True
+        if abs(current_final - best_final) <= 1e-9:
+            current_fit = _safe_float(candidate.get("identification_fit_score"))
+            best_fit = _safe_float(best.get("identification_fit_score"))
+            if current_fit > best_fit + 1e-9:
+                return True
+    return False
+
+
 def fetch_history_data_tool(
     *,
     session_store: Mapping[str, Any] | dict[str, Any],
@@ -215,6 +329,10 @@ def fit_fopdt_tool(
     session_store["model_confidence"] = best_confidence
     session_store["model_attempts"] = attempts
     session_store["model_identification_candidates"] = identification_candidates
+    session_store["identification_best_model_type"] = identification_best_model_type
+    session_store["identification_best_window_source"] = identification_best_window_source
+    session_store["identification_best_model_params"] = selected_model_params
+    session_store["identification_fit_score"] = float(identification.get("identification_fit_score", 0.0) or 0.0)
     session_store["model_reason_codes"] = reason_codes
     session_store["model_next_actions"] = next_actions
     session_store["model_selected_source"] = best_source
@@ -281,97 +399,167 @@ def tune_pid_tool(
         session_store.get("selected_model_params") or {},
     )
     tuning_model = dict(session_store.get("tuning_model") or {})
-    normalized_model_type = str(model_type).upper()
-    if normalized_model_type == "SOPDT":
-        active_K = _safe_float(selected_model_params.get("K"), _safe_float(K))
-        active_T = _safe_float(selected_model_params.get("T1"), 0.0) + _safe_float(selected_model_params.get("T2"), 0.0)
-        if active_T <= 0:
-            active_T = _safe_float(tuning_model.get("T"), _safe_float(T, 1.0))
-        active_L = _safe_float(selected_model_params.get("L"), _safe_float(L))
-    elif normalized_model_type == "IPDT":
-        active_K = _safe_float(selected_model_params.get("K"), _safe_float(K))
-        active_L = _safe_float(selected_model_params.get("L"), _safe_float(L, 1.0))
-        active_T = max(_safe_float(T, 1.0), active_L)
-    elif normalized_model_type == "FO":
-        active_K = _safe_float(selected_model_params.get("K"), _safe_float(K))
-        active_T = _safe_float(selected_model_params.get("T"), _safe_float(T, 1.0))
-        active_L = 0.0
-    else:
-        active_K = _safe_float(selected_model_params.get("K"), _safe_float(tuning_model.get("K"), _safe_float(K)))
-        active_T = _safe_float(selected_model_params.get("T"), _safe_float(tuning_model.get("T"), _safe_float(T, 1.0)))
-        active_L = _safe_float(selected_model_params.get("L"), _safe_float(tuning_model.get("L"), _safe_float(L)))
-
     knowledge_guidance_full = dict(session_store.get("expert_knowledge_guidance_full") or session_store.get("expert_knowledge_guidance") or {})
     knowledge_guidance = compact_knowledge_guidance(knowledge_guidance_full)
     knowledge_preferred_strategy = str(knowledge_guidance.get("preferred_strategy") or "").upper()
     knowledge_summary = str(knowledge_guidance.get("summary") or "").strip()
     knowledge_rule_count = int(knowledge_guidance.get("matched_count") or 0)
 
-    if is_experience_distillation_enabled():
-        experience_guidance = retrieve_experience_guidance(
-            loop_type=loop_type,
-            model_type=model_type,
-            K=active_K,
-            T=active_T,
-            L=active_L,
-            selected_model_params=selected_model_params,
-            limit=3,
-            candidate_strategies=["IMC", "LAMBDA", "ZN", "CHR"],
+    identification_candidates = list(session_store.get("model_identification_candidates") or [])
+    candidate_inputs: list[Dict[str, Any]] = []
+    for candidate in identification_candidates:
+        candidate_model_type = str(candidate.get("model_type", "") or "").upper()
+        candidate_model_params = _sanitize_selected_model_params(candidate_model_type, candidate.get("selected_model_params") or {})
+        if not candidate_model_type or not candidate_model_params:
+            continue
+        derived = _derive_tuning_metrics(candidate_model_type, candidate_model_params, fallback=tuning_model)
+        candidate_inputs.append(
+            {
+                "model_type": derived["model_type"],
+                "selected_model_params": derived["selected_model_params"],
+                "K": derived["K"],
+                "T": derived["T"],
+                "L": derived["L"],
+                "window_source": str(candidate.get("window_source", "")),
+                "identification_fit_score": _safe_float(candidate.get("identification_fit_score")),
+                "normalized_rmse": _safe_float(candidate.get("normalized_rmse")),
+                "r2_score": _safe_float(candidate.get("r2_score")),
+                "confidence": _safe_float(candidate.get("confidence"), confidence_score),
+            }
         )
-    else:
-        experience_guidance = {
-            "matches": [],
-            "summary": {"disabled": True},
-            "guidance": "",
-            "preferred_strategy": "",
-            "preferred_model_type": "",
-            "preferred_refine_pattern": "",
-            "recommended_kp_scale": 1.0,
-            "recommended_ki_scale": 1.0,
-            "recommended_kd_scale": 1.0,
-        }
-    if knowledge_preferred_strategy:
-        experience_guidance = {
-            **experience_guidance,
-            "preferred_strategy": knowledge_preferred_strategy,
-            "guidance": "；".join(
-                part
-                for part in [
-                    str(experience_guidance.get("guidance") or "").strip(),
-                    knowledge_summary,
-                ]
-                if part
-            ),
-            "summary": {
-                **dict(experience_guidance.get("summary") or {}),
-                "preferred_strategy": knowledge_preferred_strategy,
-                "preferred_model_type": model_type,
+
+    if not candidate_inputs:
+        derived = _derive_tuning_metrics(
+            model_type,
+            selected_model_params,
+            fallback={
+                "K": _safe_float(tuning_model.get("K"), _safe_float(K)),
+                "T": _safe_float(tuning_model.get("T"), _safe_float(T, 1.0)),
+                "L": _safe_float(tuning_model.get("L"), _safe_float(L)),
             },
+        )
+        candidate_inputs.append(
+            {
+                "model_type": derived["model_type"],
+                "selected_model_params": derived["selected_model_params"],
+                "K": derived["K"],
+                "T": derived["T"],
+                "L": derived["L"],
+                "window_source": str(session_store.get("model_selected_source", "")),
+                "identification_fit_score": _safe_float(session_store.get("identification_fit_score")),
+                "normalized_rmse": selected_model["normalized_rmse"],
+                "r2_score": selected_model["r2_score"],
+                "confidence": confidence_score,
+            }
+        )
+
+    tuning_model_candidates: list[Dict[str, Any]] = []
+    selected_tuning: Dict[str, Any] | None = None
+    for candidate_input in candidate_inputs[: min(len(candidate_inputs), 5)]:
+        experience_guidance = _build_experience_guidance(
+            loop_type=loop_type,
+            model_type=str(candidate_input["model_type"]),
+            selected_model_params=dict(candidate_input["selected_model_params"] or {}),
+            active_k=float(candidate_input["K"]),
+            active_t=float(candidate_input["T"]),
+            active_l=float(candidate_input["L"]),
+            knowledge_preferred_strategy=knowledge_preferred_strategy,
+            knowledge_summary=knowledge_summary,
+        )
+        selection = select_best_pid_strategy_fn(
+            K=float(candidate_input["K"]),
+            T=float(candidate_input["T"]),
+            L=float(candidate_input["L"]),
+            loop_type=loop_type,
+            model_type=str(candidate_input["model_type"]),
+            selected_model_params=dict(candidate_input["selected_model_params"] or {}),
+            confidence_score=float(candidate_input.get("confidence", confidence_score)),
+            normalized_rmse=float(candidate_input["normalized_rmse"]),
+            r2_score=float(candidate_input["r2_score"]),
+            dt=float(session_store.get("dt", 1.0)),
+            experience_guidance=experience_guidance,
+            knowledge_guidance=knowledge_guidance_full,
+        )
+        best_candidate = selection["best_candidate"]
+        candidate_summary = {
+            "model_type": str(candidate_input["model_type"]),
+            "selected_model_params": dict(candidate_input["selected_model_params"] or {}),
+            "K": float(candidate_input["K"]),
+            "T": float(candidate_input["T"]),
+            "L": float(candidate_input["L"]),
+            "window_source": str(candidate_input.get("window_source", "")),
+            "identification_fit_score": float(candidate_input.get("identification_fit_score", 0.0)),
+            "normalized_rmse": float(candidate_input["normalized_rmse"]),
+            "r2_score": float(candidate_input["r2_score"]),
+            "model_confidence": float(candidate_input.get("confidence", confidence_score)),
+            "best_strategy": str(best_candidate.get("strategy", "")),
+            "best_performance_score": _safe_float(best_candidate.get("performance_score")),
+            "best_final_rating": _safe_float(best_candidate.get("final_rating")),
+            "is_stable": bool(best_candidate.get("is_stable", False)),
+            "selection_reason": selection["selection_reason"],
+            "selection_inputs": dict(selection["selection_inputs"] or {}),
+            "experience_guidance": selection.get("experience_guidance", experience_guidance),
+            "candidate_strategies": list(selection["public_candidate_results"] or []),
+            "pid_params": {
+                "Kp": float(selection["pid_params"]["Kp"]),
+                "Ki": float(selection["pid_params"]["Ki"]),
+                "Kd": float(selection["pid_params"]["Kd"]),
+                "Ti": float(selection["pid_params"]["Ti"]),
+                "Td": float(selection["pid_params"]["Td"]),
+                "strategy": str(selection["pid_params"]["strategy"]),
+                "description": str(selection["pid_params"]["description"]),
+            },
+            "best_candidate": best_candidate,
         }
-    selection = select_best_pid_strategy_fn(
-        K=active_K,
-        T=active_T,
-        L=active_L,
-        loop_type=loop_type,
-        model_type=model_type,
-        selected_model_params=selected_model_params,
-        confidence_score=confidence_score,
-        normalized_rmse=selected_model["normalized_rmse"],
-        r2_score=selected_model["r2_score"],
-        dt=float(session_store.get("dt", 1.0)),
-        experience_guidance=experience_guidance,
-        knowledge_guidance=knowledge_guidance_full,
-    )
-    best_candidate = selection["best_candidate"]
-    pid_params = selection["pid_params"]
-    public_candidate_results = selection["public_candidate_results"]
+        tuning_model_candidates.append(candidate_summary)
+        if _is_better_tuning_selection(candidate_summary, selected_tuning):
+            selected_tuning = candidate_summary
+
+    if selected_tuning is None:
+        raise ValueError("Failed to compare identification candidates for PID tuning")
+
+    best_candidate = selected_tuning["best_candidate"]
+    pid_params = selected_tuning["pid_params"]
+    public_candidate_results = selected_tuning["candidate_strategies"]
+    experience_guidance = selected_tuning["experience_guidance"]
+    selected_model_params = dict(selected_tuning["selected_model_params"] or {})
+    model_type = str(selected_tuning["model_type"])
+    active_K = float(selected_tuning["K"])
+    active_T = float(selected_tuning["T"])
+    active_L = float(selected_tuning["L"])
 
     session_store["pid_params"] = pid_params
     session_store["pid_candidate_results"] = public_candidate_results
+    session_store["pid_tuning_model_candidates"] = [
+        {
+            "model_type": item["model_type"],
+            "selected_model_params": item["selected_model_params"],
+            "window_source": item["window_source"],
+            "identification_fit_score": item["identification_fit_score"],
+            "normalized_rmse": item["normalized_rmse"],
+            "r2_score": item["r2_score"],
+            "model_confidence": item["model_confidence"],
+            "best_strategy": item["best_strategy"],
+            "best_performance_score": item["best_performance_score"],
+            "best_final_rating": item["best_final_rating"],
+            "is_stable": item["is_stable"],
+            "pid_params": item["pid_params"],
+        }
+        for item in tuning_model_candidates
+    ]
+    session_store["tuning_selected_model_type"] = model_type
+    session_store["tuning_selected_model_params"] = selected_model_params
+    session_store["tuning_selected_window_source"] = str(selected_tuning.get("window_source", ""))
+    session_store["model_type"] = model_type
+    session_store["selected_model_params"] = selected_model_params
+    session_store["model_selected_source"] = str(selected_tuning.get("window_source", ""))
+    session_store["K"] = active_K
+    session_store["T"] = active_T
+    session_store["L"] = active_L
     session_store["strategy_used"] = best_candidate["strategy"]
-    session_store["selection_reason"] = selection["selection_reason"]
-    session_store["selection_inputs"] = selection["selection_inputs"]
-    session_store["experience_guidance"] = selection.get("experience_guidance", experience_guidance)
+    session_store["selection_reason"] = selected_tuning["selection_reason"]
+    session_store["selection_inputs"] = selected_tuning["selection_inputs"]
+    session_store["experience_guidance"] = experience_guidance
     session_store["expert_knowledge_guidance_full"] = knowledge_guidance_full
     session_store["expert_knowledge_guidance"] = knowledge_guidance
     selection_inputs = session_store["selection_inputs"]
@@ -381,6 +569,10 @@ def tune_pid_tool(
         selection_inputs["knowledge_summary"] = knowledge_summary
         selection_inputs["knowledge_risk_hints"] = list(knowledge_guidance.get("risk_hints") or [])
         selection_inputs["knowledge_constraints"] = list(knowledge_guidance.get("constraints") or [])
+        selection_inputs["tuning_selected_model_type"] = model_type
+        selection_inputs["tuning_selected_window_source"] = str(selected_tuning.get("window_source", ""))
+        selection_inputs["identification_best_model_type"] = str(session_store.get("identification_best_model_type", session_model_type))
+        selection_inputs["identification_best_window_source"] = str(session_store.get("identification_best_window_source", ""))
     session_store["selected_pid_params"] = {
         "Kp": float(pid_params["Kp"]),
         "Ki": float(pid_params["Ki"]),
@@ -409,6 +601,12 @@ def tune_pid_tool(
         "expert_knowledge_guidance": knowledge_guidance,
         "selected_model_params": selected_model_params,
         "candidate_strategies": public_candidate_results,
+        "tuning_model_candidates": session_store["pid_tuning_model_candidates"],
+        "tuning_selected_model_type": session_store["tuning_selected_model_type"],
+        "tuning_selected_model_params": session_store["tuning_selected_model_params"],
+        "tuning_selected_window_source": session_store["tuning_selected_window_source"],
+        "identification_best_model_type": str(session_store.get("identification_best_model_type", session_model_type)),
+        "identification_best_window_source": str(session_store.get("identification_best_window_source", "")),
         "description": str(pid_params["description"]),
     }
 

@@ -673,12 +673,16 @@ async def run_multi_agent_collaboration(
                 },
             },
             "model": {
-                "modelType": _shared_data_store.get("model_type", "FOPDT"),
-                "selectedModelParams": _shared_data_store.get("selected_model_params", {}),
+                "modelType": _shared_data_store.get("identification_best_model_type", _shared_data_store.get("model_type", "FOPDT")),
+                "selectedModelParams": _shared_data_store.get("identification_best_model_params", _shared_data_store.get("selected_model_params", {})),
                 "modelSelectionReason": _shared_data_store.get("model_selection_reason", ""),
-                "K": _shared_data_store.get("K", 0.0),
-                "T": _shared_data_store.get("T", 0.0),
-                "L": _shared_data_store.get("L", 0.0),
+                "K": (_shared_data_store.get("identification_best_model_params", {}) or {}).get("K", _shared_data_store.get("K", 0.0)),
+                "T": (_shared_data_store.get("identification_best_model_params", {}) or {}).get(
+                    "T",
+                    ((_shared_data_store.get("identification_best_model_params", {}) or {}).get("T1", 0.0) + (_shared_data_store.get("identification_best_model_params", {}) or {}).get("T2", 0.0))
+                    or _shared_data_store.get("T", 0.0),
+                ),
+                "L": (_shared_data_store.get("identification_best_model_params", {}) or {}).get("L", _shared_data_store.get("L", 0.0)),
                 "confidence": (_shared_data_store.get("model_confidence") or {}).get("confidence", 0.0),
                 "residue": _shared_data_store.get("residue", 0.0),
                 "normalizedRmse": _shared_data_store.get("normalized_rmse", _shared_data_store.get("residue", 0.0)),
@@ -688,8 +692,12 @@ async def run_multi_agent_collaboration(
                 "confidenceRecommendation": (_shared_data_store.get("model_confidence") or {}).get("recommendation", ""),
                 "reasonCodes": _shared_data_store.get("model_reason_codes", []),
                 "nextActions": _shared_data_store.get("model_next_actions", []),
-                "selectedWindowSource": _shared_data_store.get("model_selected_source", ""),
+                "selectedWindowSource": _shared_data_store.get("identification_best_window_source", _shared_data_store.get("model_selected_source", "")),
                 "attempts": _shared_data_store.get("model_attempts", []),
+                "identificationCandidates": _shared_data_store.get("model_identification_candidates", []),
+                "tuningSelectedModelType": _shared_data_store.get("tuning_selected_model_type", _shared_data_store.get("model_type", "FOPDT")),
+                "tuningSelectedModelParams": _shared_data_store.get("tuning_selected_model_params", _shared_data_store.get("selected_model_params", {})),
+                "tuningSelectedWindowSource": _shared_data_store.get("tuning_selected_window_source", _shared_data_store.get("model_selected_source", "")),
                 "fitPreview": _shared_data_store.get("fit_preview", {"points": []}),
                 "windowOverview": _shared_data_store.get("window_overview", {"points": []}),
             },
@@ -707,6 +715,12 @@ async def run_multi_agent_collaboration(
                 "selectionInputs": _shared_data_store.get("selection_inputs", {}),
                 "experienceGuidance": _shared_data_store.get("experience_guidance", {}),
                 "candidateStrategies": _shared_data_store.get("pid_candidate_results", []),
+                "tuningModelCandidates": _shared_data_store.get("pid_tuning_model_candidates", []),
+                "tuningSelectedModelType": _shared_data_store.get("tuning_selected_model_type", _shared_data_store.get("model_type", "FOPDT")),
+                "tuningSelectedModelParams": _shared_data_store.get("tuning_selected_model_params", _shared_data_store.get("selected_model_params", {})),
+                "tuningSelectedWindowSource": _shared_data_store.get("tuning_selected_window_source", _shared_data_store.get("model_selected_source", "")),
+                "identificationBestModelType": _shared_data_store.get("identification_best_model_type", _shared_data_store.get("model_type", "FOPDT")),
+                "identificationBestWindowSource": _shared_data_store.get("identification_best_window_source", _shared_data_store.get("model_selected_source", "")),
                 "description": effective_pid_params.get("description", ""),
             },
             "knowledge": {
@@ -842,34 +856,34 @@ async def run_multi_agent_collaboration(
             )
             if any(marker in lowered for marker in fallback_markers):
                 yield {
-                    "type": "thought",
-                    "agent": "系统",
-                    "content": "检测到 LLM 编排中断，自动切换为本地确定性整定流程继续执行。",
+                    "type": "error",
+                    "message": "LLM 编排中断，任务已终止。",
+                    "error_type": "llm_orchestration_interrupted",
+                    "error_code": "LLM_ORCHESTRATION_INTERRUPTED",
+                    "error_detail": detail or "上游模型调用在响应阶段被中断或超时。",
                 }
-                async for fallback_event in _fallback_without_llm():
-                    yield fallback_event
                 return
 
             yield event
             return
     except asyncio.CancelledError:
         yield {
-            "type": "thought",
-            "agent": "系统",
-            "content": "LLM 编排被取消，自动切换为本地确定性整定流程继续执行。",
+            "type": "error",
+            "message": "LLM 编排被取消，任务已终止。",
+            "error_type": "llm_orchestration_cancelled",
+            "error_code": "LLM_ORCHESTRATION_CANCELLED",
+            "error_detail": "上游模型调用或事件流在等待响应时被取消。",
         }
-        async for fallback_event in _fallback_without_llm():
-            yield fallback_event
         return
 
     if not orchestration_completed:
         yield {
-            "type": "thought",
-            "agent": "系统",
-            "content": "LLM 编排异常结束且未产出结果，自动切换为本地确定性整定流程继续执行。",
+            "type": "error",
+            "message": "LLM 编排异常结束且未产出结果，任务已终止。",
+            "error_type": "llm_orchestration_incomplete",
+            "error_code": "LLM_ORCHESTRATION_INCOMPLETE",
+            "error_detail": "事件流提前结束，未生成最终结果。",
         }
-        async for fallback_event in _fallback_without_llm():
-            yield fallback_event
         return
 
 
