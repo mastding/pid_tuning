@@ -122,8 +122,12 @@ def _build_display_result(result_data: Dict[str, Any], *, current_tool_name: str
             "passed": initial_assessment.get("passed", False),
             "pass_threshold": initial_assessment.get("pass_threshold", result_data.get("pass_threshold", 7.0)),
             "performance_score": initial_eval_result.get("performance_score", 0.0),
+            "acceptance_performance_score": result_data.get("acceptance_performance_score", initial_eval_result.get("performance_score", 0.0)),
             "method_confidence": initial_eval_result.get("method_confidence", 0.0),
             "final_rating": initial_eval_result.get("final_rating", 0.0),
+            "online_readiness_score": result_data.get("online_readiness_score", initial_eval_result.get("final_rating", 0.0)),
+            "robustness_score": result_data.get("robustness_score", 0.0),
+            "constraint_score": result_data.get("constraint_score", 0.0),
             "failure_reason": initial_assessment.get("failure_reason", ""),
             "feedback_target": initial_assessment.get("feedback_target", ""),
             "feedback_target_display": result_data.get("feedback_target_display", ""),
@@ -132,6 +136,10 @@ def _build_display_result(result_data: Dict[str, Any], *, current_tool_name: str
             "performance_details": result_data.get("performance_details", {}),
             "final_details": result_data.get("final_details", {}),
             "model_type": result_data.get("model_type", ""),
+            "evaluation_candidates": result_data.get("evaluation_candidates", []),
+            "evaluation_selected_candidate": result_data.get("evaluation_selected_candidate", {}),
+            "launch_recommendation": result_data.get("launch_recommendation", ""),
+            "scenario_evaluations": result_data.get("scenario_evaluations", {}),
         }
 
     display_result: Dict[str, Any] = {}
@@ -149,13 +157,14 @@ def _build_tuning_advice(final_result: Dict[str, Any]) -> Dict[str, Any]:
     model = final_result.get("model") or {}
 
     passed = bool(evaluation.get("passed", False))
-    final_rating = float(evaluation.get("final_rating", 0.0) or 0.0)
-    performance_score = float(evaluation.get("performance_score", 0.0) or 0.0)
+    final_rating = float(evaluation.get("online_readiness_score", evaluation.get("final_rating", 0.0)) or 0.0)
+    performance_score = float(evaluation.get("acceptance_performance_score", evaluation.get("performance_score", 0.0)) or 0.0)
     method_confidence = float(evaluation.get("method_confidence", 0.0) or 0.0)
     model_type = str(model.get("modelType", "FOPDT") or "FOPDT")
     strategy_used = str(pid_params.get("strategyUsed") or pid_params.get("strategy") or "")
     failure_reason = str(evaluation.get("failure_reason", "") or "")
     feedback_action = str(evaluation.get("feedback_action", "") or "")
+    launch_recommendation = str(evaluation.get("launch_recommendation", "") or "")
 
     if passed and final_rating >= 8.5:
         level = "recommended"
@@ -190,7 +199,10 @@ def _build_tuning_advice(final_result: Dict[str, Any]) -> Dict[str, Any]:
         "actions": actions,
         "risks": risks,
         "rollback_advice": "如投用后振荡、超调或稳态误差明显恶化，建议回退到原 PID 参数。",
-        "operator_note": f"当前性能评分 {performance_score:.2f}，综合评分 {final_rating:.2f}，建议结合现场工况审慎应用。",
+        "operator_note": (
+            f"当前验收性能评分 {performance_score:.2f}，上线就绪评分 {final_rating:.2f}，"
+            f"{launch_recommendation or '建议结合现场工况审慎应用。'}"
+        ),
     }
 
 
@@ -329,7 +341,7 @@ async def run_multi_agent_collaboration(
     await asyncio.sleep(0.3)
 
     cancel_token = CancellationToken()
-    shared_data: Dict[str, Any] = {}
+    shared_data = shared_data_store
     current_agent = ""
     current_turn_data = None
     last_agent = None
@@ -425,7 +437,9 @@ async def run_multi_agent_collaboration(
                     try:
                         result_data = _parse_tool_result(tool_result.content)
                         if isinstance(result_data, dict):
-                            shared_data.update(result_data)
+                            for key, value in result_data.items():
+                                if key not in shared_data:
+                                    shared_data[key] = value
 
                         current_tool_name = ""
                         if current_turn_data and current_turn_data["tools"]:
@@ -939,8 +953,12 @@ async def run_multi_agent_collaboration(
         if "final_rating" in shared_data:
             final_result["evaluation"] = {
                 "performance_score": shared_data.get("performance_score", 0.0),
+                "acceptance_performance_score": shared_data.get("acceptance_performance_score", shared_data.get("performance_score", 0.0)),
                 "method_confidence": shared_data.get("method_confidence", 0.0),
+                "robustness_score": shared_data.get("robustness_score", 0.0),
+                "constraint_score": shared_data.get("constraint_score", 0.0),
                 "final_rating": shared_data.get("final_rating", 0.0),
+                "online_readiness_score": shared_data.get("online_readiness_score", shared_data.get("final_rating", 0.0)),
                 "strategy_used": shared_data.get("strategy_used", ""),
                 "passed": shared_data.get("passed", False),
                 "pass_threshold": shared_data.get("pass_threshold", 7.0),
@@ -954,6 +972,10 @@ async def run_multi_agent_collaboration(
                 "performance_details": shared_data.get("performance_details", {}),
                 "final_details": shared_data.get("final_details", {}),
                 "replay_evaluation": shared_data.get("replay_evaluation", {}),
+                "scenario_evaluations": shared_data.get("scenario_evaluations", {}),
+                "evaluation_candidates": shared_data.get("evaluation_candidates", []),
+                "evaluation_selected_candidate": shared_data.get("evaluation_selected_candidate", {}),
+                "launch_recommendation": shared_data.get("launch_recommendation", ""),
             }
 
         final_result["tuningAdvice"] = _build_tuning_advice(final_result)

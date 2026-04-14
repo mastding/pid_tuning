@@ -163,6 +163,221 @@ def _is_better_tuning_selection(candidate: Dict[str, Any], best: Dict[str, Any] 
     return False
 
 
+def _simulation_saturation_pct(evaluation_result: Mapping[str, Any] | None) -> float:
+    simulation = dict((evaluation_result or {}).get("simulation") or {})
+    mv_history = simulation.get("mv_history") or []
+    if not mv_history:
+        return 0.0
+    saturated = 0
+    for value in mv_history:
+        mv = _safe_float(value)
+        if mv <= 0.5 or mv >= 99.5:
+            saturated += 1
+    return (saturated / float(len(mv_history))) * 100.0
+
+
+def _build_shortlist_candidate(candidate_summary: Dict[str, Any]) -> Dict[str, Any]:
+    best_candidate = dict(candidate_summary.get("best_candidate") or {})
+    evaluation_result = dict(best_candidate.get("evaluation_result") or {})
+    identification_fit_score = _safe_float(candidate_summary.get("identification_fit_score"))
+    performance_score = _safe_float(candidate_summary.get("best_performance_score"))
+    final_rating = _safe_float(candidate_summary.get("best_final_rating"))
+    is_stable = bool(candidate_summary.get("is_stable", False))
+    saturation_pct = _simulation_saturation_pct(evaluation_result)
+    oscillation_count = int(((evaluation_result.get("performance_details") or {}).get("oscillation_count", 0)) or 0)
+
+    reasons: list[str] = []
+    shortlist_passed = True
+
+    if identification_fit_score < 8.0:
+        shortlist_passed = False
+        reasons.append(f"辨识拟合评分 {identification_fit_score:.2f} 低于 8.0")
+    if performance_score < 7.0:
+        shortlist_passed = False
+        reasons.append(f"试算性能 {performance_score:.2f} 低于 7.0")
+    if final_rating < 7.0:
+        shortlist_passed = False
+        reasons.append(f"综合评分 {final_rating:.2f} 低于 7.0")
+    if not is_stable:
+        shortlist_passed = False
+        reasons.append("闭环试算未稳定")
+    if saturation_pct >= 35.0:
+        shortlist_passed = False
+        reasons.append(f"MV 饱和占比 {saturation_pct:.1f}% 过高")
+    if oscillation_count > 20:
+        shortlist_passed = False
+        reasons.append(f"振荡次数 {oscillation_count} 过多")
+
+    shortlist_score = round(
+        0.3 * identification_fit_score + 0.4 * performance_score + 0.3 * final_rating,
+        2,
+    )
+    if shortlist_passed and not reasons:
+        reasons.append("满足拟合、试算性能、综合评分与稳定性入围条件")
+
+    return {
+        "model_type": candidate_summary.get("model_type"),
+        "selected_model_params": dict(candidate_summary.get("selected_model_params") or {}),
+        "K": _safe_float(candidate_summary.get("K")),
+        "T": _safe_float(candidate_summary.get("T"), 1.0),
+        "L": _safe_float(candidate_summary.get("L")),
+        "window_source": str(candidate_summary.get("window_source", "")),
+        "identification_fit_score": identification_fit_score,
+        "normalized_rmse": _safe_float(candidate_summary.get("normalized_rmse")),
+        "r2_score": _safe_float(candidate_summary.get("r2_score")),
+        "model_confidence": _safe_float(candidate_summary.get("model_confidence")),
+        "best_strategy": str(candidate_summary.get("best_strategy", "")),
+        "best_performance_score": performance_score,
+        "best_final_rating": final_rating,
+        "is_stable": is_stable,
+        "pid_params": dict(candidate_summary.get("pid_params") or {}),
+        "shortlist_passed": shortlist_passed,
+        "shortlist_reasons": reasons,
+        "shortlist_score": shortlist_score,
+        "saturation_pct": round(saturation_pct, 3),
+        "evaluation_result": evaluation_result,
+    }
+
+
+def _summarize_step_events_for_llm(step_events: Any, *, limit: int = 6) -> list[Dict[str, Any]]:
+    summary: list[Dict[str, Any]] = []
+    for event in list(step_events or [])[:limit]:
+        if not isinstance(event, Mapping):
+            continue
+        summary.append(
+            {
+                "type": str(event.get("type", "")),
+                "amplitude": round(_safe_float(event.get("amplitude")), 4),
+                "start_idx": int(event.get("start_idx") or 0),
+                "end_idx": int(event.get("end_idx") or 0),
+            }
+        )
+    return summary
+
+
+def _summarize_candidate_windows_for_llm(candidate_windows: Any, *, limit: int = 8) -> list[Dict[str, Any]]:
+    summary: list[Dict[str, Any]] = []
+    for window in list(candidate_windows or [])[:limit]:
+        if not isinstance(window, Mapping):
+            continue
+        summary.append(
+            {
+                "window_source": str(window.get("window_source") or window.get("source") or ""),
+                "type": str(window.get("type") or ""),
+                "start_idx": int(window.get("start_idx") or 0),
+                "end_idx": int(window.get("end_idx") or 0),
+                "window_usable_for_id": bool(window.get("window_usable_for_id", False)),
+                "window_quality_score": round(_safe_float(window.get("window_quality_score")), 4),
+                "saturation_ratio": round(_safe_float(window.get("saturation_ratio")), 4),
+                "drift_ratio": round(_safe_float(window.get("drift_ratio")), 4),
+            }
+        )
+    return summary
+
+
+def _summarize_identification_candidates_for_llm(candidates: Any, *, limit: int = 8) -> list[Dict[str, Any]]:
+    summary: list[Dict[str, Any]] = []
+    for candidate in list(candidates or [])[:limit]:
+        if not isinstance(candidate, Mapping):
+            continue
+        model_type = str(candidate.get("model_type") or "").upper()
+        params = _sanitize_selected_model_params(model_type, candidate.get("selected_model_params") or {})
+        summary.append(
+            {
+                "window_source": str(candidate.get("window_source") or ""),
+                "model_type": model_type,
+                "selected_model_params": params,
+                "normalized_rmse": round(_safe_float(candidate.get("normalized_rmse")), 6),
+                "r2_score": round(_safe_float(candidate.get("r2_score")), 6),
+                "identification_fit_score": round(_safe_float(candidate.get("identification_fit_score")), 4),
+                "confidence": round(_safe_float(candidate.get("confidence")), 4),
+                "points": int(candidate.get("points") or 0),
+                "is_selected": bool(candidate.get("is_selected", False)),
+            }
+        )
+    return summary
+
+
+def _summarize_tuning_model_candidates_for_llm(candidates: Any, *, limit: int = 5) -> list[Dict[str, Any]]:
+    summary: list[Dict[str, Any]] = []
+    for candidate in list(candidates or [])[:limit]:
+        if not isinstance(candidate, Mapping):
+            continue
+        summary.append(
+            {
+                "model_type": str(candidate.get("model_type") or ""),
+                "window_source": str(candidate.get("window_source") or ""),
+                "best_strategy": str(candidate.get("best_strategy") or ""),
+                "identification_fit_score": round(_safe_float(candidate.get("identification_fit_score")), 4),
+                "best_performance_score": round(_safe_float(candidate.get("best_performance_score")), 4),
+                "best_final_rating": round(_safe_float(candidate.get("best_final_rating")), 4),
+                "is_stable": bool(candidate.get("is_stable", False)),
+                "pid_params": dict(candidate.get("pid_params") or {}),
+            }
+        )
+    return summary
+
+
+def _summarize_shortlist_candidates_for_llm(candidates: Any, *, limit: int = 5) -> list[Dict[str, Any]]:
+    summary: list[Dict[str, Any]] = []
+    for candidate in list(candidates or [])[:limit]:
+        if not isinstance(candidate, Mapping):
+            continue
+        summary.append(
+            {
+                "model_type": str(candidate.get("model_type") or ""),
+                "window_source": str(candidate.get("window_source") or ""),
+                "best_strategy": str(candidate.get("best_strategy") or ""),
+                "shortlist_passed": bool(candidate.get("shortlist_passed", False)),
+                "shortlist_score": round(_safe_float(candidate.get("shortlist_score")), 4),
+                "identification_fit_score": round(_safe_float(candidate.get("identification_fit_score")), 4),
+                "best_performance_score": round(_safe_float(candidate.get("best_performance_score")), 4),
+                "best_final_rating": round(_safe_float(candidate.get("best_final_rating")), 4),
+                "shortlist_reasons": list(candidate.get("shortlist_reasons") or []),
+                "pid_params": dict(candidate.get("pid_params") or {}),
+            }
+        )
+    return summary
+
+
+def _summarize_scenario_evaluations_for_llm(scenarios: Any) -> Dict[str, Any]:
+    summarized: Dict[str, Any] = {}
+    for name, payload in dict(scenarios or {}).items():
+        if not isinstance(payload, Mapping):
+            continue
+        summarized[str(name)] = {
+            "score": round(_safe_float(payload.get("score")), 4),
+            "passed": bool(payload.get("passed", False)),
+            "overshoot": round(_safe_float(payload.get("overshoot")), 4),
+            "settling_time": round(_safe_float(payload.get("settling_time")), 4),
+            "steady_state_error": round(_safe_float(payload.get("steady_state_error")), 4),
+            "constraint_penalty": round(_safe_float(payload.get("constraint_penalty")), 4),
+        }
+    return summarized
+
+
+def _summarize_evaluation_candidates_for_llm(candidates: Any, *, limit: int = 5) -> list[Dict[str, Any]]:
+    summary: list[Dict[str, Any]] = []
+    for candidate in list(candidates or [])[:limit]:
+        if not isinstance(candidate, Mapping):
+            continue
+        summary.append(
+            {
+                "rank": int(candidate.get("rank") or 0),
+                "model_type": str(candidate.get("model_type") or ""),
+                "window_source": str(candidate.get("window_source") or ""),
+                "strategy": str(candidate.get("strategy") or ""),
+                "acceptance_performance_score": round(_safe_float(candidate.get("acceptance_performance_score")), 4),
+                "robustness_score": round(_safe_float(candidate.get("robustness_score")), 4),
+                "constraint_score": round(_safe_float(candidate.get("constraint_score")), 4),
+                "online_readiness_score": round(_safe_float(candidate.get("online_readiness_score")), 4),
+                "passed": bool(candidate.get("passed", False)),
+                "is_selected": bool(candidate.get("is_selected", False)),
+            }
+        )
+    return summary
+
+
 def fetch_history_data_tool(
     *,
     session_store: Mapping[str, Any] | dict[str, Any],
@@ -250,8 +465,10 @@ def load_data_tool(
         "pv_range": prepared["pv_range"],
         "available_columns": prepared["available_columns"],
         "history_range": prepared.get("history_range") or {},
-        "step_events": prepared["step_events"],
-        "candidate_windows": prepared["candidate_windows"],
+        "step_events": _summarize_step_events_for_llm(prepared["step_events"]),
+        "step_event_count": len(prepared["step_events"] or []),
+        "candidate_windows": _summarize_candidate_windows_for_llm(prepared["candidate_windows"]),
+        "candidate_window_count": len(prepared["candidate_windows"] or []),
         "artifacts": artifact_payload,
         "status": prepared["status"],
         "instruction": "数据加载成功。已提取多个候选窗口并存入上下文，后续由辨识智能体(tool_fit_fopdt)做多窗口评估，无需你做单窗口选择。"
@@ -365,13 +582,25 @@ def fit_fopdt_tool(
         "next_actions": next_actions,
         "identification_best_model_type": identification_best_model_type,
         "identification_best_window_source": identification_best_window_source,
-        "identification_candidates": identification_candidates,
+        "identification_candidates": _summarize_identification_candidates_for_llm(identification_candidates),
+        "identification_candidate_count": len(identification_candidates or []),
         "selected_window_source": best_source,
         "selected_window": selected_window_payload or session_store.get("selected_window", {}),
-        "window_overview": session_store.get("window_overview", {"points": []}),
-        "attempts": attempts,
-        "fit_preview": fit_preview,
-        "window_benchmark": (best_benchmark or {}).get("best", {}),
+        "window_overview": {
+            "start_time": (session_store.get("window_overview") or {}).get("start_time", ""),
+            "end_time": (session_store.get("window_overview") or {}).get("end_time", ""),
+            "window_source": (session_store.get("window_overview") or {}).get("window_source", best_source),
+        },
+        "attempts": [],
+        "fit_preview": {
+            "model_type": selected_model_type,
+            "point_count": len((fit_preview or {}).get("points") or []),
+        },
+        "window_benchmark": {
+            "best_strategy": ((best_benchmark or {}).get("best") or {}).get("strategy", ""),
+            "performance_score": _safe_float(((best_benchmark or {}).get("best") or {}).get("performance_score")),
+            "final_rating": _safe_float(((best_benchmark or {}).get("best") or {}).get("final_rating")),
+        },
     }
 
 
@@ -544,9 +773,25 @@ def tune_pid_tool(
             "best_final_rating": item["best_final_rating"],
             "is_stable": item["is_stable"],
             "pid_params": item["pid_params"],
+            "evaluation_result": item["best_candidate"].get("evaluation_result", {}),
         }
         for item in tuning_model_candidates
     ]
+    shortlist_candidates = [
+        _build_shortlist_candidate(item)
+        for item in tuning_model_candidates
+    ]
+    shortlist_candidates = [item for item in shortlist_candidates if item.get("shortlist_passed")]
+    shortlist_candidates.sort(
+        key=lambda item: (
+            _safe_float(item.get("shortlist_score")),
+            _safe_float(item.get("best_final_rating")),
+            _safe_float(item.get("best_performance_score")),
+        ),
+        reverse=True,
+    )
+    shortlist_candidates = shortlist_candidates[:5]
+    session_store["pid_tuning_shortlist_candidates"] = shortlist_candidates
     session_store["tuning_selected_model_type"] = model_type
     session_store["tuning_selected_model_params"] = selected_model_params
     session_store["tuning_selected_window_source"] = str(selected_tuning.get("window_source", ""))
@@ -600,8 +845,9 @@ def tune_pid_tool(
         "experience_guidance": session_store.get("experience_guidance", {}),
         "expert_knowledge_guidance": knowledge_guidance,
         "selected_model_params": selected_model_params,
-        "candidate_strategies": public_candidate_results,
-        "tuning_model_candidates": session_store["pid_tuning_model_candidates"],
+        "candidate_strategies": public_candidate_results[:4],
+        "tuning_model_candidates": _summarize_tuning_model_candidates_for_llm(session_store["pid_tuning_model_candidates"]),
+        "tuning_shortlist_candidates": _summarize_shortlist_candidates_for_llm(session_store["pid_tuning_shortlist_candidates"]),
         "tuning_selected_model_type": session_store["tuning_selected_model_type"],
         "tuning_selected_model_params": session_store["tuning_selected_model_params"],
         "tuning_selected_window_source": session_store["tuning_selected_window_source"],
@@ -690,7 +936,9 @@ def evaluate_pid_tool(
     method: str,
     display_agent_names: Dict[str, str],
     evaluate_pid_model_fn: Callable[..., Dict[str, Any]],
+    evaluate_pid_acceptance_fn: Callable[..., Dict[str, Any]],
     diagnose_failure_fn: Callable[..., Dict[str, str]],
+    choose_best_evaluation_candidate_fn: Callable[[list[Dict[str, Any]]], Dict[str, Any]],
     build_initial_assessment_fn: Callable[..., Dict[str, Any]],
     refine_pid_for_performance_fn: Callable[..., Dict[str, Any]],
     choose_alternative_model_attempt_fn: Callable[..., Dict[str, Any]],
@@ -706,347 +954,228 @@ def evaluate_pid_tool(
         session_store.get("model_type", model_type),
         session_store.get("selected_model_params") or {},
     )
-    selected_pid_params = session_store.get("selected_pid_params") or {}
-    selected_pid_evaluation = session_store.get("selected_pid_evaluation")
-    auto_refine_result = None
-    model_retry_result = None
 
-    if selected_pid_params:
-        Kp = float(selected_pid_params.get("Kp", Kp))
-        Ki = float(selected_pid_params.get("Ki", Ki))
-        Kd = float(selected_pid_params.get("Kd", Kd))
-
-    if selected_pid_evaluation:
-        eval_result = selected_pid_evaluation
-    else:
-        if active_model_type == "SOPDT":
-            active_K = float(selected_model_params.get("K", K))
-            active_T = float(selected_model_params.get("T1", T)) + float(selected_model_params.get("T2", T))
-            active_L = float(selected_model_params.get("L", L))
-        elif active_model_type == "IPDT":
-            active_K = float(selected_model_params.get("K", K))
-            active_L = float(selected_model_params.get("L", L))
-            active_T = max(float(T or 0.0), active_L, 1e-3)
-        elif active_model_type == "FO":
-            active_K = float(selected_model_params.get("K", K))
-            active_T = float(selected_model_params.get("T", T))
-            active_L = 0.0
-        else:
-            active_K = float(selected_model_params.get("K", K))
-            active_T = float(selected_model_params.get("T", T))
-            active_L = float(selected_model_params.get("L", L))
-
-        eval_result = evaluate_pid_model_fn(
-            K=active_K,
-            T=active_T,
-            L=active_L,
-            Kp=float(Kp),
-            Ki=float(Ki),
-            Kd=float(Kd),
-            method=method,
-            method_confidence=method_confidence,
-            model_confidence=model_confidence,
-            dt=float(session_store.get("dt", 1.0)),
-            model_type=active_model_type,
-            selected_model_params=selected_model_params,
+    shortlist = [item for item in list(session_store.get("pid_tuning_shortlist_candidates") or []) if item.get("shortlist_passed", True)]
+    evaluation_inputs: list[Dict[str, Any]] = []
+    for item in shortlist:
+        pid_params = dict(item.get("pid_params") or {})
+        if not pid_params:
+            continue
+        evaluation_inputs.append(
+            {
+                "model_type": str(item.get("model_type", active_model_type)),
+                "selected_model_params": dict(item.get("selected_model_params") or {}),
+                "window_source": str(item.get("window_source", "")),
+                "identification_fit_score": _safe_float(item.get("identification_fit_score")),
+                "shortlist_score": _safe_float(item.get("shortlist_score")),
+                "r2_score": _safe_float(item.get("r2_score")),
+                "normalized_rmse": _safe_float(item.get("normalized_rmse")),
+                "model_confidence": _safe_float(item.get("model_confidence"), method_confidence),
+                "strategy": str(item.get("best_strategy") or pid_params.get("strategy") or method),
+                "K": _safe_float(item.get("K")),
+                "T": _safe_float(item.get("T"), 1.0),
+                "L": _safe_float(item.get("L")),
+                "pid_params": pid_params,
+            }
         )
 
-    base_eval_result = eval_result
-    session_store["evaluation_result"] = eval_result
+    if not evaluation_inputs:
+        selected_pid_params = dict(session_store.get("selected_pid_params") or {})
+        if selected_pid_params:
+            Kp = float(selected_pid_params.get("Kp", Kp))
+            Ki = float(selected_pid_params.get("Ki", Ki))
+            Kd = float(selected_pid_params.get("Kd", Kd))
+        derived = _derive_tuning_metrics(active_model_type, selected_model_params, {"K": K, "T": T, "L": L})
+        evaluation_inputs.append(
+            {
+                "model_type": derived["model_type"],
+                "selected_model_params": dict(derived["selected_model_params"] or {}),
+                "window_source": str(session_store.get("tuning_selected_window_source", session_store.get("selected_window_source", ""))),
+                "identification_fit_score": _safe_float(session_store.get("identification_fit_score")),
+                "shortlist_score": 0.0,
+                "r2_score": _safe_float(session_store.get("r2_score")),
+                "normalized_rmse": _safe_float(session_store.get("normalized_rmse"), _safe_float(session_store.get("residue"))),
+                "model_confidence": method_confidence,
+                "strategy": str(selected_pid_params.get("strategy") or session_store.get("strategy_used") or method),
+                "K": float(derived["K"]),
+                "T": float(derived["T"]),
+                "L": float(derived["L"]),
+                "pid_params": {
+                    "Kp": float(Kp),
+                    "Ki": float(Ki),
+                    "Kd": float(Kd),
+                    "Ti": _safe_float(selected_pid_params.get("Ti")),
+                    "Td": _safe_float(selected_pid_params.get("Td")),
+                    "strategy": str(selected_pid_params.get("strategy") or session_store.get("strategy_used") or method),
+                    "description": str(selected_pid_params.get("description") or ""),
+                },
+            }
+        )
+
+    dt_value = float(session_store.get("dt", 1.0))
+    loop_type_value = str(session_store.get("loop_type", "flow"))
+    evaluated_candidates: list[Dict[str, Any]] = []
+    for item in evaluation_inputs:
+        pid_params = item["pid_params"]
+        evaluation_result = evaluate_pid_acceptance_fn(
+            K=float(item["K"]),
+            T=float(item["T"]),
+            L=float(item["L"]),
+            Kp=_safe_float(pid_params.get("Kp")),
+            Ki=_safe_float(pid_params.get("Ki")),
+            Kd=_safe_float(pid_params.get("Kd")),
+            method=str(item.get("strategy") or method),
+            method_confidence=_safe_float(item.get("model_confidence"), method_confidence),
+            model_confidence=model_confidence,
+            dt=dt_value,
+            loop_type=loop_type_value,
+            model_type=str(item.get("model_type", active_model_type)),
+            selected_model_params=dict(item.get("selected_model_params") or {}),
+        )
+        evaluated_candidates.append({**item, "evaluation_result": evaluation_result, "passed": bool(evaluation_result.get("passed", False))})
+
+    selected_candidate = choose_best_evaluation_candidate_fn(evaluated_candidates)
+    if not selected_candidate:
+        raise ValueError("Failed to evaluate PID shortlist candidates")
+
+    eval_result = dict(selected_candidate.get("evaluation_result") or {})
+    active_model_type = str(selected_candidate.get("model_type", active_model_type))
+    selected_model_params = dict(selected_candidate.get("selected_model_params") or {})
+    K = float(selected_candidate.get("K", K))
+    T = float(selected_candidate.get("T", T))
+    L = float(selected_candidate.get("L", L))
+    selected_pid_params = dict(selected_candidate.get("pid_params") or {})
+    Kp = float(selected_pid_params.get("Kp", Kp))
+    Ki = float(selected_pid_params.get("Ki", Ki))
+    Kd = float(selected_pid_params.get("Kd", Kd))
     pass_threshold = 7.0
-    passed = bool(_safe_float(eval_result.get("final_rating")) >= pass_threshold)
+    passed = bool(eval_result.get("passed", False))
+
     diagnosis = diagnose_failure_fn(
         eval_result=eval_result,
-        model_r2=_safe_float(session_store.get("r2_score")),
-        model_rmse=_safe_float(session_store.get("normalized_rmse"), _safe_float(session_store.get("residue"))),
+        model_r2=_safe_float(selected_candidate.get("r2_score"), _safe_float(session_store.get("r2_score"))),
+        model_rmse=_safe_float(selected_candidate.get("normalized_rmse"), _safe_float(session_store.get("normalized_rmse"), _safe_float(session_store.get("residue")))),
         candidate_window_count=len(session_store.get("candidate_windows") or []),
-    ) if not passed else {
-        "failure_reason": "",
-        "feedback_target": "",
-        "feedback_action": "",
-    }
+    ) if not passed else {"failure_reason": "", "feedback_target": "", "feedback_action": ""}
     initial_assessment = build_initial_assessment_fn(
-        eval_result=base_eval_result,
+        eval_result=eval_result,
         pass_threshold=pass_threshold,
         diagnosis=diagnosis,
-        evaluated_pid={"Kp": float(Kp), "Ki": float(Ki), "Kd": float(Kd)},
+        evaluated_pid={"Kp": Kp, "Ki": Ki, "Kd": Kd},
     )
-    session_store["initial_assessment"] = initial_assessment
 
-    if not passed and diagnosis.get("feedback_target") == "pid_expert":
-        if active_model_type == "SOPDT":
-            refine_model_params = {
-                "model_type": "SOPDT",
-                "K": float(selected_model_params.get("K", K)),
-                "T1": float(selected_model_params.get("T1", T)),
-                "T2": float(selected_model_params.get("T2", T)),
-                "L": float(selected_model_params.get("L", L)),
+    ranked_candidates = sorted(
+        evaluated_candidates,
+        key=lambda item: (
+            _safe_float((item.get("evaluation_result") or {}).get("online_readiness_score", (item.get("evaluation_result") or {}).get("final_rating"))),
+            _safe_float((item.get("evaluation_result") or {}).get("acceptance_performance_score", (item.get("evaluation_result") or {}).get("performance_score"))),
+            _safe_float((item.get("evaluation_result") or {}).get("robustness_score")),
+            _safe_float((item.get("evaluation_result") or {}).get("constraint_score")),
+        ),
+        reverse=True,
+    )
+    evaluation_candidates = []
+    for idx, item in enumerate(ranked_candidates, start=1):
+        candidate_eval = item.get("evaluation_result") or {}
+        evaluation_candidates.append(
+            {
+                "rank": idx,
+                "model_type": item.get("model_type"),
+                "selected_model_params": item.get("selected_model_params"),
+                "window_source": item.get("window_source"),
+                "strategy": item.get("strategy"),
+                "pid_params": item.get("pid_params"),
+                "identification_fit_score": item.get("identification_fit_score"),
+                "shortlist_score": item.get("shortlist_score"),
+                "acceptance_performance_score": _safe_float(candidate_eval.get("acceptance_performance_score", candidate_eval.get("performance_score"))),
+                "robustness_score": _safe_float(candidate_eval.get("robustness_score")),
+                "constraint_score": _safe_float(candidate_eval.get("constraint_score")),
+                "online_readiness_score": _safe_float(candidate_eval.get("online_readiness_score", candidate_eval.get("final_rating"))),
+                "passed": bool(candidate_eval.get("passed", False)),
+                "is_selected": item is selected_candidate,
             }
-        elif active_model_type == "IPDT":
-            refine_model_params = {
-                "model_type": "IPDT",
-                "K": float(selected_model_params.get("K", K)),
-                "L": max(float(selected_model_params.get("L", L)), 1e-3),
-            }
-        elif active_model_type == "FO":
-            refine_model_params = {
-                "model_type": "FO",
-                "K": float(selected_model_params.get("K", K)),
-                "T1": float(selected_model_params.get("T", T)),
-                "T2": 0.0,
-                "L": 0.0,
-            }
-        else:
-            refine_model_params = {"model_type": "FOPDT", "K": float(K), "T1": float(T), "T2": 0.0, "L": float(L)}
-
-        refined = refine_pid_for_performance_fn(
-            model_params=refine_model_params,
-            base_pid_params={"Kp": float(Kp), "Ki": float(Ki), "Kd": float(Kd)},
-            method_confidence=method_confidence,
-            dt=float(session_store.get("dt", 1.0)),
-            base_strategy=str(session_store.get("strategy_used", method or "auto")),
         )
-        best_refined = refined.get("best") or {}
-        if best_refined:
-            improved = float(best_refined.get("final_rating", 0.0)) > float(eval_result.get("final_rating", 0.0)) + 1e-9
-            if improved:
-                Kp = float(best_refined["Kp"])
-                Ki = float(best_refined["Ki"])
-                Kd = float(best_refined["Kd"])
-                eval_result = best_refined["evaluation_result"]
-                session_store["selected_pid_params"] = {
-                    **(session_store.get("selected_pid_params") or {}),
-                    "Kp": Kp,
-                    "Ki": Ki,
-                    "Kd": Kd,
-                    "strategy": str(session_store.get("strategy_used", method or "auto")),
-                    "description": "Auto refined after evaluation feedback",
-                }
-                session_store["selected_pid_evaluation"] = eval_result
-                session_store["evaluation_result"] = eval_result
-                auto_refine_result = {
-                    "applied": True,
-                    "base_final_rating": float(base_eval_result.get("final_rating", 0.0)),
-                    "refined_final_rating": float(eval_result.get("final_rating", 0.0)),
-                    "refined_performance_score": float(eval_result.get("performance_score", 0.0)),
-                    "Kp": Kp,
-                    "Ki": Ki,
-                    "Kd": Kd,
-                }
-                passed = bool(_safe_float(eval_result.get("final_rating")) >= pass_threshold)
-                diagnosis = diagnose_failure_fn(
-                    eval_result=eval_result,
-                    model_r2=_safe_float(session_store.get("r2_score")),
-                    model_rmse=_safe_float(session_store.get("normalized_rmse"), _safe_float(session_store.get("residue"))),
-                    candidate_window_count=len(session_store.get("candidate_windows") or []),
-                ) if not passed else {
-                    "failure_reason": "",
-                    "feedback_target": "",
-                    "feedback_action": "",
-                }
-            else:
-                auto_refine_result = {
-                    "applied": False,
-                    "base_final_rating": float(base_eval_result.get("final_rating", 0.0)),
-                    "refined_final_rating": float(best_refined.get("final_rating", 0.0)),
-                    "refined_performance_score": float(best_refined.get("performance_score", 0.0)),
-                }
 
-    if not passed:
-        alternative_model = choose_alternative_model_attempt_fn(
-            attempts=session_store.get("model_attempts") or [],
-            current_source=str(session_store.get("model_selected_source", "")),
-            candidate_map={candidate["name"]: candidate for candidate in extract_candidate_windows_fn()},
-            loop_type=str(session_store.get("loop_type", "flow")),
-            dt=float(session_store.get("dt", 1.0)),
-            pass_threshold=pass_threshold,
-            benchmark_fn=benchmark_fn,
-            refine_fn=refine_pid_for_performance_fn,
-        )
-        if alternative_model:
-            alternative_eval = alternative_model["evaluation_result"]
-            if float(alternative_eval.get("final_rating", 0.0)) > float(eval_result.get("final_rating", 0.0)) + 1e-9:
-                K = float(alternative_model["K"])
-                T = float(alternative_model["T"])
-                L = float(alternative_model["L"])
-                Kp = float(alternative_model["Kp"])
-                Ki = float(alternative_model["Ki"])
-                Kd = float(alternative_model["Kd"])
-                eval_result = alternative_eval
-                passed = bool(_safe_float(eval_result.get("final_rating")) >= pass_threshold)
-                diagnosis = diagnose_failure_fn(
-                    eval_result=eval_result,
-                    model_r2=_safe_float(session_store.get("r2_score")),
-                    model_rmse=_safe_float(session_store.get("normalized_rmse"), _safe_float(session_store.get("residue"))),
-                    candidate_window_count=len(session_store.get("candidate_windows") or []),
-                ) if not passed else {
-                    "failure_reason": "",
-                    "feedback_target": "",
-                    "feedback_action": "",
-                }
-                session_store["K"] = K
-                session_store["T"] = T
-                session_store["L"] = L
-                session_store["strategy_used"] = str(alternative_model.get("strategy", session_store.get("strategy_used", "")))
-                session_store["model_selected_source"] = str(alternative_model.get("window_source", session_store.get("model_selected_source", "")))
-                session_store["selected_pid_params"] = {
-                    **(session_store.get("selected_pid_params") or {}),
-                    "Kp": Kp,
-                    "Ki": Ki,
-                    "Kd": Kd,
-                    "strategy": str(alternative_model.get("strategy", "")),
-                    "description": "Switched to alternative identification window",
-                }
-                session_store["selected_pid_evaluation"] = eval_result
-                model_retry_result = {
-                    "applied": True,
-                    "window_source": str(alternative_model.get("window_source", "")),
-                    "strategy": str(alternative_model.get("strategy", "")),
-                    "final_rating": float(eval_result.get("final_rating", 0.0)),
-                    "performance_score": float(eval_result.get("performance_score", 0.0)),
-                    "K": K,
-                    "T": T,
-                    "L": L,
-                    "Kp": Kp,
-                    "Ki": Ki,
-                    "Kd": Kd,
-                }
+    selected_summary = {
+        "model_type": active_model_type,
+        "selected_model_params": selected_model_params,
+        "window_source": str(selected_candidate.get("window_source", "")),
+        "strategy": str(selected_candidate.get("strategy", method)),
+        "pid_params": selected_pid_params,
+        "identification_fit_score": _safe_float(selected_candidate.get("identification_fit_score")),
+        "shortlist_score": _safe_float(selected_candidate.get("shortlist_score")),
+        "acceptance_performance_score": _safe_float(eval_result.get("acceptance_performance_score", eval_result.get("performance_score"))),
+        "robustness_score": _safe_float(eval_result.get("robustness_score")),
+        "constraint_score": _safe_float(eval_result.get("constraint_score")),
+        "online_readiness_score": _safe_float(eval_result.get("online_readiness_score", eval_result.get("final_rating"))),
+        "passed": passed,
+    }
 
-    replay_evaluation: Dict[str, Any] | None = None
-    try:
-        sp_series: list[float] = []
-        pv_initial: float | None = None
-        mv_initial: float | None = None
-        replay_source = ""
-        window_df = session_store.get("window_df")
-        if window_df is not None and hasattr(window_df, "columns") and "SV" in getattr(window_df, "columns", []):
-            sp_series = [float(x) for x in window_df["SV"].tolist()]
-            replay_source = "window_df"
-            if "PV" in window_df.columns:
-                try:
-                    pv_initial = float(window_df["PV"].iloc[0])
-                except Exception:
-                    pv_initial = None
-            if "MV" in window_df.columns:
-                try:
-                    mv_initial = float(window_df["MV"].iloc[0])
-                except Exception:
-                    mv_initial = None
-
-        if not sp_series:
-            overview = session_store.get("window_overview") or {}
-            points = overview.get("points") or []
-            sp_series = [float(p.get("sv")) for p in points if p.get("sv") is not None]
-            replay_source = "window_overview" if sp_series else ""
-            if points:
-                first = points[0] or {}
-                pv_value = first.get("pv")
-                mv_value = first.get("mv")
-                pv_initial = float(pv_value) if pv_value is not None else pv_initial
-                mv_initial = float(mv_value) if mv_value is not None else mv_initial
-
-        if sp_series:
-            sp_align_offset = 0.0
-            try:
-                sp0 = float(sp_series[0])
-                sp_min = float(min(sp_series))
-                sp_max = float(max(sp_series))
-                sp_range = sp_max - sp_min
-                if pv_initial is not None:
-                    candidate_offset = float(pv_initial) - sp0
-                    if abs(candidate_offset) > max(3.0 * max(sp_range, 1e-6), 1.0):
-                        sp_series = [float(value) + float(candidate_offset) for value in sp_series]
-                        sp_align_offset = float(candidate_offset)
-            except Exception:
-                sp_align_offset = 0.0
-
-            if active_model_type == "SOPDT":
-                replay_model_params = {
-                    "model_type": "SOPDT",
-                    "K": float(selected_model_params.get("K", K)),
-                    "T1": float(selected_model_params.get("T1", T)),
-                    "T2": float(selected_model_params.get("T2", 0.0)),
-                    "L": float(selected_model_params.get("L", L)),
-                }
-            elif active_model_type == "IPDT":
-                replay_model_params = {
-                    "model_type": "IPDT",
-                    "K": float(selected_model_params.get("K", K)),
-                    "T1": 1.0,
-                    "T2": 0.0,
-                    "L": max(float(selected_model_params.get("L", L)), 1e-3),
-                }
-            elif active_model_type == "FO":
-                replay_model_params = {
-                    "model_type": "FO",
-                    "K": float(selected_model_params.get("K", K)),
-                    "T1": float(selected_model_params.get("T", T)),
-                    "T2": 0.0,
-                    "L": 0.0,
-                }
-            else:
-                replay_model_params = {
-                    "model_type": "FOPDT",
-                    "K": float(selected_model_params.get("K", K)),
-                    "T1": float(selected_model_params.get("T", T)),
-                    "T2": 0.0,
-                    "L": float(selected_model_params.get("L", L)),
-                }
-
-            from skills.rating import ModelRating
-
-            replay_evaluation = ModelRating.evaluate_replay(
-                model_params=replay_model_params,
-                pid_params={"Kp": float(Kp), "Ki": float(Ki), "Kd": float(Kd)},
-                sp_series=sp_series,
-                pv_initial=pv_initial,
-                mv_initial=mv_initial,
-                dt=float(session_store.get("dt", 1.0)),
-                loop_type=str(session_store.get("loop_type", "flow")),
-            )
-            replay_evaluation["source"] = replay_source
-            replay_evaluation["sp_align_offset"] = sp_align_offset
-    except Exception:
-        replay_evaluation = None
-
+    session_store["evaluation_candidates"] = evaluation_candidates
+    session_store["evaluation_selected_candidate"] = selected_summary
+    session_store["evaluation_result"] = eval_result
     session_store["evaluation_pass_threshold"] = pass_threshold
     session_store["evaluation_feedback"] = diagnosis
     session_store["initial_assessment"] = initial_assessment
-    session_store["auto_refine_result"] = auto_refine_result or {}
-    session_store["model_retry_result"] = model_retry_result or {}
-    session_store["performance_score"] = float(eval_result["performance_score"])
-    session_store["method_confidence"] = float(eval_result["method_confidence"])
-    session_store["final_rating"] = float(eval_result["final_rating"])
+    session_store["auto_refine_result"] = {}
+    session_store["model_retry_result"] = {}
+    session_store["performance_score"] = float(eval_result.get("acceptance_performance_score", eval_result.get("performance_score", 0.0)))
+    session_store["acceptance_performance_score"] = float(eval_result.get("acceptance_performance_score", eval_result.get("performance_score", 0.0)))
+    session_store["method_confidence"] = float(eval_result.get("method_confidence", 0.0))
+    session_store["robustness_score"] = float(eval_result.get("robustness_score", 0.0))
+    session_store["constraint_score"] = float(eval_result.get("constraint_score", 0.0))
+    session_store["final_rating"] = float(eval_result.get("online_readiness_score", eval_result.get("final_rating", 0.0)))
+    session_store["online_readiness_score"] = float(eval_result.get("online_readiness_score", eval_result.get("final_rating", 0.0)))
     session_store["passed"] = passed
     session_store["pass_threshold"] = pass_threshold
     session_store["failure_reason"] = diagnosis["failure_reason"]
     session_store["feedback_target"] = diagnosis["feedback_target"]
     session_store["feedback_target_display"] = display_agent_names.get(diagnosis["feedback_target"], diagnosis["feedback_target"])
     session_store["feedback_action"] = diagnosis["feedback_action"]
-    session_store["performance_details"] = eval_result["performance_details"]
-    session_store["final_details"] = eval_result["final_details"]
-    session_store["simulation"] = eval_result["simulation"]
-    if replay_evaluation:
-        session_store["replay_evaluation"] = replay_evaluation
+    session_store["performance_details"] = eval_result.get("performance_details", {})
+    session_store["final_details"] = eval_result.get("final_details", {})
+    session_store["simulation"] = eval_result.get("simulation", {})
+    session_store["replay_evaluation"] = (eval_result.get("scenario_evaluations") or {}).get("disturbance_rejection", {})
+    session_store["scenario_evaluations"] = eval_result.get("scenario_evaluations", {})
+    session_store["launch_recommendation"] = eval_result.get("launch_recommendation", "")
+    session_store["strategy_used"] = str(selected_candidate.get("strategy", method))
+    session_store["tuning_selected_model_type"] = active_model_type
+    session_store["tuning_selected_model_params"] = selected_model_params
+    session_store["tuning_selected_window_source"] = str(selected_candidate.get("window_source", ""))
+    session_store["selected_pid_params"] = {**selected_pid_params, "Kp": Kp, "Ki": Ki, "Kd": Kd, "strategy": str(selected_candidate.get("strategy", method))}
+    session_store["selected_pid_evaluation"] = eval_result
+    session_store["model_type"] = active_model_type
+    session_store["selected_model_params"] = selected_model_params
+    session_store["K"] = K
+    session_store["T"] = T
+    session_store["L"] = L
 
     return {
         "model_type": active_model_type,
         "selected_model_params": selected_model_params,
-        "performance_score": float(eval_result["performance_score"]),
-        "method_confidence": float(eval_result["method_confidence"]),
-        "final_rating": float(eval_result["final_rating"]),
+        "performance_score": float(eval_result.get("acceptance_performance_score", eval_result.get("performance_score", 0.0))),
+        "acceptance_performance_score": float(eval_result.get("acceptance_performance_score", eval_result.get("performance_score", 0.0))),
+        "method_confidence": float(eval_result.get("method_confidence", 0.0)),
+        "robustness_score": float(eval_result.get("robustness_score", 0.0)),
+        "constraint_score": float(eval_result.get("constraint_score", 0.0)),
+        "final_rating": float(eval_result.get("online_readiness_score", eval_result.get("final_rating", 0.0))),
+        "online_readiness_score": float(eval_result.get("online_readiness_score", eval_result.get("final_rating", 0.0))),
         "passed": passed,
         "pass_threshold": pass_threshold,
-        "performance_details": eval_result["performance_details"],
-        "final_details": eval_result["final_details"],
+        "performance_details": eval_result.get("performance_details", {}),
+        "final_details": eval_result.get("final_details", {}),
         "failure_reason": diagnosis["failure_reason"],
         "feedback_target": diagnosis["feedback_target"],
         "feedback_target_display": display_agent_names.get(diagnosis["feedback_target"], diagnosis["feedback_target"]),
         "feedback_action": diagnosis["feedback_action"],
         "initial_assessment": initial_assessment,
-        "auto_refine_result": auto_refine_result or {},
-        "model_retry_result": model_retry_result or {},
-        "simulation": eval_result["simulation"],
-        "replay_evaluation": replay_evaluation or {},
+        "auto_refine_result": {},
+        "model_retry_result": {},
+        "simulation": {},
+        "replay_evaluation": {},
+        "scenario_evaluations": _summarize_scenario_evaluations_for_llm(eval_result.get("scenario_evaluations", {})),
+        "evaluation_candidates": _summarize_evaluation_candidates_for_llm(evaluation_candidates),
+        "evaluation_selected_candidate": selected_summary,
+        "launch_recommendation": eval_result.get("launch_recommendation", ""),
         "evaluated_pid": {"Kp": float(Kp), "Ki": float(Ki), "Kd": float(Kd)},
     }

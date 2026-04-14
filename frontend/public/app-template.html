@@ -182,6 +182,7 @@
                   </div>
                   <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
                     <div class="rounded-lg bg-slate-50 px-3 py-2"><div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">模型类型</div><div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.modelType }}</div></div>
+                    <div class="rounded-lg bg-slate-50 px-3 py-2 md:col-span-2 xl:col-span-2"><div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">模型参数</div><div class="mt-1 text-sm font-medium text-slate-800 break-all">{{ attempt.modelParamsSummary }}</div></div>
                     <div class="rounded-lg bg-slate-50 px-3 py-2"><div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">窗口点数</div><div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.points }}</div></div>
                     <div class="rounded-lg bg-slate-50 px-3 py-2"><div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">标准化RMSE</div><div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.normalizedRmse }}</div></div>
                     <div class="rounded-lg bg-slate-50 px-3 py-2"><div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">R²</div><div class="mt-1 text-sm font-medium text-slate-800">{{ attempt.r2 }}</div></div>
@@ -263,7 +264,7 @@
         <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
           <div>
             <h2 class="text-xl font-bold text-slate-900">评估详情</h2>
-            <p class="mt-1 text-sm text-slate-500">展示评估智能体给出的性能分、综合分、阈值判断以及未通过原因。</p>
+            <p class="mt-1 text-sm text-slate-500">展示评估冠军方案、验收评分、多场景结果和上线建议。</p>
           </div>
           <button @click="closeEvaluationExplain" class="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all">关闭</button>
         </div>
@@ -271,22 +272,46 @@
           <div v-if="selectedEvaluationExplain" class="space-y-5">
             <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
               <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-amber-800"><span>📈</span><span>评估结论</span></div>
-              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">性能评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.performanceScore }}/100</div></div>
-                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">综合评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.finalRating }}/100</div></div>
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">验收性能评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.performanceScore }}/100</div></div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">上线就绪评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.finalRating }}/100</div></div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">鲁棒性评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.robustnessScore }}/100</div></div>
+                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">约束友好性</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.constraintScore }}/100</div></div>
                 <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">方法置信度</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.methodConfidence }}</div></div>
-                <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">通过阈值</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.passThreshold }}</div></div>
               </div>
               <div class="mt-3 rounded-xl border border-amber-100 bg-white px-4 py-3">
                 <div class="text-xs font-semibold text-slate-500">结论</div>
                 <div class="mt-1 text-sm font-semibold" :class="selectedEvaluationExplain.passed ? 'text-emerald-700' : 'text-red-700'">{{ selectedEvaluationExplain.passed ? '评估通过' : '评估未通过' }}</div>
+                <div class="mt-2 text-sm leading-relaxed text-slate-700">冠军方案：{{ selectedEvaluationExplain.selectedCandidate.modelType || '-' }} / {{ selectedEvaluationExplain.selectedCandidate.strategy || '-' }} / {{ selectedEvaluationExplain.selectedCandidate.windowSource || '-' }}</div>
+                <div class="mt-1 text-sm leading-relaxed text-slate-700">参数摘要：{{ selectedEvaluationExplain.selectedCandidate.modelParamsSummary || '-' }}</div>
+                <div v-if="selectedEvaluationExplain.launchRecommendation" class="mt-1 text-sm leading-relaxed text-slate-700">上线建议：{{ selectedEvaluationExplain.launchRecommendation }}</div>
                 <div class="mt-2 text-sm leading-relaxed text-slate-700">主因：{{ selectedEvaluationExplain.failureReason }}</div>
                 <div class="mt-2 text-sm leading-relaxed text-slate-700">回流目标：{{ selectedEvaluationExplain.feedbackTarget }}</div>
                 <div v-if="selectedEvaluationExplain.feedbackAction" class="mt-1 text-sm leading-relaxed text-slate-700">建议动作：{{ selectedEvaluationExplain.feedbackAction }}</div>
               </div>
             </div>
+            <div v-if="selectedEvaluationExplain.evaluationCandidates.length" class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span>🏁</span><span>入围方案与冠军</span></div>
+              <div class="space-y-3">
+                <div v-for="candidate in selectedEvaluationExplain.evaluationCandidates" :key="`${candidate.rank}-${candidate.windowSource}-${candidate.modelType}`" class="rounded-xl border px-4 py-3 shadow-sm" :class="candidate.isSelected ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'">
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <div class="text-sm font-semibold text-slate-900">#{{ candidate.rank }} {{ candidate.modelType }} · {{ candidate.windowSource }}</div>
+                      <div class="mt-1 text-xs text-slate-500">策略 {{ candidate.strategy }} · {{ candidate.modelParamsSummary }}</div>
+                    </div>
+                    <span v-if="candidate.isSelected" class="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">冠军方案</span>
+                  </div>
+                  <div class="mt-3 grid gap-3 md:grid-cols-4">
+                    <div><div class="text-xs text-slate-500">验收性能</div><div class="mt-1 font-mono text-slate-800">{{ candidate.acceptancePerformanceScore }}</div></div>
+                    <div><div class="text-xs text-slate-500">鲁棒性</div><div class="mt-1 font-mono text-slate-800">{{ candidate.robustnessScore }}</div></div>
+                    <div><div class="text-xs text-slate-500">约束友好性</div><div class="mt-1 font-mono text-slate-800">{{ candidate.constraintScore }}</div></div>
+                    <div><div class="text-xs text-slate-500">上线就绪</div><div class="mt-1 font-mono text-slate-800">{{ candidate.onlineReadinessScore }}</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
             <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span>🧪</span><span>性能指标拆解</span></div>
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span>🧪</span><span>验收指标拆解</span></div>
               <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                 <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">超调</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.overshoot }}</div></div>
                 <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">调节时间</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.settlingTime }}</div></div>
@@ -294,19 +319,22 @@
                 <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">振荡次数</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.oscillationCount }}</div></div>
                 <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">置信度折算分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedEvaluationExplain.confidenceAsScore }}</div></div>
               </div>
-              <div v-if="selectedEvaluationExplain.initialPid" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                <div class="text-xs font-semibold text-slate-500">首次评估 PID</div>
-                <div class="mt-2 text-sm text-slate-700">Kp={{ formatNumber(selectedEvaluationExplain.initialPid.Kp, 4) }} / Ki={{ formatNumber(selectedEvaluationExplain.initialPid.Ki, 4) }} / Kd={{ formatNumber(selectedEvaluationExplain.initialPid.Kd, 4) }}</div>
+              <div v-if="selectedEvaluationExplain.scenarioItems.length" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">多场景验收结果</div>
+                <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  <div v-for="item in selectedEvaluationExplain.scenarioItems" :key="item.key" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div class="text-xs text-slate-500">{{ item.label }}</div>
+                    <div class="mt-1 font-mono text-slate-800">{{ item.score }}</div>
+                    <div class="mt-1 text-xs" :class="item.passed === true ? 'text-emerald-700' : item.passed === false ? 'text-rose-700' : 'text-slate-500'">
+                      {{ item.passed === true ? '通过' : item.passed === false ? '未通过' : '已评估' }}
+                    </div>
+                    <div v-if="item.summary" class="mt-1 text-[11px] leading-5 text-slate-600">{{ item.summary }}</div>
+                  </div>
+                </div>
               </div>
-              <div v-if="selectedEvaluationExplain.autoRefineResult?.applied || selectedEvaluationExplain.modelRetryResult?.applied" class="mt-4 grid gap-3 md:grid-cols-2">
-                <div v-if="selectedEvaluationExplain.autoRefineResult?.applied" class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                  <div class="text-xs font-semibold text-slate-500">自动细调结果</div>
-                  <div class="mt-2 text-sm text-slate-700">综合评分 {{ formatNumber(selectedEvaluationExplain.autoRefineResult.base_final_rating, 2) }} → {{ formatNumber(selectedEvaluationExplain.autoRefineResult.refined_final_rating, 2) }}</div>
-                </div>
-                <div v-if="selectedEvaluationExplain.modelRetryResult?.applied" class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                  <div class="text-xs font-semibold text-slate-500">模型/窗口回试</div>
-                  <div class="mt-2 text-sm text-slate-700">窗口 {{ selectedEvaluationExplain.modelRetryResult.window_source || '-' }} / 评分 {{ formatNumber(selectedEvaluationExplain.modelRetryResult.final_rating, 2) }}</div>
-                </div>
+              <div v-if="selectedEvaluationExplain.initialPid" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">冠军方案 PID</div>
+                <div class="mt-2 text-sm text-slate-700">Kp={{ formatNumber(selectedEvaluationExplain.initialPid.Kp, 4) }} / Ki={{ formatNumber(selectedEvaluationExplain.initialPid.Ki, 4) }} / Kd={{ formatNumber(selectedEvaluationExplain.initialPid.Kd, 4) }}</div>
               </div>
             </div>
           </div>
@@ -918,19 +946,15 @@
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="shell-status-pill" :class="group.status === 'running' ? 'is-warning' : 'is-success'">{{ group.statusLabel }}</span>
-                    <button type="button" @click="openExecutionDetail(group.id)" class="shell-icon-action" title="整定详情" aria-label="整定详情">i</button>
+                    <button type="button" @click="openExecutionDetail(group.id)" class="shell-inline-action" title="查看详情" aria-label="查看详情">查看详情</button>
                     <button type="button" @click="toggleCollapse(group.id)" class="shell-icon-action" :title="group.collapsed ? '&#23637;&#24320;&#26234;&#33021;&#20307;&#21345;&#29255;' : '&#25240;&#21472;&#26234;&#33021;&#20307;&#21345;&#29255;'" :aria-label="group.collapsed ? '&#23637;&#24320;&#26234;&#33021;&#20307;&#21345;&#29255;' : '&#25240;&#21472;&#26234;&#33021;&#20307;&#21345;&#29255;'">{{ group.collapsed ? '&#9656;' : '&#9662;' }}</button>
                   </div>
                 </div>
                 <div v-if="!group.collapsed" class="shell-process-card-body">
                   <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">智能体摘要</div>
-                    <div class="shell-process-summary">{{ group.summary }}</div>
+                    <div class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">智能体分析</div>
+                    <div class="text-sm leading-6 text-slate-700 whitespace-pre-wrap">{{ group.response || group.summary }}</div>
                   </div>
-                  <details v-if="group.response && !compactMode && group.response !== group.summary" class="rounded-xl border border-slate-200 bg-white p-4">
-                    <summary class="cursor-pointer text-sm font-semibold text-slate-700">查看完整分析</summary>
-                    <div class="mt-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">{{ group.response }}</div>
-                  </details>
                   <div v-if="group.tools.length" class="shell-process-tools">
                     <div v-for="(tool, idx) in group.tools" :key="'tool-card-' + group.id + '-' + idx" class="shell-process-tool">
                       <div class="shell-process-tool-header">
@@ -1013,12 +1037,12 @@
                       <div class="mt-2 text-xl font-bold text-slate-900">{{ latestTuningResultData.model?.modelType || '-' }}</div>
                     </div>
                     <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">性能评分</div>
-                      <div class="mt-2 text-xl font-bold text-emerald-700">{{ formatScore100(latestTuningResultData.evaluation?.performance_score, 1) }}</div>
+                      <div class="text-xs text-slate-500">验收性能评分</div>
+                      <div class="mt-2 text-xl font-bold text-emerald-700">{{ formatScore100(latestTuningResultData.evaluation?.acceptance_performance_score ?? latestTuningResultData.evaluation?.performance_score, 1) }}</div>
                     </div>
                     <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div class="text-xs text-slate-500">综合评分</div>
-                      <div class="mt-2 text-xl font-bold text-blue-700">{{ formatScore100(latestTuningResultData.evaluation?.final_rating, 1) }}</div>
+                      <div class="text-xs text-slate-500">上线就绪评分</div>
+                      <div class="mt-2 text-xl font-bold text-blue-700">{{ formatScore100(latestTuningResultData.evaluation?.online_readiness_score ?? latestTuningResultData.evaluation?.final_rating, 1) }}</div>
                     </div>
                     <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
                       <div class="text-xs text-slate-500">评估结论</div>
@@ -3494,13 +3518,16 @@
                         <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">整定回路选择</div>
                         <div class="mt-3 space-y-2">
                           <label v-for="loop in csvDetectedLoops" :key="loop.prefix" class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:border-blue-200 hover:bg-blue-50/50">
-                            <input type="radio" class="mt-1" v-model="csvSelectedLoopPrefix" :value="loop.prefix">
+                            <input type="radio" class="mt-1" :checked="csvSelectedLoopPrefix === loop.prefix" :value="loop.prefix" @change="handleCsvLoopSelectionChange($event.target.value)">
                             <div class="min-w-0 flex-1">
                               <div class="flex flex-wrap items-center gap-2">
                                 <div class="text-sm font-semibold text-slate-800">{{ loop.prefix }}</div>
                                 <span v-if="loop.prefix === csvRecommendedLoopPrefix" class="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">推荐</span>
                                 <span v-if="loop.has_sv" class="text-[11px] text-slate-500">含SV</span>
                                 <span v-else class="text-[11px] text-slate-500">无SV</span>
+                              </div>
+                              <div v-if="loop.time_range && (loop.time_range.start_time || loop.time_range.end_time)" class="mt-1 text-[11px] text-slate-500">
+                                {{ loop.time_range.start_time || '-' }} -> {{ loop.time_range.end_time || '-' }}
                               </div>
                             </div>
                           </label>
@@ -3564,11 +3591,6 @@
           <button @click="closeExecutionDetail" class="shell-drawer-close">关闭</button>
         </div>
         <div v-if="selectedExecutionDetail" class="p-6 space-y-4">
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div class="text-sm font-semibold text-slate-800 mb-2">智能体摘要</div>
-            <div class="text-sm text-slate-700 whitespace-pre-wrap">{{ selectedExecutionDetail.summary }}</div>
-          </div>
-
           <div v-if="selectedExecutionDetail.dataAnalysis" class="rounded-xl border border-blue-100 bg-blue-50 p-4">
             <div class="text-sm font-semibold text-slate-800 mb-2">数据分析详情</div>
             <div class="grid grid-cols-3 gap-2 text-sm">
@@ -3582,6 +3604,7 @@
                 <thead>
                   <tr class="text-left text-xs text-slate-500">
                     <th class="py-2 pr-3">#</th>
+                    <th class="py-2 pr-3">窗口名称</th>
                     <th class="py-2 pr-3">类型</th>
                     <th class="py-2 pr-3">起止时间</th>
                     <th class="py-2 pr-3">事件索引</th>
@@ -3597,6 +3620,7 @@
                 <tbody>
                   <tr v-for="row in selectedExecutionDetail.dataAnalysis.candidateWindows" :key="'da-' + row.order" class="border-t border-slate-200">
                     <td class="py-2 pr-3 font-mono text-slate-800">{{ row.order }}</td>
+                    <td class="py-2 pr-3 font-mono text-slate-800">{{ row.windowSource }}</td>
                     <td class="py-2 pr-3 text-slate-800">{{ row.typeLabel }}</td>
                     <td class="py-2 pr-3 font-mono text-slate-700 whitespace-pre-wrap">{{ row.windowTimeRange }}</td>
                     <td class="py-2 pr-3 font-mono text-slate-700">{{ row.eventIndexRange }}</td>
@@ -3733,21 +3757,25 @@
 
           <div v-if="selectedExecutionDetail.evaluation" class="rounded-xl border border-amber-100 bg-amber-50 p-4">
             <div class="text-sm font-semibold text-slate-800 mb-2">评估详情</div>
-            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">性能评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.performanceScore }}/100</div></div>
-              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">综合评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.finalRating }}/100</div></div>
+            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">验收性能评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.performanceScore }}/100</div></div>
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">上线就绪评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.finalRating }}/100</div></div>
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">鲁棒性评分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.robustnessScore }}/100</div></div>
+              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">约束友好性</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.constraintScore }}/100</div></div>
               <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">方法置信度</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.methodConfidence }}</div></div>
-              <div class="rounded-xl bg-white px-4 py-3 shadow-sm border border-amber-100"><div class="text-xs font-semibold text-slate-500">通过阈值</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.passThreshold }}</div></div>
             </div>
             <div class="mt-3 rounded-xl border border-amber-100 bg-white px-4 py-3">
               <div class="text-xs font-semibold text-slate-500">结论</div>
               <div class="mt-1 text-sm font-semibold" :class="selectedExecutionDetail.evaluation.passed ? 'text-emerald-700' : 'text-red-700'">{{ selectedExecutionDetail.evaluation.passed ? '评估通过' : '评估未通过' }}</div>
+              <div class="mt-2 text-sm leading-relaxed text-slate-700">冠军方案：{{ selectedExecutionDetail.evaluation.selectedCandidate.modelType || '-' }} / {{ selectedExecutionDetail.evaluation.selectedCandidate.strategy || '-' }} / {{ selectedExecutionDetail.evaluation.selectedCandidate.windowSource || '-' }}</div>
+              <div class="mt-1 text-sm leading-relaxed text-slate-700">参数摘要：{{ selectedExecutionDetail.evaluation.selectedCandidate.modelParamsSummary || '-' }}</div>
+              <div v-if="selectedExecutionDetail.evaluation.launchRecommendation" class="mt-1 text-sm leading-relaxed text-slate-700">上线建议：{{ selectedExecutionDetail.evaluation.launchRecommendation }}</div>
               <div class="mt-2 text-sm leading-relaxed text-slate-700">主因：{{ selectedExecutionDetail.evaluation.failureReason }}</div>
               <div class="mt-2 text-sm leading-relaxed text-slate-700">回流目标：{{ selectedExecutionDetail.evaluation.feedbackTarget }}</div>
               <div v-if="selectedExecutionDetail.evaluation.feedbackAction" class="mt-1 text-sm leading-relaxed text-slate-700">建议动作：{{ selectedExecutionDetail.evaluation.feedbackAction }}</div>
             </div>
             <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span>🧪</span><span>性能指标拆解</span></div>
+              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span>🧪</span><span>验收指标拆解</span></div>
               <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                 <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">超调</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.overshoot }}</div></div>
                 <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">调节时间</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.settlingTime }}</div></div>
@@ -3755,18 +3783,32 @@
                 <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">振荡次数</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.oscillationCount }}</div></div>
                 <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"><div class="text-xs font-semibold text-slate-500">置信度折算分</div><div class="mt-1 text-sm font-medium text-slate-800">{{ selectedExecutionDetail.evaluation.confidenceAsScore }}</div></div>
               </div>
+              <div v-if="selectedExecutionDetail.evaluation.scenarioItems.length" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">多场景验收结果</div>
+                <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  <div v-for="item in selectedExecutionDetail.evaluation.scenarioItems" :key="item.key" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div class="text-xs text-slate-500">{{ item.label }}</div>
+                    <div class="mt-1 font-mono text-slate-800">{{ item.score }}</div>
+                    <div class="mt-1 text-xs" :class="item.passed === true ? 'text-emerald-700' : item.passed === false ? 'text-rose-700' : 'text-slate-500'">
+                      {{ item.passed === true ? '通过' : item.passed === false ? '未通过' : '已评估' }}
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div v-if="selectedExecutionDetail.evaluation.initialPid" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                <div class="text-xs font-semibold text-slate-500">首次评估 PID</div>
+                <div class="text-xs font-semibold text-slate-500">冠军方案 PID</div>
                 <div class="mt-2 text-sm text-slate-700">Kp={{ formatNumber(selectedExecutionDetail.evaluation.initialPid.Kp, 4) }} / Ki={{ formatNumber(selectedExecutionDetail.evaluation.initialPid.Ki, 4) }} / Kd={{ formatNumber(selectedExecutionDetail.evaluation.initialPid.Kd, 4) }}</div>
               </div>
-              <div v-if="selectedExecutionDetail.evaluation.autoRefineResult?.applied || selectedExecutionDetail.evaluation.modelRetryResult?.applied" class="mt-4 grid gap-3 md:grid-cols-2">
-                <div v-if="selectedExecutionDetail.evaluation.autoRefineResult?.applied" class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                  <div class="text-xs font-semibold text-slate-500">自动细调结果</div>
-                  <div class="mt-2 text-sm text-slate-700">综合评分 {{ formatNumber(selectedExecutionDetail.evaluation.autoRefineResult.base_final_rating, 2) }} → {{ formatNumber(selectedExecutionDetail.evaluation.autoRefineResult.refined_final_rating, 2) }}</div>
-                </div>
-                <div v-if="selectedExecutionDetail.evaluation.modelRetryResult?.applied" class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                  <div class="text-xs font-semibold text-slate-500">模型/窗口回试</div>
-                  <div class="mt-2 text-sm text-slate-700">窗口 {{ selectedExecutionDetail.evaluation.modelRetryResult.window_source || '-' }} / 评分 {{ formatNumber(selectedExecutionDetail.evaluation.modelRetryResult.final_rating, 2) }}</div>
+              <div v-if="selectedExecutionDetail.evaluation.evaluationCandidates.length" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div class="text-xs font-semibold text-slate-500">入围方案列表</div>
+                <div class="mt-3 space-y-2">
+                  <div v-for="candidate in selectedExecutionDetail.evaluation.evaluationCandidates" :key="`${candidate.rank}-${candidate.windowSource}-${candidate.modelType}`" class="rounded-lg border px-3 py-2" :class="candidate.isSelected ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="text-sm text-slate-800">#{{ candidate.rank }} {{ candidate.modelType }} · {{ candidate.windowSource }} · {{ candidate.strategy }}</div>
+                      <span v-if="candidate.isSelected" class="text-xs font-semibold text-emerald-700">冠军</span>
+                    </div>
+                    <div class="mt-1 text-xs text-slate-500">{{ candidate.modelParamsSummary }}</div>
+                  </div>
                 </div>
               </div>
             </div>

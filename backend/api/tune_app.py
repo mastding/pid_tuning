@@ -651,14 +651,24 @@ def create_app(
 
             raw_df = _read_csv_with_fallback(csv_path)
             loops = detect_pid_loops(raw_df)
-            options = [
-                {
-                    "prefix": loop.get("prefix", ""),
-                    "has_sv": bool(loop.get("sv_col")),
-                }
-                for loop in loops
-                if loop.get("prefix")
-            ]
+            options = []
+            for loop in loops:
+                prefix = str(loop.get("prefix", "") or "").strip()
+                if not prefix:
+                    continue
+                loop_time_range = {"start_time": "", "end_time": ""}
+                try:
+                    cleaned_loop_df = clean_pid_dataframe(raw_df, selected_loop_prefix=prefix)
+                    loop_time_range = get_timestamp_range(cleaned_loop_df)
+                except Exception:
+                    loop_time_range = {"start_time": "", "end_time": ""}
+                options.append(
+                    {
+                        "prefix": prefix,
+                        "has_sv": bool(loop.get("sv_col")),
+                        "time_range": loop_time_range,
+                    }
+                )
             recommended_prefix = options[0]["prefix"] if options else None
             return JSONResponse(
                 {

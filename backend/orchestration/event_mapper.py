@@ -100,9 +100,11 @@ def _derive_evaluation_failure_reason(result: Dict[str, Any]) -> str:
         return explicit
 
     performance_details = result.get("performance_details") or {}
-    final_details = result.get("final_details") or {}
-    performance_score = result.get("performance_score")
-    final_rating = result.get("final_rating")
+    scenario_evaluations = result.get("scenario_evaluations") or {}
+    performance_score = result.get("acceptance_performance_score", result.get("performance_score"))
+    final_rating = result.get("online_readiness_score", result.get("final_rating"))
+    robustness_score = result.get("robustness_score")
+    constraint_score = result.get("constraint_score")
     method_confidence = result.get("method_confidence")
 
     reasons: List[str] = []
@@ -119,16 +121,16 @@ def _derive_evaluation_failure_reason(result: Dict[str, Any]) -> str:
     if isinstance(method_confidence, (int, float)) and float(method_confidence) < 0.35:
         reasons.append(f"模型置信度 {float(method_confidence):.3f} 偏低")
     if isinstance(performance_score, (int, float)) and float(performance_score) < 5.0:
-        reasons.append(f"性能评分 {float(performance_score):.2f} 偏低")
-    if (
-        isinstance(final_rating, (int, float))
-        and isinstance(performance_score, (int, float))
-        and isinstance(final_details.get("confidence_as_score"), (int, float))
-        and float(final_rating) < float(performance_score)
-    ):
-        reasons.append(
-            f"综合评分 {float(final_rating):.2f} 低于性能评分 {float(performance_score):.2f}，主要受方法置信度拖累"
-        )
+        reasons.append(f"验收性能评分 {float(performance_score):.2f} 偏低")
+    if isinstance(robustness_score, (int, float)) and float(robustness_score) < 6.0:
+        reasons.append(f"鲁棒性评分 {float(robustness_score):.2f} 偏低")
+    if isinstance(constraint_score, (int, float)) and float(constraint_score) < 6.0:
+        reasons.append(f"约束友好性评分 {float(constraint_score):.2f} 偏低")
+    if isinstance(final_rating, (int, float)) and float(final_rating) < 7.0:
+        reasons.append(f"上线就绪评分 {float(final_rating):.2f} 未达阈值")
+    disturbance_eval = scenario_evaluations.get("disturbance_rejection") or {}
+    if disturbance_eval.get("passed") is False:
+        reasons.append("扰动抑制场景未通过")
 
     return "；".join(reasons) if reasons else "综合评分未达阈值"
 
@@ -165,17 +167,61 @@ def build_agent_response(
         )
 
     if agent_name == display_agent_names["system_id_expert"]:
+        if latest_tool_name == "tool_fit_fopdt":
+            raw_result_text = str(latest_result.get("result") or "").strip()
+            selected_model_params = latest_result.get("selected_model_params", {}) or {}
+            has_structured_metrics = any(
+                latest_result.get(key) is not None
+                for key in ("normalized_rmse", "r2_score", "confidence")
+            )
+            if raw_result_text and not selected_model_params and not has_structured_metrics:
+                return f"系统辨识未形成可用模型：{raw_result_text}"
+
         model_type = str(latest_result.get("model_type", "FOPDT")).upper()
         selected_model_params = latest_result.get("selected_model_params", {}) or {}
         raw_model_summary = _summarize_raw_model(model_type, selected_model_params)
-        quality_summary = (
+        candidate_count = 0
+        candidates = latest_result.get("identification_candidates")
+        attempts = latest_result.get("attempts")
+        if isinstance(candidates, list) and candidates:
+            candidate_count = len(candidates)
+        elif isinstance(attempts, list) and attempts:
+            candidate_count = len([item for item in attempts if isinstance(item, dict) and item.get("success", True)])
+        candidate_window_count = 0
+        if isinstance(candidates, list) and candidates:
+            candidate_window_count = len(
+                {
+                    str(item.get("window_source") or "").strip()
+                    for item in candidates
+                    if isinstance(item, dict) and str(item.get("window_source") or "").strip()
+                }
+            )
+        elif isinstance(attempts, list) and attempts:
+            candidate_window_count = len(
+                {
+                    str(item.get("window_source") or "").strip()
+                    for item in attempts
+                    if isinstance(item, dict) and str(item.get("window_source") or "").strip()
+                }
+            )
+        selection_reason = latest_result.get("model_selection_reason") or latest_result.get("selection_reason") or ""
+        reason_text = (
+            f"选模依据：{selection_reason}"
+            if selection_reason
+            else "选模依据：已在可用于辨识的候选窗口集合上完成多窗口多模型评估，并按辨识拟合评分排序。"
+        )
+        retained_text = (
+            f"并保留排序靠前的 {candidate_count} 个辨识模型，覆盖 {candidate_window_count} 个辨识窗口，供 PID 专家继续整定比较。"
+            if candidate_count > 0 and candidate_window_count > 0
+            else (f"并保留排序靠前的 {candidate_count} 个辨识模型，供 PID 专家继续整定比较。" if candidate_count > 0 else "")
+        )
+        return (
+            f"{reason_text}{retained_text}\n"
+            f"当前主候选模型：{model_type}，{raw_model_summary}\n"
             f"标准化RMSE {_format_float(latest_result.get('normalized_rmse'), 3)}，"
             f"R² {_format_float(latest_result.get('r2_score'), 3)}，"
             f"模型置信度 {_format_float(latest_result.get('confidence'), 2)}。"
         )
-        selection_reason = latest_result.get("model_selection_reason") or latest_result.get("selection_reason") or ""
-        suffix = f" 选模依据：{selection_reason}。" if selection_reason else ""
-        return f"{model_type} 过程模型辨识完成，{raw_model_summary} {quality_summary}{suffix}"
 
     if agent_name == display_agent_names["knowledge_expert"]:
         if latest_tool_name == "tool_query_expert_knowledge":
@@ -241,21 +287,41 @@ def build_agent_response(
         return "PID 参数整定完成。"
 
     if agent_name == display_agent_names["evaluation_expert"]:
+        selected_candidate = latest_result.get("evaluation_selected_candidate") or {}
+        selected_model_type = str(
+            selected_candidate.get("model_type")
+            or latest_result.get("model_type")
+            or latest_result.get("evaluated_model_type")
+            or ""
+        ).upper()
+        selected_window_source = str(selected_candidate.get("window_source") or "").strip()
+        selected_strategy = str(selected_candidate.get("strategy") or "").strip()
+        online_readiness = latest_result.get("online_readiness_score", latest_result.get("final_rating"))
+        acceptance_performance = latest_result.get(
+            "acceptance_performance_score",
+            latest_result.get("performance_score"),
+        )
+        robustness_score = latest_result.get("robustness_score")
+        constraint_score = latest_result.get("constraint_score")
+        evaluation_candidates = latest_result.get("evaluation_candidates") or []
+        launch_recommendation = str(latest_result.get("launch_recommendation") or "").strip()
+        shortlist_text = f" 已对 {len(evaluation_candidates)} 组入围方案完成独立验收。" if evaluation_candidates else ""
+        model_hint = f"{selected_model_type}" if selected_model_type else "未标注"
+        source_hint = f"，来源窗口 {selected_window_source}" if selected_window_source else ""
+        strategy_hint = f"，采用策略 {selected_strategy}" if selected_strategy else ""
         if latest_result.get("passed") is True:
-            model_type = str(latest_result.get("model_type") or latest_result.get("evaluated_model_type") or "").upper()
-            model_hint = f"，评估模型类型 {model_type}" if model_type else ""
             return (
-                f"性能评分 {_format_float(latest_result.get('performance_score'), 2)}，"
-                f"方法置信度 {_format_float(latest_result.get('method_confidence'), 3)}，"
-                f"最终评分 {_format_float(latest_result.get('final_rating'), 2)}{model_hint}，APPROVE。"
+                f"评估智能体已完成独立验收。冠军方案模型为 {model_hint}{source_hint}{strategy_hint}。"
+                f"{shortlist_text} 验收性能评分 {_format_float(acceptance_performance, 2)}，"
+                f"鲁棒性评分 {_format_float(robustness_score, 2)}，"
+                f"约束友好性评分 {_format_float(constraint_score, 2)}，"
+                f"上线就绪评分 {_format_float(online_readiness, 2)}。"
+                f"{(' 上线建议：' + launch_recommendation) if launch_recommendation else ''} APPROVE。"
             )
         target_display = latest_result.get("feedback_target_display") or latest_result.get("feedback_target") or "后续智能体"
-        model_type = str(latest_result.get("model_type") or latest_result.get("evaluated_model_type") or "").upper()
-        model_hint = f"FO" if model_type == "FO" else model_type
         failure_reason = _derive_evaluation_failure_reason(latest_result)
         feedback_action = latest_result.get("feedback_action", "")
         performance_details = latest_result.get("performance_details") or {}
-        final_details = latest_result.get("final_details") or {}
         initial_assessment = latest_result.get("initial_assessment") or {}
         evaluated_pid = initial_assessment.get("evaluated_pid") or latest_result.get("evaluated_pid") or {}
         overshoot = _format_float(performance_details.get("overshoot"), 2)
@@ -264,28 +330,32 @@ def build_agent_response(
         oscillation_count = _format_float(performance_details.get("oscillation_count"), 0)
         is_stable = performance_details.get("is_stable")
         stable_text = "稳定" if is_stable is True else "不稳定" if is_stable is False else "待确认"
-        confidence_as_score = _format_float(final_details.get("confidence_as_score"), 2)
         pid_line = ""
+        launch_line = f"- **上线建议**：{launch_recommendation}\n" if launch_recommendation else ""
         if evaluated_pid:
             pid_line = (
-                f"- **首次评估 PID 参数**："
+                f"- **冠军方案 PID 参数**："
                 f"Kp={_format_float(evaluated_pid.get('Kp'), 4)}, "
                 f"Ki={_format_float(evaluated_pid.get('Ki'), 4)}, "
                 f"Kd={_format_float(evaluated_pid.get('Kd'), 4)}\n"
             )
         return (
-            f"**评估智能体报告：PID整定质量评估**\n\n"
+            f"**评估智能体报告：整定方案独立验收**\n\n"
             f"## 一、评估结论\n"
             f"- **结论**：未通过\n"
-            f"- **性能评分**：{_format_float(latest_result.get('performance_score'), 2)}/10\n"
-            f"- **综合评分**：{_format_float(latest_result.get('final_rating'), 2)}/10\n"
+            f"- **验收性能评分**：{_format_float(acceptance_performance, 2)}/10\n"
+            f"- **鲁棒性评分**：{_format_float(robustness_score, 2)}/10\n"
+            f"- **约束友好性评分**：{_format_float(constraint_score, 2)}/10\n"
+            f"- **上线就绪评分**：{_format_float(online_readiness, 2)}/10\n"
             f"- **方法置信度**：{_format_float(latest_result.get('method_confidence'), 3)}\n"
             f"- **通过阈值**：{_format_float(latest_result.get('pass_threshold', 7.0), 2)}\n"
-            f"- **评估模型**：{model_hint or '未标注'}\n\n"
+            f"- **冠军方案模型**：{model_hint or '未标注'}{source_hint}{strategy_hint}\n"
+            f"- **入围方案数**：{len(evaluation_candidates)}\n"
+            f"{launch_line}"
             f"## 二、主因分析\n"
             f"- **未通过主因**：{failure_reason}\n"
             f"- **闭环稳定性**：{stable_text}\n"
-            f"- **置信度折算分**：{confidence_as_score}\n\n"
+            f"- **入围方案已完成独立验收**：是\n\n"
             f"## 三、关键性能指标\n"
             f"- **超调**：{overshoot}%\n"
             f"- **调节时间**：{settling_time} s\n"

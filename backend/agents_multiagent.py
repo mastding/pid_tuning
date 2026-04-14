@@ -24,7 +24,9 @@ from services.pid_tuning_service import (
 from services.pid_evaluation_service import (
     build_initial_assessment,
     choose_alternative_model_attempt,
+    choose_best_evaluation_candidate,
     diagnose_evaluation_failure as service_diagnose_evaluation_failure,
+    evaluate_pid_acceptance,
     evaluate_pid_model,
 )
 from services.data_service import build_window_overview as service_build_window_overview, load_pid_dataset
@@ -335,7 +337,9 @@ async def tool_evaluate_pid(
         method=method,
         display_agent_names=DISPLAY_AGENT_NAMES,
         evaluate_pid_model_fn=evaluate_pid_model,
+        evaluate_pid_acceptance_fn=evaluate_pid_acceptance,
         diagnose_failure_fn=service_diagnose_evaluation_failure,
+        choose_best_evaluation_candidate_fn=choose_best_evaluation_candidate,
         build_initial_assessment_fn=build_initial_assessment,
         refine_pid_for_performance_fn=_refine_pid_for_performance,
         choose_alternative_model_attempt_fn=choose_alternative_model_attempt,
@@ -731,8 +735,12 @@ async def run_multi_agent_collaboration(
             if "final_rating" in shared_data:
                 final_result["evaluation"] = {
                 "performance_score": shared_data.get("performance_score", 0.0),
+                "acceptance_performance_score": shared_data.get("acceptance_performance_score", shared_data.get("performance_score", 0.0)),
                 "method_confidence": shared_data.get("method_confidence", 0.0),
+                "robustness_score": shared_data.get("robustness_score", 0.0),
+                "constraint_score": shared_data.get("constraint_score", 0.0),
                 "final_rating": shared_data.get("final_rating", 0.0),
+                "online_readiness_score": shared_data.get("online_readiness_score", shared_data.get("final_rating", 0.0)),
                 "strategy_used": _shared_data_store.get("strategy_used", ""),
                 "passed": shared_data.get("passed", False),
                 "pass_threshold": shared_data.get("pass_threshold", 7.0),
@@ -745,6 +753,10 @@ async def run_multi_agent_collaboration(
                 "model_retry_result": shared_data.get("model_retry_result", {}),
                 "performance_details": shared_data.get("performance_details", {}),
                 "final_details": shared_data.get("final_details", {}),
+                "scenario_evaluations": shared_data.get("scenario_evaluations", {}),
+                "evaluation_candidates": shared_data.get("evaluation_candidates", []),
+                "evaluation_selected_candidate": shared_data.get("evaluation_selected_candidate", {}),
+                "launch_recommendation": shared_data.get("launch_recommendation", ""),
                 }
 
             final_result["tuningAdvice"] = _build_tuning_advice(final_result)

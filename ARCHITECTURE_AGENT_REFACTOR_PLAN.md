@@ -1,486 +1,357 @@
 # 智能体架构改造方案
 
-本文档整理当前 PID 整定流程中，系统辨识智能体、PID 专家智能体、评估智能体三者的职责重构思路，并分别列出前端、后端建议修改点。
+本文档整理 PID 整定链路中三个核心智能体的职责边界、数据流和改造方向：
 
-目标不是一次性推翻现有实现，而是在当前工程基础上逐步演进到更清晰、更工程化的三阶段架构：
+1. 系统辨识智能体：输出多个高质量辨识候选。
+2. PID 专家智能体：基于辨识候选生成整定入围方案。
+3. 评估智能体：对入围方案做独立验收，并最终选出冠军方案。
 
-1. 系统辨识智能体负责“找出高质量模型候选”
-2. PID 专家智能体负责“基于候选模型选择最优整定方案”
-3. 评估智能体负责“对最终整定方案做独立验收并给出上线/回流建议”
+目标不是推翻现有实现，而是在当前工程基础上逐步演进到更清晰、更工程化的三阶段架构。
 
+## 一、当前问题
 
-## 一、当前问题概述
-
-当前流程的核心问题有三类：
-
-- 系统辨识阶段与 PID 整定阶段耦合过深
-  - 历史实现中，系统辨识选模会混入闭环试算分数和窗口质量惩罚，导致“拟合最好”和“最终选中”不一致。
-- PID 专家阶段和评估阶段职责边界不清
-  - PID 专家会做闭环试算并给出分数，评估智能体也会再次做仿真和评分，存在职责重叠。
-- 前端展示口径容易混淆
-  - 用户难以区分：
-    - 辨识最优模型
-    - 整定采用模型
-    - 最终验收结果
-
+- 系统辨识与 PID 整定耦合过深。
+  - 过去辨识阶段的最终排序混入了闭环试算和窗口惩罚，导致“拟合最好”和“最终被选中”不一致。
+- PID 专家和评估智能体职责重叠。
+  - 两边都在使用相近的闭环评分逻辑，评估智能体没有真正成为独立验收层。
+- 候选方案缺乏正式 shortlist 机制。
+  - 目前 PID 专家虽然会比较多个辨识候选，但尚未以明确门槛形成“入围方案集合”。
+- 前端口径易混淆。
+  - “辨识最优模型”“整定采用模型”“评估冠军方案”三个概念还没有完全拆开。
 
 ## 二、目标架构
 
-建议将三类智能体职责明确拆分为：
-
 ### 1. 系统辨识智能体
 
-只负责：
+负责：
 
-- 在“可用于辨识”的窗口集合中尝试多模型拟合
-- 计算拟合指标：
-  - `R²`
-  - `NRMSE`
+- 在“可用于辨识”的候选窗口集合上尝试多模型拟合。
+- 计算并输出：
+  - `r2_score`
+  - `normalized_rmse`
   - `identification_fit_score`
-- 输出多个高质量候选辨识结果
+  - `confidence`
+- 保留多个高质量辨识候选结果。
 
 不负责：
 
-- 直接决定最终 PID 参数
-- 用闭环性能分数决定最终整定模型
-
+- 决定最终 PID 参数。
+- 用 PID 闭环性能直接决定最终模型。
 
 ### 2. PID 专家智能体
 
 负责：
 
-- 接收多个辨识候选模型
-- 对每个候选模型尝试多种整定策略
-- 针对每个候选模型做闭环试算
-- 输出整定采用模型、整定采用策略、最终 PID 参数
-- 输出用于候选比较的整定评分：
+- 接收多个辨识候选。
+- 对每个候选模型尝试多种整定策略。
+- 进行闭环试算。
+- 形成“整定入围方案集合”。
+- 给出：
   - `tuning_selection_score`
+  - shortlist 入围标记与原因
+  - 当前内部首选方案
 
 不负责：
 
-- 直接给出“可以上线”结论
-
+- 给出最终上线结论。
 
 ### 3. 评估智能体
 
 负责：
 
-- 接收 PID 专家最终选中的模型与 PID 参数
-- 独立做验收级评估
+- 接收 PID 专家入围方案。
+- 对入围方案逐个做独立验收。
+- 在评估阶段选出冠军方案。
 - 输出：
   - `acceptance_performance_score`
+  - `robustness_score`
+  - `constraint_score`
   - `online_readiness_score`
   - `passed`
   - `feedback_target`
   - `feedback_action`
-  - 上线建议
+  - `launch_recommendation`
 
 不负责：
 
-- 再次参与整定候选排序
-
+- 重新参与 PID 整定排序。
 
 ## 三、系统辨识智能体改造点
 
-### 后端修改建议
+### 后端
 
 涉及模块：
 
 - `backend/services/identification_service.py`
 - `backend/services/tool_adapter_service.py`
-- 可能影响：
-  - `backend/orchestration/workflow_runner.py`
-  - `backend/orchestration/event_mapper.py`
+- `backend/orchestration/event_mapper.py`
+- `backend/orchestration/workflow_runner.py`
 
-建议改造内容：
+改造建议：
 
-1. 保留多窗口、多模型候选结果
-- 当前辨识结果不能只保留一个最终模型。
-- 应保留前 `N=3~5` 个高质量候选。
+1. 保留多个辨识候选。
+   - 每个候选至少包含：
+     - `window_source`
+     - `model_type`
+     - `selected_model_params`
+     - `r2_score`
+     - `normalized_rmse`
+     - `identification_fit_score`
+     - `confidence`
+     - `points`
+2. 辨识排序只按拟合质量。
+   - 排序优先级：
+     1. `identification_fit_score`
+     2. `r2_score`
+     3. `normalized_rmse`
+     4. `confidence`
+3. 明确结构化输出。
+   - 输出：
+     - `identification_best_model_type`
+     - `identification_best_window_source`
+     - `identification_candidates`
+4. `window_quality_score` 仅保留为说明字段。
+   - 不再主导辨识排序。
 
-每个候选建议至少包含：
-
-- `window_source`
-- `model_type`
-- `selected_model_params`
-- `r2_score`
-- `normalized_rmse`
-- `identification_fit_score`
-- `confidence`
-- `window_start/end`
-
-2. 系统辨识排序只看拟合质量
-- 当前已经往这个方向走。
-- 最终排序建议固定为：
-  1. `identification_fit_score`
-  2. `R²`
-  3. `NRMSE`
-  4. `confidence` 仅作弱 tie-break
-
-3. `window_quality_score` 退化为展示信息
-- 数据分析阶段可继续计算 `window_quality_score`
-- 但系统辨识阶段不再用它主导排序
-- 最多作为过滤或说明字段
-
-4. 输出字段区分“辨识最优”
-- 后端结果中明确输出：
-  - `identification_best_model_type`
-  - `identification_best_window_source`
-  - `identification_candidates`
-
-不要再默认“辨识最优 = 整定采用模型”。
-
-
-### 前端修改建议
+### 前端
 
 涉及模块：
 
 - `frontend/js/app.js`
 - `frontend/public/app-template.html`
 
-建议改造内容：
+改造建议：
 
-1. 系统辨识详情页展示候选列表
-- 按 `identification_fit_score` 排序
-- 展示每个候选的：
-  - 模型类型
-  - 窗口来源
-  - `R²`
-  - `NRMSE`
-  - `identification_fit_score`
-
-2. 顶部卡片明确写“辨识最优模型”
-- 不再只写“当前选中模型”
-- 建议字段：
-  - `辨识最优模型`
-  - `辨识最优窗口`
-  - `辨识拟合评分`
-
-3. 文案统一
-- 不再用“候选评分”描述辨识阶段结果
-- 统一改成：
-  - `辨识拟合评分`
-
+1. 系统辨识详情展示候选列表。
+2. 明确显示：
+   - `辨识主候选模型`
+   - `辨识主候选窗口`
+   - `辨识拟合评分`
+3. 候选列表中显示：
+   - 模型类型
+   - 窗口来源
+   - `R²`
+   - `NRMSE`
+   - `identification_fit_score`
+   - 参数摘要
 
 ## 四、PID 专家智能体改造点
 
-### 后端修改建议
+### 后端
 
 涉及模块：
 
 - `backend/services/pid_tuning_service.py`
 - `backend/services/tool_adapter_service.py`
-- 可能影响：
-  - `backend/orchestration/event_mapper.py`
+- `backend/skills/rating.py`
 
-建议改造内容：
+改造建议：
 
-1. 输入改成“多个辨识候选”
-- PID 专家不能只吃单个最优模型
-- 应接收 `identification_candidates`
+1. 输入改为多个辨识候选。
+2. 对每个候选模型尝试多种整定策略：
+   - `IMC`
+   - `LAMBDA`
+   - `ZN`
+   - `CHR`
+3. 生成 `tuning_model_candidates`。
+   - 每个元素至少包含：
+     - `model_type`
+     - `selected_model_params`
+     - `window_source`
+     - `identification_fit_score`
+     - `best_strategy`
+     - `best_performance_score`
+     - `best_final_rating`
+     - `is_stable`
+     - `pid_params`
+4. 引入 PID 入围标准。
 
-2. 对每个候选模型分别整定
-- 对每个候选模型尝试：
-  - `IMC`
-  - `LAMBDA`
-  - `ZN`
-  - `CHR`
+#### PID 入围标准
 
-3. 引入 `tuning_selection_score`
-- 用于候选整定方案比较
-- 这是 PID 专家内部排序分，不是最终验收分
+不采用写死 `top3` 的方式，而采用“硬门槛 + 上限控制”：
+
+- 硬门槛：
+  - `identification_fit_score >= 8.0`
+  - `best_performance_score >= 7.0`
+  - `best_final_rating >= 7.0`
+  - `is_stable == true`
+- 约束门槛：
+  - 不允许明显严重饱和
+  - 不允许显著发散或过量振荡
+- 上限控制：
+  - 所有通过门槛的方案都可入围
+  - 仅在入围数过多时，按排序截断到上限，例如 5 组
+
+建议新增字段：
+
+- `shortlist_passed`
+- `shortlist_reasons`
+- `shortlist_score`
+
+其中：
+
+- `shortlist_passed`：是否进入评估阶段
+- `shortlist_reasons`：通过/未通过原因
+- `shortlist_score`：仅作为 shortlist 内部排序辅助分，不代替硬门槛
+
+#### PID 试算职责
+
+PID 专家负责“候选比较”，不是“最终验收”。
+
+建议试算场景：
+
+- 正向设定值阶跃
+- 反向设定值阶跃
+- 扰动抑制
 
 建议输出：
 
-- `selected_tuning_model_type`
-- `selected_tuning_window_source`
-- `selected_strategy`
-- `selected_pid_params`
 - `tuning_selection_score`
-- `tuning_candidates`
+- `tuning_model_candidates`
+- `tuning_shortlist_candidates`
+- `tuning_selected_model_type`
+- `tuning_selected_window_source`
+- `selected_pid_params`
 
-4. 试算按每个窗口进行
-- 同一模型类型，不同窗口必须分开试算
-- 比较对象应是：
-  - `窗口 + 模型 + 策略`
-
-5. 试算分层
-- 快速筛选层
-  - 用较少点数
-  - 筛掉明显失稳/明显过激方案
-- 精细比较层
-  - 对前几名做更长时域仿真
-
-6. 试算点数建议
-- 不建议固定 500 点
-- 建议按模型时间尺度自适应：
-  - 快速筛选：`120~300` 点
-  - 精细比较：`240~800` 点
-
-建议依据：
-
-- `FO/FOPDT`
-  - `T_eq = T`
-- `SOPDT`
-  - `T_eq = T1 + T2`
-- `IPDT`
-  - `T_eq = max(L, 60s)`
-
-7. 内部仿真步长建议
-- 不直接等于原始数据采样周期
-- 建议：
-  - `dt_sim = min(dt_data, T_eq / 10)`
-- 这样快对象不会因为步长过粗而数值失真
-
-8. `tuning_selection_score` 建议指标
-
-建议权重：
-
-- 跟踪性能：40%
-  - 超调
-  - 调节时间
-  - 稳态误差
-- 振荡/阻尼：20%
-  - 振荡次数
-  - 衰减比
-- 控制代价：15%
-  - `MV` 总变化量
-  - 峰值控制动作
-- 饱和风险：10%
-  - `MV` 饱和比例
-- 鲁棒性粗测：15%
-  - 模型参数轻微摄动后的表现
-
-9. PID 专家输出语义要改清楚
-- 当前输出容易被理解为“最终验收结论”
-- 改造后应明确：
-  - 这是“整定候选选择结果”
-  - 不是最终上线结论
-
-
-### 前端修改建议
+### 前端
 
 涉及模块：
 
 - `frontend/js/app.js`
 - `frontend/public/app-template.html`
 
-建议改造内容：
+改造建议：
 
-1. PID 专家卡片增加“整定采用模型”
-- 需要和“辨识最优模型”区分
-
-建议展示：
-
-- `辨识最优模型`
-- `整定采用模型`
-- `整定采用窗口`
-- `整定采用策略`
-- `最终 PID`
-- `tuning_selection_score`
-
-2. 增加整定候选列表
-- 展示前几名整定候选
-- 每个候选包含：
-  - 模型类型
-  - 窗口来源
-  - 策略
-  - PID 参数
-  - `tuning_selection_score`
-
-3. 文案统一
-- PID 专家阶段的分数统一叫：
-  - `整定候选评分`
-  - 或 `tuning_selection_score`
-
-不要和评估阶段的最终分混用。
-
+1. 区分：
+   - `辨识最优模型`
+   - `整定采用模型`
+2. 增加“整定候选列表”。
+3. 增加“整定入围方案”展示。
+4. 显示：
+   - 模型
+   - 窗口来源
+   - 策略
+   - PID 参数
+   - `tuning_selection_score`
+   - shortlist 是否入围
 
 ## 五、评估智能体改造点
 
-### 后端修改建议
+### 后端
 
 涉及模块：
 
 - `backend/services/pid_evaluation_service.py`
 - `backend/services/tool_adapter_service.py`
 - `backend/skills/rating.py`
+- `backend/orchestration/event_mapper.py`
+- `backend/orchestration/workflow_runner.py`
 
-建议改造内容：
+改造建议：
 
-1. 评估智能体只评最终采用方案
-- 输入：
-  - `selected_tuning_model_type`
-  - `selected_model_params`
-  - `selected_pid_params`
+1. 输入改为 PID 入围方案集合。
+   - 评估智能体不再只吃 PID 专家当前冠军。
+   - 而是接收 `tuning_shortlist_candidates`。
+2. 对每个入围方案做独立验收。
 
-2. 评估与 PID 专家的试算职责区分
-- PID 专家：
-  - 负责“选方案”
-- 评估智能体：
-  - 负责“验收方案”
+#### 评估场景
 
-3. 引入新的验收分
-
-建议字段：
-
-- `acceptance_performance_score`
-- `robustness_score`
-- `constraint_score`
-- `online_readiness_score`
-
-4. 评估场景比 PID 专家更严格
-
-建议至少包含：
-
-- 正向设定值阶跃
-- 反向设定值阶跃
+- 正向阶跃
+- 反向阶跃
 - 扰动抑制
-- 参数摄动鲁棒性
+- 模型参数摄动
 - 饱和/约束检查
 
-5. 当前 `performance_score` 可保留，但语义需调整
-- 当前 `performance_score` 更接近“单场景闭环表现”
-- 后续建议把它作为验收子项，不直接等于最终上线分
+#### 评估输出
 
-6. 输出最终验收结论
-
-建议输出：
-
-- `passed`
+- `acceptance_performance_score`
+  - 用于衡量多场景闭环表现
+- `robustness_score`
+  - 用于衡量参数摄动后的稳定性和性能退化
+- `constraint_score`
+  - 用于衡量饱和风险和控制输出剧烈程度
 - `online_readiness_score`
-- `failure_reason`
-- `feedback_target`
-- `feedback_action`
-- `launch_recommendation`
+  - 综合验收分，用于冠军选择和上线建议
+- `evaluation_candidates`
+  - 所有入围方案的独立验收结果
+- `evaluation_selected_candidate`
+  - 评估冠军方案
 
-7. 自动回流逻辑建议保留
-- 评估不通过时：
-  - 回流 `pid_expert`
-  - 回流 `system_id_expert`
-  - 回流 `data_analyst`
+#### 冠军选择原则
 
-8. 若关闭经验模块，评估后不应再强制做经验沉淀
-- 当前已发现“经验检索关闭但评估后收尾仍走经验记录”的问题
-- 后续建议：
-  - `ENABLE_EXPERIENCE_DISTILLATION=0` 时
-  - 直接跳过经验落库
+冠军选择不再由 PID 专家单独决定。
 
+评估阶段应：
 
-### 前端修改建议
+1. 仅在 PID shortlist 中选择。
+2. 按以下优先级选择冠军：
+   1. `online_readiness_score`
+   2. `acceptance_performance_score`
+   3. `robustness_score`
+   4. `constraint_score`
+
+#### 通过标准
+
+建议第一版采用：
+
+- `online_readiness_score >= 7.0`
+- 冠军方案必须稳定
+- 不允许严重约束风险
+
+#### 输出语义
+
+评估智能体输出的是“最终验收结果”，不是 PID 试算内部评分。
+
+建议保留兼容字段：
+
+- `performance_score` 可兼容映射到 `acceptance_performance_score`
+- `final_rating` 可兼容映射到 `online_readiness_score`
+
+### 前端
 
 涉及模块：
 
 - `frontend/js/app.js`
 - `frontend/public/app-template.html`
 
-建议改造内容：
+改造建议：
 
-1. 评估页只展示“最终验收结果”
+1. 评估智能体显示“验收冠军方案”。
+2. 显示多场景验收明细。
+3. 区分：
+   - `PID 试算分`
+   - `评估验收分`
+4. 增加字段：
+   - `acceptance_performance_score`
+   - `robustness_score`
+   - `constraint_score`
+   - `online_readiness_score`
+   - `launch_recommendation`
 
-建议展示：
+## 六、推荐实施顺序
 
-- `acceptance_performance_score`
-- `online_readiness_score`
-- `passed`
-- `launch_recommendation`
-- `failure_reason`
-- `feedback_target`
+1. 系统辨识输出多个候选。
+2. PID 专家形成 shortlist。
+3. 评估智能体接管冠军选择。
+4. 最后再升级仿真器数值质量。
 
-2. 文案明确区分“整定评分”和“验收评分”
-
-建议命名：
-
-- PID 专家：
-  - `整定候选评分`
-- 评估智能体：
-  - `最终验收评分`
-  - `上线就绪评分`
-
-3. 若发生回流，前端要明确原因
-- 回流给谁
-- 为什么回流
-- 是模型问题、窗口问题还是 PID 问题
-
-
-## 六、推荐字段命名
-
-建议最终统一为：
+## 七、验收标准
 
 ### 系统辨识智能体
 
-- `identification_fit_score`
-- `identification_best_model_type`
-- `identification_best_window_source`
-- `identification_candidates`
-
+- 用户可看到多个辨识候选。
+- 候选按 `identification_fit_score` 排序。
 
 ### PID 专家智能体
 
-- `tuning_selection_score`
-- `selected_tuning_model_type`
-- `selected_tuning_window_source`
-- `selected_strategy`
-- `selected_pid_params`
-- `tuning_candidates`
-
+- 用户可看到 shortlist 规则生效后的入围方案。
+- “整定采用模型”不必等于“辨识最优模型”。
 
 ### 评估智能体
 
-- `acceptance_performance_score`
-- `robustness_score`
-- `constraint_score`
-- `online_readiness_score`
-- `launch_recommendation`
-
-
-## 七、推荐实施顺序
-
-建议按以下顺序逐步实施，降低风险：
-
-1. 第一阶段
-- 系统辨识阶段保留多个候选模型
-- 前端系统辨识页面支持候选列表展示
-
-2. 第二阶段
-- PID 专家支持“多候选模型并行整定”
-- 输出 `tuning_selection_score`
-- 前端区分“辨识最优模型”和“整定采用模型”
-
-3. 第三阶段
-- 评估智能体升级为“最终验收”
-- 引入 `online_readiness_score`
-- 保留自动回流能力
-
-4. 第四阶段
-- 升级闭环仿真器
-  - 精确离散化
-  - 分数延迟
-  - 更真实的 PID 控制器结构
-
-
-## 八、总结
-
-建议将整套流程的判断链改造成：
-
-1. 数据分析智能体：
-   - 找窗口
-2. 系统辨识智能体：
-   - 给模型候选
-3. PID 专家智能体：
-   - 从候选中选出最优整定方案
-4. 评估智能体：
-   - 对最终方案做独立验收并决定是否上线
-
-这样可以避免：
-
-- “辨识最优模型直接等于整定最优模型”
-- “PID 专家和评估智能体重复评分”
-- “前端展示口径混乱”
-
-同时也更符合控制工程实际中的分工：
-
-- 辨识是建模
-- 整定是设计
-- 评估是验收
-
+- 评估智能体基于 shortlist 独立选冠军。
+- 可明确看到：
+  - 冠军方案
+  - 是否通过
+  - 是否建议上线
+  - 不通过时回流给谁

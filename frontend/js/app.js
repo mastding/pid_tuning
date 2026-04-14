@@ -1619,6 +1619,7 @@ createApp({
               const usableText = usableForId === null ? '-' : (usableForId ? '是' : '否');
               return {
                 order: idx + 1,
+                windowSource: this.candidateWindowSourceKey(event, idx),
                 typeLabel: this.describeStepEventType(event?.type),
                 eventIndexRange: `${event?.start_idx ?? 0} -> ${event?.end_idx ?? 0}`,
                 windowIndexRange:
@@ -2666,6 +2667,7 @@ createApp({
               r2: this.formatNumber(attempt.r2_score, 3),
               confidence: this.formatPercent(attempt.confidence, 1),
               fitScore: this.formatNumber(attempt.identification_fit_score, 2),
+              modelParamsSummary: this.summarizeModelParams({ model_type: attempt.model_type, ...(attempt.selected_model_params || {}) }),
               explanation: this.formatAttemptExplanation(attempt)
             }));
 
@@ -2797,15 +2799,40 @@ createApp({
           const initialPid = payload.initial_assessment?.evaluated_pid || latestEvaluation.initial_assessment?.evaluated_pid || null;
           const autoRefineResult = payload.auto_refine_result || latestEvaluation.auto_refine_result || {};
           const modelRetryResult = payload.model_retry_result || latestEvaluation.model_retry_result || {};
+          const selectedCandidate = payload.evaluation_selected_candidate || latestEvaluation.evaluation_selected_candidate || {};
+          const evaluationCandidates = Array.isArray(payload.evaluation_candidates)
+            ? payload.evaluation_candidates
+            : (Array.isArray(latestEvaluation.evaluation_candidates) ? latestEvaluation.evaluation_candidates : []);
+          const scenarioEvaluations = payload.scenario_evaluations || latestEvaluation.scenario_evaluations || {};
+          const scenarioItems = [
+            { key: 'forward_step', label: '正向阶跃' },
+            { key: 'reverse_step', label: '反向阶跃' },
+            { key: 'disturbance_rejection', label: '扰动抑制' },
+            { key: 'perturbation_robustness', label: '参数摄动' },
+            { key: 'constraints', label: '约束检查' }
+          ].map((item) => {
+            const data = scenarioEvaluations[item.key] || {};
+            const scoreValue = data.score ?? data.performance_score ?? data.final_rating;
+            return {
+              key: item.key,
+              label: item.label,
+              passed: data.passed,
+              score: Number.isFinite(Number(scoreValue)) ? this.formatNumber(Number(scoreValue), 2) : '-',
+              summary: data.summary || data.reason || data.message || ''
+            };
+          }).filter(item => item.summary || item.score !== '-' || typeof item.passed === 'boolean');
           return {
             passed: payload.passed === true,
             passThreshold: this.formatNumber(Number(payload.pass_threshold ?? latestEvaluation.pass_threshold ?? 7), 2),
-            performanceScore: this.formatScore100(Number(payload.performance_score ?? latestEvaluation.performance_score), 1),
-            finalRating: this.formatScore100(Number(payload.final_rating ?? latestEvaluation.final_rating), 1),
+            performanceScore: this.formatScore100(Number(payload.acceptance_performance_score ?? payload.performance_score ?? latestEvaluation.acceptance_performance_score ?? latestEvaluation.performance_score), 1),
+            finalRating: this.formatScore100(Number(payload.online_readiness_score ?? payload.final_rating ?? latestEvaluation.online_readiness_score ?? latestEvaluation.final_rating), 1),
             methodConfidence: this.formatPercent(Number(payload.method_confidence ?? latestEvaluation.method_confidence), 1),
+            robustnessScore: this.formatScore100(Number(payload.robustness_score ?? latestEvaluation.robustness_score), 1),
+            constraintScore: this.formatScore100(Number(payload.constraint_score ?? latestEvaluation.constraint_score), 1),
             failureReason: this.deriveEvaluationFailureReason({ ...latestEvaluation, ...payload }),
             feedbackTarget: payload.feedback_target_display || payload.feedback_target || latestEvaluation.feedback_target_display || latestEvaluation.feedback_target || '-',
             feedbackAction: payload.feedback_action || latestEvaluation.feedback_action || '',
+            launchRecommendation: payload.launch_recommendation || latestEvaluation.launch_recommendation || '',
             overshoot: this.formatNumber(Number(performanceDetails.overshoot), 2),
             settlingTime: Number.isFinite(Number(performanceDetails.settling_time)) ? `${this.formatNumber(Number(performanceDetails.settling_time), 2)} s` : '-',
             steadyStateError: Number.isFinite(Number(performanceDetails.steady_state_error)) ? `${this.formatNumber(Number(performanceDetails.steady_state_error), 2)}%` : '-',
@@ -2817,6 +2844,31 @@ createApp({
             initialPidText: initialPid
               ? `Kp=${this.formatNumber(Number(initialPid.Kp), 4)} / Ki=${this.formatNumber(Number(initialPid.Ki), 4)} / Kd=${this.formatNumber(Number(initialPid.Kd), 4)}`
               : '',
+            selectedCandidate: {
+              modelType: this.modelTypeLabel(selectedCandidate.model_type || payload.model_type || ''),
+              modelParamsSummary: this.summarizeModelParams(selectedCandidate.selected_model_params || {}),
+              windowSource: selectedCandidate.window_source || '-',
+              strategy: this.strategyDisplayLabel(selectedCandidate.strategy || ''),
+              acceptancePerformanceScore: this.formatNumber(selectedCandidate.acceptance_performance_score, 2),
+              robustnessScore: this.formatNumber(selectedCandidate.robustness_score, 2),
+              constraintScore: this.formatNumber(selectedCandidate.constraint_score, 2),
+              onlineReadinessScore: this.formatNumber(selectedCandidate.online_readiness_score, 2),
+              passed: selectedCandidate.passed === true
+            },
+            evaluationCandidates: evaluationCandidates.map((item, idx) => ({
+              rank: item.rank || (idx + 1),
+              modelType: this.modelTypeLabel(item.model_type || ''),
+              modelParamsSummary: this.summarizeModelParams(item.selected_model_params || {}),
+              windowSource: item.window_source || '-',
+              strategy: this.strategyDisplayLabel(item.strategy || ''),
+              acceptancePerformanceScore: this.formatNumber(item.acceptance_performance_score, 2),
+              robustnessScore: this.formatNumber(item.robustness_score, 2),
+              constraintScore: this.formatNumber(item.constraint_score, 2),
+              onlineReadinessScore: this.formatNumber(item.online_readiness_score, 2),
+              passed: item.passed === true,
+              isSelected: item.is_selected === true
+            })),
+            scenarioItems,
             autoRefineResult,
             autoRefineSummary: autoRefineResult?.applied
               ? `已自动细调，输出 Kp=${this.formatNumber(Number(autoRefineResult?.output_pid?.Kp), 4)} / Ki=${this.formatNumber(Number(autoRefineResult?.output_pid?.Ki), 4)} / Kd=${this.formatNumber(Number(autoRefineResult?.output_pid?.Kd), 4)}`
@@ -3204,8 +3256,13 @@ createApp({
               this.csvDerivedEndTime = this.normalizeChartRangeValue(timeRange?.end_time || '', { xAxisType: 'timestamp' });
             }
 
-            if (loops.length === 1) {
-              this.csvSelectedLoopPrefix = String(loops[0]?.prefix || '').trim();
+            const defaultLoopPrefix =
+              loops.length === 1
+                ? String(loops[0]?.prefix || '').trim()
+                : String(this.csvRecommendedLoopPrefix || loops[0]?.prefix || '').trim();
+            if (defaultLoopPrefix) {
+              this.csvSelectedLoopPrefix = defaultLoopPrefix;
+              this.applyCsvLoopTimeRange(this.csvSelectedLoopPrefix);
             }
           } catch (error) {
             console.error('Failed to inspect CSV loops:', error);
@@ -3213,6 +3270,24 @@ createApp({
           } finally {
             this.csvLoopInspecting = false;
           }
+        },
+
+        applyCsvLoopTimeRange(selectedPrefix) {
+          const prefix = String(selectedPrefix || '').trim();
+          if (!prefix) return;
+          const matchedLoop = (this.csvDetectedLoops || []).find(loop => String(loop?.prefix || '').trim() === prefix);
+          if (!matchedLoop) return;
+          const timeRange = matchedLoop?.time_range || {};
+          if (!this.csvTimeRangeDirty || (!this.csvDerivedStartTime && !this.csvDerivedEndTime)) {
+            this.csvDerivedStartTime = this.normalizeChartRangeValue(timeRange?.start_time || '', { xAxisType: 'timestamp' });
+            this.csvDerivedEndTime = this.normalizeChartRangeValue(timeRange?.end_time || '', { xAxisType: 'timestamp' });
+          }
+        },
+
+        handleCsvLoopSelectionChange(value) {
+          this.csvSelectedLoopPrefix = String(value || '').trim();
+          this.csvTimeRangeDirty = false;
+          this.applyCsvLoopTimeRange(this.csvSelectedLoopPrefix);
         },
 
         clearUploadedFile() {
