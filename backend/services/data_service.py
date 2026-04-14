@@ -9,13 +9,38 @@ import pandas as pd
 from skills.data_analysis_skills import prepare_pid_dataset
 
 
+def _detect_time_column(cleaned_df: Any) -> str | None:
+    """自动检测时间列"""
+    if cleaned_df is None or len(cleaned_df) == 0:
+        return None
+    
+    time_column = None
+    max_valid_count = 0
+    
+    for col in cleaned_df.columns:
+        try:
+            # 尝试将列解析为 datetime
+            parsed = pd.to_datetime(cleaned_df[col], errors='coerce')
+            valid_count = parsed.notna().sum()
+            
+            if valid_count > max_valid_count and valid_count > len(cleaned_df) * 0.5:  # 至少50%的数据是有效时间
+                max_valid_count = valid_count
+                time_column = col
+        except Exception:
+            continue
+    
+    return time_column
+
+
 def enrich_step_events_with_time(cleaned_df: Any, step_events: list[Dict[str, Any]] | None) -> list[Dict[str, Any]]:
     if cleaned_df is None or len(cleaned_df) == 0 or not step_events:
         return step_events or []
-    if "timestamp" not in cleaned_df.columns:
+    
+    time_column = _detect_time_column(cleaned_df)
+    if not time_column:
         return step_events or []
 
-    timestamps = cleaned_df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
+    timestamps = cleaned_df[time_column].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
     last_index = len(timestamps) - 1
     enriched: list[Dict[str, Any]] = []
     for event in step_events:
@@ -57,8 +82,9 @@ def build_window_overview(
     window_end = max(window_start, min(window_end, n - 1))
 
     timestamp_strings = None
-    if "timestamp" in cleaned_df.columns:
-        timestamp_strings = cleaned_df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
+    time_column = _detect_time_column(cleaned_df)
+    if time_column:
+        timestamp_strings = cleaned_df[time_column].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
 
     points = []
     for i in indices:
@@ -107,7 +133,8 @@ def _build_interpolated_point(
     window_start: int,
     window_end: int,
 ) -> Dict[str, Any]:
-    timestamps = cleaned_df["timestamp"]
+    time_column = _detect_time_column(cleaned_df)
+    timestamps = cleaned_df[time_column] if time_column else None
     pv = cleaned_df["PV"].to_numpy(dtype=float)
     mv = cleaned_df["MV"].to_numpy(dtype=float)
     sv = cleaned_df["SV"].to_numpy(dtype=float) if "SV" in cleaned_df.columns else None
@@ -137,10 +164,14 @@ def build_time_range_overview(
     end_time: Any,
     max_points: int = 240,
 ) -> Dict[str, Any]:
-    if cleaned_df is None or len(cleaned_df) == 0 or "timestamp" not in cleaned_df.columns:
+    if cleaned_df is None or len(cleaned_df) == 0:
+        return {"points": [], "window_start": 0, "window_end": 0}
+    
+    time_column = _detect_time_column(cleaned_df)
+    if not time_column:
         return {"points": [], "window_start": 0, "window_end": 0}
 
-    timestamps = cleaned_df["timestamp"]
+    timestamps = cleaned_df[time_column]
     timestamp_index = pd.DatetimeIndex(timestamps)
     start_dt = pd.to_datetime(start_time, errors="coerce")
     end_dt = pd.to_datetime(end_time, errors="coerce")

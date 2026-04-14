@@ -435,29 +435,70 @@ def normalize_pid_columns(df: pd.DataFrame, selected_loop_prefix: str | None = N
     return normalized
 
 
+def _detect_time_column(df: pd.DataFrame) -> str | None:
+    """自动检测时间列"""
+    if df is None or len(df) == 0:
+        return None
+    
+    time_column = None
+    max_valid_count = 0
+    
+    for col in df.columns:
+        try:
+            # 尝试将列解析为 datetime
+            parsed = pd.to_datetime(df[col], errors='coerce')
+            valid_count = parsed.notna().sum()
+            
+            if valid_count > max_valid_count and valid_count > len(df) * 0.5:  # 至少50%的数据是有效时间
+                max_valid_count = valid_count
+                time_column = col
+        except Exception:
+            continue
+    
+    # 如果没有检测到时间列，尝试使用 "timestamp" 列
+    if not time_column and "timestamp" in df.columns:
+        try:
+            parsed = pd.to_datetime(df["timestamp"], errors='coerce')
+            valid_count = parsed.notna().sum()
+            if valid_count > len(df) * 0.5:
+                time_column = "timestamp"
+        except Exception:
+            pass
+    
+    return time_column
+
+
 def parse_timestamp_column(df: pd.DataFrame) -> pd.DataFrame:
-    if "timestamp" not in df.columns:
+    # 自动检测时间列
+    time_column = _detect_time_column(df)
+    
+    # 如果没有检测到时间列，尝试使用 "timestamp" 列
+    if not time_column and "timestamp" in df.columns:
+        time_column = "timestamp"
+    
+    if not time_column:
         return df
 
-    ts = df["timestamp"]
+    ts = df[time_column]
     if pd.api.types.is_numeric_dtype(ts):
         unit = "ms" if ts.dropna().abs().median() > 1e11 else "s"
-        df["timestamp"] = (
+        df[time_column] = (
             pd.to_datetime(ts, unit=unit, errors="coerce", utc=True)
             .dt.tz_convert(LOCAL_TIMEZONE)
             .dt.tz_localize(None)
         )
     else:
-        df["timestamp"] = pd.to_datetime(ts, errors="coerce")
+        df[time_column] = pd.to_datetime(ts, errors="coerce")
 
-    return df.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    return df.dropna(subset=[time_column]).sort_values(time_column).reset_index(drop=True)
 
 
 def estimate_sampling_time(df: pd.DataFrame, fallback: float = 1.0) -> float:
-    if "timestamp" not in df.columns or len(df) < 2:
+    time_column = _detect_time_column(df)
+    if not time_column or len(df) < 2:
         return fallback
 
-    deltas = df["timestamp"].diff().dt.total_seconds().dropna()
+    deltas = df[time_column].diff().dt.total_seconds().dropna()
     deltas = deltas[deltas > 0]
     if deltas.empty:
         return fallback
@@ -611,13 +652,14 @@ def _score_candidate_window(df: pd.DataFrame, event: Dict) -> Dict:
     window_end_time = None
     event_start_time = None
     event_end_time = None
-    if "timestamp" in df.columns and len(df) > 0:
+    time_column = _detect_time_column(df)
+    if time_column and len(df) > 0:
         last = len(df) - 1
         start_i = max(0, min(start, last))
         end_i = max(0, min(end - 1, last))
         event_start_i = max(0, min(int(event.get("start_idx", start_i) or start_i), last))
         event_end_i = max(0, min(int(event.get("end_idx", event_start_i) or event_start_i) - 1, last))
-        ts = df["timestamp"]
+        ts = df[time_column]
         if len(ts) > 0:
             try:
                 window_start_time = ts.iloc[start_i].strftime("%Y-%m-%d %H:%M:%S")
@@ -811,19 +853,23 @@ def load_and_slice_data(csv_path: str, max_pv_change: bool = True) -> pd.DataFra
         max_pv_change: 是否提取最大PV变化段
     
     Returns:
-        DataFrame with columns: timestamp, SV, PV, MV
+        DataFrame with time column, SV, PV, MV
     """
     df = _read_csv_with_fallback(csv_path)
     
     # 确保必要的列存在
-    required_cols = ['timestamp', 'SV', 'PV', 'MV']
+    required_cols = ['SV', 'PV', 'MV']
     for col in required_cols:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
     
-    # 转换时间戳
-    if 'timestamp' in df.columns:
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+    # 自动检测时间列
+    time_column = _detect_time_column(df)
+    if not time_column:
+        raise ValueError("CSV 文件中没有找到时间列")
+    
+    df[time_column] = pd.to_datetime(df[time_column], errors='coerce')
+    df = df.dropna(subset=[time_column]).reset_index(drop=True)
     
     if max_pv_change:
         # 计算PV的滑动窗口变化量

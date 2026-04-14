@@ -269,8 +269,20 @@ def build_fit_preview(
     pv_fit = pv[0] + np.asarray(simulated_delta)
 
     timestamp_strings = None
-    if "timestamp" in window_df.columns:
-        timestamp_strings = window_df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
+    # 自动检测时间列
+    time_column = None
+    for col in window_df.columns:
+        try:
+            parsed = pd.to_datetime(window_df[col], errors='coerce')
+            valid_count = parsed.notna().sum()
+            if valid_count > len(window_df) * 0.5:
+                time_column = col
+                break
+        except Exception:
+            continue
+    
+    if time_column:
+        timestamp_strings = window_df[time_column].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
 
     points = []
     for i in indices:

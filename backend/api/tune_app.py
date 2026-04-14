@@ -661,6 +661,151 @@ def create_app(
             if csv_path and os.path.exists(csv_path):
                 os.remove(csv_path)
 
+    @app.post("/api/tuning/csv/slice-by-time")
+    async def slice_csv_by_time(
+        file: UploadFile = File(...),
+        start_time: str = Form(...),
+        end_time: str = Form(...),
+        selected_loop_prefix: str | None = Form(default=None),
+    ) -> Any:
+        csv_path = ""
+        sliced_csv_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
+                content = await file.read()
+                tmp_file.write(content)
+                csv_path = tmp_file.name
+
+            raw_df = _read_csv_with_fallback(csv_path)
+            
+            # 自动检测时间列
+            time_column = None
+            max_valid_count = 0
+            
+            for col in raw_df.columns:
+                try:
+                    # 尝试将列解析为 datetime
+                    parsed = pd.to_datetime(raw_df[col], errors='coerce')
+                    valid_count = parsed.notna().sum()
+                    
+                    if valid_count > max_valid_count and valid_count > len(raw_df) * 0.5:  # 至少50%的数据是有效时间
+                        max_valid_count = valid_count
+                        time_column = col
+                except Exception:
+                    continue
+            
+            # 如果没有检测到时间列，尝试使用 "timestamp" 列
+            if not time_column and "timestamp" in raw_df.columns:
+                try:
+                    parsed = pd.to_datetime(raw_df["timestamp"], errors='coerce')
+                    valid_count = parsed.notna().sum()
+                    if valid_count > len(raw_df) * 0.5:
+                        time_column = "timestamp"
+                except Exception:
+                    pass
+            
+            if time_column is None:
+                return JSONResponse(
+                    {
+                        "code": 1,
+                        "message": "CSV 文件中没有找到时间列",
+                        "error_code": "TIME_COLUMN_NOT_FOUND",
+                        "error_type": "validation_error",
+                        "detail": "CSV 文件必须包含可识别的时间列才能按时间切分",
+                    },
+                    status_code=400,
+                )
+            
+            raw_df[time_column] = pd.to_datetime(raw_df[time_column], errors='coerce')
+            raw_df = raw_df.dropna(subset=[time_column]).reset_index(drop=True)
+            
+            if len(raw_df) == 0:
+                return JSONResponse(
+                    {
+                        "code": 1,
+                        "message": "CSV 文件中没有找到有效的时间数据",
+                        "error_code": "NO_VALID_TIME_DATA",
+                        "error_type": "validation_error",
+                        "detail": "CSV 文件中的时间列没有包含可解析的时间数据",
+                    },
+                    status_code=400,
+                )
+            
+            start_dt = pd.to_datetime(start_time)
+            end_dt = pd.to_datetime(end_time)
+            
+            if start_dt > end_dt:
+                return JSONResponse(
+                    {
+                        "code": 1,
+                        "message": "开始时间不能晚于结束时间",
+                        "error_code": "INVALID_TIME_RANGE",
+                        "error_type": "validation_error",
+                        "detail": "请检查开始时间和结束时间的设置",
+                    },
+                    status_code=400,
+                )
+            
+            mask = (raw_df[time_column] >= start_dt) & (raw_df[time_column] <= end_dt)
+            sliced_df = raw_df[mask].copy()
+            
+            if len(sliced_df) == 0:
+                return JSONResponse(
+                    {
+                        "code": 1,
+                        "message": "选择的时间范围内没有数据",
+                        "error_code": "NO_DATA_IN_RANGE",
+                        "error_type": "validation_error",
+                        "detail": f"在 {start_time} 到 {end_time} 范围内没有找到数据",
+                    },
+                    status_code=400,
+                )
+            
+            # 保持原始时间格式
+            sliced_df[time_column] = sliced_df[time_column].dt.strftime("%Y-%m-%d %H:%M:%S")
+            
+            sliced_csv_path = tempfile.mktemp(suffix=".csv")
+            sliced_df.to_csv(sliced_csv_path, index=False)
+            
+            with open(sliced_csv_path, "rb") as f:
+                sliced_content = f.read()
+            
+            import base64
+            sliced_file_base64 = base64.b64encode(sliced_content).decode("utf-8")
+            
+            return JSONResponse(
+                {
+                    "code": 0,
+                    "message": "ok",
+                    "data": {
+                        "sliced_file_base64": sliced_file_base64,
+                        "sliced_file_name": f"sliced_{os.path.basename(file.filename)}",
+                        "original_rows": len(raw_df),
+                        "sliced_rows": len(sliced_df),
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "time_column": time_column,  # 返回检测到的时间列名
+                    },
+                }
+            )
+        except Exception as exc:
+            mapped_error = _map_workflow_error(exc)
+            return JSONResponse(
+                {
+                    "code": 1,
+                    "message": mapped_error["message"],
+                    "error_code": mapped_error["error_code"],
+                    "error_type": mapped_error["error_type"],
+                    "detail": mapped_error["detail"],
+                },
+                status_code=400,
+            )
+        finally:
+            if csv_path and os.path.exists(csv_path):
+                os.remove(csv_path)
+            if sliced_csv_path and os.path.exists(sliced_csv_path):
+                os.remove(sliced_csv_path)
+
     @app.post("/api/tuning/csv/inspect-windows")
     async def inspect_csv_windows(
         file: UploadFile = File(...),
@@ -676,7 +821,18 @@ def create_app(
             dataset = load_pid_dataset(csv_path, selected_loop_prefix=selected_loop_prefix)
             cleaned_df = dataset.get("cleaned_df")
             candidate_windows = dataset.get("candidate_windows") or []
-            timestamps = cleaned_df["timestamp"] if cleaned_df is not None and "timestamp" in cleaned_df.columns else None
+            time_column = None
+            if cleaned_df is not None:
+                for col in cleaned_df.columns:
+                    try:
+                        parsed = pd.to_datetime(cleaned_df[col], errors='coerce')
+                        valid_count = parsed.notna().sum()
+                        if valid_count > len(cleaned_df) * 0.5:
+                            time_column = col
+                            break
+                    except Exception:
+                        continue
+            timestamps = cleaned_df[time_column] if cleaned_df is not None and time_column else None
 
             ranked: list[dict[str, Any]] = []
             for idx, event in enumerate(candidate_windows):
@@ -1303,7 +1459,7 @@ def create_app(
             overview = dataset.get("window_overview") or {}
             cleaned_df = dataset.get("cleaned_df")
 
-            if cleaned_df is not None and len(cleaned_df) and "timestamp" in cleaned_df.columns:
+            if cleaned_df is not None and len(cleaned_df):
                 overview = build_time_range_overview(
                     cleaned_df,
                     dataset.get("selected_window") or {},

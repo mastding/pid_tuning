@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -3383,7 +3383,7 @@
     </section>
 
     <div v-if="tuningTaskModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" @click.self="closeTuningTaskModal">
-      <div class="w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+      <div class="w-full max-w-6xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
         <div class="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5">
           <div>
             <h3 class="text-xl font-bold text-slate-900">新建整定任务</h3>
@@ -3484,6 +3484,28 @@
                         <button v-if="uploadedFile" type="button" class="shell-inline-action" @click="clearUploadedFile">清除文件</button>
                       </div>
                       <p v-if="csvLoopInspectError" class="mt-2 text-xs text-red-600">{{ csvLoopInspectError }}</p>
+                      <div v-if="csvTimeRange.startTime && csvTimeRange.endTime" class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                        <div class="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">时间范围选择</div>
+                        <div class="mt-1 text-xs text-emerald-600">CSV 数据时间范围：{{ csvTimeRange.startTime.replace('T', ' ') }} 至 {{ csvTimeRange.endTime.replace('T', ' ') }}</div>
+                        <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <div>
+                            <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">开始时间</label>
+                            <input v-model="csvSelectedTimeRange.startTime" type="datetime-local" step="1" class="w-full rounded-xl border border-emerald-300 px-4 py-3 text-sm text-slate-800 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                          </div>
+                          <div>
+                            <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">结束时间</label>
+                            <input v-model="csvSelectedTimeRange.endTime" type="datetime-local" step="1" class="w-full rounded-xl border border-emerald-300 px-4 py-3 text-sm text-slate-800 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                          </div>
+                        </div>
+                        <div class="mt-3 flex items-center gap-3">
+                          <button type="button" class="shell-inline-action" :disabled="csvTimeRangeLoading || !csvSelectedTimeRange.startTime || !csvSelectedTimeRange.endTime" @click="sliceCsvByTimeRange">
+                            {{ csvTimeRangeLoading ? '正在切分...' : '应用时间范围' }}
+                          </button>
+                          <span v-if="csvSelectedTimeRange.startTime && csvSelectedTimeRange.endTime" class="text-xs text-emerald-700">
+                            已选择：{{ csvSelectedTimeRange.startTime.replace('T', ' ') }} 至 {{ csvSelectedTimeRange.endTime.replace('T', ' ') }}
+                          </span>
+                        </div>
+                      </div>
                       <div v-if="csvDetectedLoops.length === 1" class="mt-3 rounded-xl border border-slate-200 bg-white p-4">
                         <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">整定回路</div>
                         <div class="mt-2 text-sm text-slate-800">
@@ -3506,7 +3528,7 @@
                           </label>
                         </div>
                       </div>
-                      <div v-else class="mt-3 rounded-xl border border-slate-200 bg-white p-4">
+                      <div v-else-if="csvDetectedLoops.length === 0 && !csvLoopInspecting && uploadedFile" class="mt-3 rounded-xl border border-slate-200 bg-white p-4">
                         <div class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">回路识别</div>
                         <div class="mt-2 text-sm text-slate-700">未检测到回路前缀列（如 prefix.pv / prefix.mv）。系统将按 PV/MV/SV 列名或别名自动解析，无需选择回路。</div>
                       </div>

@@ -51,3 +51,19 @@ export const inspectCsvLoops = async (formData) => {
   }
   return payload.data || {};
 };
+
+export const sliceCsvByTime = async (formData) => {
+  const res = await apiFetch('/api/tuning/csv/slice-by-time', {
+    method: 'POST',
+    body: formData
+  });
+  const payload = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = payload?.message || `HTTP error! status: ${res.status}`;
+    throw new Error(message);
+  }
+  if (!payload || payload.code !== 0) {
+    throw new Error(payload?.message || '时间切分失败');
+  }
+  return payload.data || {};
+};

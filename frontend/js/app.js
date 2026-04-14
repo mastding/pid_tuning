@@ -21,7 +21,7 @@ import {
   fetchCaseLibraryItems as fetchCaseLibraryItemsApi,
   fetchCaseLibraryStats as fetchCaseLibraryStatsApi
 } from './api/case-library.js';
-import { fetchPidChartData, fetchPidPredictionCurve, inspectCsvLoops, startTuneStream } from './api/tuning.js';
+import { fetchPidChartData, fetchPidPredictionCurve, inspectCsvLoops, sliceCsvByTime, startTuneStream } from './api/tuning.js';
 import { createRafScheduler, destroyPidAnalysisChart, renderPidAnalysisChart } from './charts/index.js';
 import { loadHelpCenterMarkdown } from './content/help-center.js';
 import { buildHelpCenterRenderModel } from './content/help-center-render.js';
@@ -83,6 +83,15 @@ createApp({
       csvArchivedOriginalPath: '',
       csvArchivedProcessedPath: '',
       csvArtifactDirectory: '',
+      csvTimeRange: {
+        startTime: '',
+        endTime: ''
+      },
+      csvSelectedTimeRange: {
+        startTime: '',
+        endTime: ''
+      },
+      csvTimeRangeLoading: false,
       historyWindow: 1,
       historyPanelCollapsed: false,
       loopType: 'flow',
@@ -3132,7 +3141,10 @@ createApp({
           this.csvArchivedOriginalPath = '';
           this.csvArchivedProcessedPath = '';
           this.csvArtifactDirectory = '';
+          this.csvTimeRange = { startTime: '', endTime: '' };
+          this.csvSelectedTimeRange = { startTime: '', endTime: '' };
           if (!this.uploadedFile) return;
+          await this.parseCsvTimeRange();
           await this.inspectUploadedCsvLoops();
         },
 
@@ -3156,11 +3168,187 @@ createApp({
             if (loops.length === 1) {
               this.csvSelectedLoopPrefix = String(loops[0]?.prefix || '').trim();
             }
+            
+            await this.parseCsvTimeRange();
           } catch (error) {
             console.error('Failed to inspect CSV loops:', error);
             this.csvLoopInspectError = error?.message || '回路识别失败';
           } finally {
             this.csvLoopInspecting = false;
+          }
+        },
+
+        async parseCsvTimeRange() {
+          if (!this.uploadedFile) return;
+
+          this.csvTimeRangeLoading = true;
+          try {
+            const text = await this.uploadedFile.text();
+            const lines = text.split('\n').filter(line => line.trim());
+            if (lines.length < 2) {
+              this.csvTimeRange = { startTime: '', endTime: '' };
+              return;
+            }
+
+            const header = lines[0].split(',').map(h => h.trim());
+            
+            // 自动检测时间列
+            let bestTimeColumnIndex = -1;
+            let bestTimeCount = 0;
+            
+            // 尝试解析每一列，找到最可能是时间列的列
+            for (let colIndex = 0; colIndex < header.length; colIndex++) {
+              let validTimeCount = 0;
+              
+              for (let rowIndex = 1; rowIndex < Math.min(lines.length, 200); rowIndex++) {
+                const columns = lines[rowIndex].split(',');
+                if (columns.length > colIndex) {
+                  const value = columns[colIndex].trim();
+                  if (value) {
+                    const parsed = this.parseDateTime(value);
+                    if (parsed && parsed.getTime() > 0) {
+                      validTimeCount++;
+                    }
+                  }
+                }
+              }
+              
+              if (validTimeCount > bestTimeCount) {
+                bestTimeCount = validTimeCount;
+                bestTimeColumnIndex = colIndex;
+              }
+            }
+            
+            if (bestTimeColumnIndex === -1) {
+              this.csvTimeRange = { startTime: '', endTime: '' };
+              this.csvSelectedTimeRange = { startTime: '', endTime: '' };
+              return;
+            }
+
+            const timestamps = [];
+            for (let i = 1; i < lines.length; i++) {
+              const columns = lines[i].split(',');
+              if (columns.length > bestTimeColumnIndex) {
+                const ts = columns[bestTimeColumnIndex].trim();
+                if (ts) {
+                  const d = this.parseDateTime(ts);
+                  if (d && d.getTime() > 0) {
+                    timestamps.push({ original: ts, date: d });
+                  }
+                }
+              }
+            }
+
+            if (timestamps.length > 0) {
+              timestamps.sort((a, b) => a.date - b.date);
+              
+              const toDatetimeLocal = (d) => {
+                if (!d || d.getTime() <= 0) return '';
+                const pad = (n) => String(n).padStart(2, '0');
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+              };
+              
+              const startLocal = toDatetimeLocal(timestamps[0].date);
+              const endLocal = toDatetimeLocal(timestamps[timestamps.length - 1].date);
+              
+              this.csvTimeRange = {
+                startTime: startLocal,
+                endTime: endLocal
+              };
+              this.csvSelectedTimeRange = {
+                startTime: startLocal,
+                endTime: endLocal
+              };
+            }
+          } catch (error) {
+            console.error('Failed to parse CSV time range:', error);
+            this.csvTimeRange = { startTime: '', endTime: '' };
+            this.csvSelectedTimeRange = { startTime: '', endTime: '' };
+          } finally {
+            this.csvTimeRangeLoading = false;
+          }
+        },
+        
+        // 增强的时间解析函数，支持多种时间格式
+        parseDateTime(value) {
+          // 处理 "2025/9/25 0:00:00" 格式（优先处理，避免new Date解析错误）
+          const slashMatch = value.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})\s*(\d{1,2}):(\d{2}):(\d{2})/);
+          if (slashMatch) {
+            const [, year, month, day, hour, minute, second] = slashMatch.map(Number);
+            const d = new Date(year, month - 1, day, hour, minute, second);
+            if (!isNaN(d.getTime())) {
+              return d;
+            }
+          }
+          
+          // 处理 "2025-9-25 0:00:00" 格式
+          const dashMatch = value.match(/(\d{4})-(\d{1,2})-(\d{1,2})\s*(\d{1,2}):(\d{2}):(\d{2})/);
+          if (dashMatch) {
+            const [, year, month, day, hour, minute, second] = dashMatch.map(Number);
+            const d = new Date(year, month - 1, day, hour, minute, second);
+            if (!isNaN(d.getTime())) {
+              return d;
+            }
+          }
+          
+          // 尝试直接解析
+          let d = new Date(value);
+          if (!isNaN(d.getTime())) {
+            return d;
+          }
+          
+          // 处理其他格式
+          return new Date(0); // 返回无效日期
+        },
+
+        async sliceCsvByTimeRange() {
+          if (!this.uploadedFile || !this.csvSelectedTimeRange.startTime || !this.csvSelectedTimeRange.endTime) {
+            return;
+          }
+
+          this.csvTimeRangeLoading = true;
+          try {
+            const toBackendTime = (dtLocal) => dtLocal.replace('T', ' ');
+            const formData = new FormData();
+            formData.append('file', this.uploadedFile);
+            formData.append('start_time', toBackendTime(this.csvSelectedTimeRange.startTime));
+            formData.append('end_time', toBackendTime(this.csvSelectedTimeRange.endTime));
+            if (this.csvSelectedLoopPrefix) {
+              formData.append('selected_loop_prefix', this.csvSelectedLoopPrefix);
+            }
+
+            const payload = await sliceCsvByTime(formData);
+            
+            const { sliced_file_base64, sliced_file_name, sliced_rows } = payload;
+            
+            const binaryString = atob(sliced_file_base64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            
+            const slicedFile = new File([bytes], sliced_file_name, { type: 'text/csv' });
+            
+            this.uploadedFile = slicedFile;
+            this.csvUploadedFileName = sliced_file_name;
+            this.csvUploadedFileHash = await this.computeUploadedFileHash(slicedFile);
+            this.csvTimeRange = { startTime: '', endTime: '' };
+            this.csvSelectedTimeRange = { startTime: '', endTime: '' };
+            
+            await this.parseCsvTimeRange();
+            
+            this.$nextTick(() => {
+              if (this.$refs.fileInput) {
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(slicedFile);
+                this.$refs.fileInput.files = dataTransfer.files;
+              }
+            });
+          } catch (error) {
+            console.error('Failed to slice CSV by time:', error);
+            this.csvLoopInspectError = error?.message || '时间切分失败';
+          } finally {
+            this.csvTimeRangeLoading = false;
           }
         },
 
@@ -3175,6 +3363,8 @@ createApp({
           this.csvArchivedOriginalPath = '';
           this.csvArchivedProcessedPath = '';
           this.csvArtifactDirectory = '';
+          this.csvTimeRange = { startTime: '', endTime: '' };
+          this.csvSelectedTimeRange = { startTime: '', endTime: '' };
           if (this.$refs.fileInput) {
             this.$refs.fileInput.value = '';
           }
