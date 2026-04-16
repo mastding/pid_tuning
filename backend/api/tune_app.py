@@ -77,6 +77,30 @@ PID_DATASET_CACHE_MAX_ITEMS = 16
 _pid_dataset_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 
 
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, set):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "tolist"):
+        try:
+            return _json_safe(value.tolist())
+        except Exception:
+            pass
+    if hasattr(value, "item"):
+        try:
+            return _json_safe(value.item())
+        except Exception:
+            return str(value)
+    return str(value)
+
+
 def _build_pid_chart_cache_key(
     *,
     task_session_id: str,
@@ -594,7 +618,7 @@ def create_app(
                             f"[tune_stream] client_disconnected_before_yield "
                             f"loop={loop_name} event_count={event_count} last_event_type={event.get('type')}"
                         )
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(_json_safe(event), ensure_ascii=False)}\n\n"
                     if event_count <= 3 or event.get("type") in {"error", "result", "done"}:
                         print(
                             f"[tune_stream] yield loop={loop_name} event_count={event_count} "
@@ -622,7 +646,7 @@ def create_app(
                     "error_detail": mapped_error["detail"],
                     "traceback": traceback.format_exc(),
                 }
-                yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(_json_safe(error_msg), ensure_ascii=False)}\n\n"
             finally:
                 print(
                     f"[tune_stream] close loop={loop_name} event_count={event_count} "
@@ -812,7 +836,7 @@ def create_app(
         if response_mode == "streaming":
             async def stream_events() -> AsyncGenerator[str, None]:
                 accepted = {"type": "accepted", "task_id": task_id}
-                yield f"data: {json.dumps(accepted, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(_json_safe(accepted), ensure_ascii=False)}\n\n"
                 try:
                     async for event in _workflow_event_generator(
                         csv_path="",
@@ -827,7 +851,7 @@ def create_app(
                         data_type="interpolated",
                         window=payload.window,
                     ):
-                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps(_json_safe(event), ensure_ascii=False)}\n\n"
                 except Exception as exc:
                     import traceback
 
@@ -841,7 +865,7 @@ def create_app(
                         "error_detail": mapped_error["detail"],
                         "traceback": traceback.format_exc(),
                     }
-                    yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(_json_safe(error_msg), ensure_ascii=False)}\n\n"
 
             return StreamingResponse(
                 stream_events(),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import numpy as np
 from typing import Any, Callable, Dict, Mapping
 
 from memory.experience_service import retrieve_experience_guidance
@@ -255,21 +256,51 @@ def _summarize_step_events_for_llm(step_events: Any, *, limit: int = 6) -> list[
     return summary
 
 
-def _summarize_candidate_windows_for_llm(candidate_windows: Any, *, limit: int = 8) -> list[Dict[str, Any]]:
+def _summarize_candidate_windows_for_llm(cleaned_df: Any, candidate_windows: Any, *, limit: int = 8) -> list[Dict[str, Any]]:
+    events = list(candidate_windows or [])
+
     summary: list[Dict[str, Any]] = []
-    for window in list(candidate_windows or [])[:limit]:
+    for idx, window in enumerate(events[:limit]):
         if not isinstance(window, Mapping):
             continue
+        window_type = str(window.get("type") or "")
+        window_start_idx = int(window.get("window_start_idx", window.get("start_idx", 0)) or 0)
+        window_end_idx = int(window.get("window_end_idx", window.get("end_idx", 0)) or 0)
+        base_name = "step_event"
+        if window_type == "mv_peak":
+            base_name = "mv_peak"
+        window_source = str(window.get("window_source") or window.get("source") or f"{base_name}_{idx + 1}")
+
+        window_start_time = None
+        window_end_time = None
+        if cleaned_df is not None and "timestamp" in getattr(cleaned_df, "columns", []):
+            try:
+                last = len(cleaned_df) - 1
+                start_i = max(0, min(window_start_idx, last))
+                end_i = max(0, min(max(window_end_idx - 1, window_start_idx), last))
+                ts = cleaned_df["timestamp"]
+                window_start_time = ts.iloc[start_i].strftime("%Y-%m-%d %H:%M:%S")
+                window_end_time = ts.iloc[end_i].strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                window_start_time = None
+                window_end_time = None
         summary.append(
             {
-                "window_source": str(window.get("window_source") or window.get("source") or ""),
-                "type": str(window.get("type") or ""),
+                "window_source": window_source,
+                "type": window_type,
                 "start_idx": int(window.get("start_idx") or 0),
                 "end_idx": int(window.get("end_idx") or 0),
+                "window_start_idx": window_start_idx,
+                "window_end_idx": window_end_idx,
+                "amplitude": round(_safe_float(window.get("amplitude")), 4),
                 "window_usable_for_id": bool(window.get("window_usable_for_id", False)),
                 "window_quality_score": round(_safe_float(window.get("window_quality_score")), 4),
+                "window_saturation_ratio": round(_safe_float(window.get("window_saturation_ratio", window.get("saturation_ratio"))), 4),
                 "saturation_ratio": round(_safe_float(window.get("saturation_ratio")), 4),
                 "drift_ratio": round(_safe_float(window.get("drift_ratio")), 4),
+                "window_start_time": window_start_time,
+                "window_end_time": window_end_time,
+                "window_quality_reasons": list(window.get("window_quality_reasons") or []),
             }
         )
     return summary
@@ -467,7 +498,7 @@ def load_data_tool(
         "history_range": prepared.get("history_range") or {},
         "step_events": _summarize_step_events_for_llm(prepared["step_events"]),
         "step_event_count": len(prepared["step_events"] or []),
-        "candidate_windows": _summarize_candidate_windows_for_llm(prepared["candidate_windows"]),
+        "candidate_windows": _summarize_candidate_windows_for_llm(prepared["cleaned_df"], prepared["candidate_windows"]),
         "candidate_window_count": len(prepared["candidate_windows"] or []),
         "artifacts": artifact_payload,
         "status": prepared["status"],

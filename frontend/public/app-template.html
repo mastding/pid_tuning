@@ -335,6 +335,7 @@
               <div v-if="selectedEvaluationExplain.initialPid" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                 <div class="text-xs font-semibold text-slate-500">冠军方案 PID</div>
                 <div class="mt-2 text-sm text-slate-700">Kp={{ formatNumber(selectedEvaluationExplain.initialPid.Kp, 4) }} / Ki={{ formatNumber(selectedEvaluationExplain.initialPid.Ki, 4) }} / Kd={{ formatNumber(selectedEvaluationExplain.initialPid.Kd, 4) }}</div>
+                <div v-if="selectedEvaluationExplain.initialPidDerived" class="mt-1 text-sm text-slate-700">PB={{ formatNumber(selectedEvaluationExplain.initialPidDerived.PB, 3) }} / Ti={{ formatNumber(selectedEvaluationExplain.initialPidDerived.Ti, 3) }} s / Td={{ formatNumber(selectedEvaluationExplain.initialPidDerived.Td, 3) }} s</div>
               </div>
             </div>
           </div>
@@ -3798,6 +3799,7 @@
               <div v-if="selectedExecutionDetail.evaluation.initialPid" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                 <div class="text-xs font-semibold text-slate-500">冠军方案 PID</div>
                 <div class="mt-2 text-sm text-slate-700">Kp={{ formatNumber(selectedExecutionDetail.evaluation.initialPid.Kp, 4) }} / Ki={{ formatNumber(selectedExecutionDetail.evaluation.initialPid.Ki, 4) }} / Kd={{ formatNumber(selectedExecutionDetail.evaluation.initialPid.Kd, 4) }}</div>
+                <div v-if="selectedExecutionDetail.evaluation.initialPidDerived" class="mt-1 text-sm text-slate-700">PB={{ formatNumber(selectedExecutionDetail.evaluation.initialPidDerived.PB, 3) }} / Ti={{ formatNumber(selectedExecutionDetail.evaluation.initialPidDerived.Ti, 3) }} s / Td={{ formatNumber(selectedExecutionDetail.evaluation.initialPidDerived.Td, 3) }} s</div>
               </div>
               <div v-if="selectedExecutionDetail.evaluation.evaluationCandidates.length" class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                 <div class="text-xs font-semibold text-slate-500">入围方案列表</div>

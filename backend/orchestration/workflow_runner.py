@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import re
 from typing import Any, AsyncGenerator, Callable, Dict
 
 from autogen_agentchat.base import TaskResult
@@ -104,11 +105,15 @@ def _parse_tool_result(content: Any) -> Dict[str, Any]:
     if isinstance(content, dict):
         return content
     if isinstance(content, str):
+        normalized_content = content
+        normalized_content = re.sub(r"np\.(?:float64|float32|float16|int64|int32|int16|int8|uint64|uint32|uint16|uint8)\(([^()]+)\)", r"\1", normalized_content)
+        normalized_content = re.sub(r"np\.bool_\((True|False)\)", r"\1", normalized_content)
+        normalized_content = re.sub(r"datetime\.datetime\(([^()]+)\)", r"'\1'", normalized_content)
         try:
-            return json.loads(content)
+            return json.loads(normalized_content)
         except Exception:
             try:
-                return ast.literal_eval(content)
+                return ast.literal_eval(normalized_content)
             except Exception:
                 return {"result": content}
     return {"result": str(content)}

@@ -10,6 +10,27 @@ def _format_float(value: Any, digits: int = 3) -> str:
         return str(value)
 
 
+def _format_pid_equivalents(pid_params: Dict[str, Any]) -> str:
+    try:
+        kp = float(pid_params.get("Kp"))
+    except Exception:
+        return ""
+    try:
+        ki = float(pid_params.get("Ki"))
+    except Exception:
+        ki = 0.0
+    try:
+        kd = float(pid_params.get("Kd"))
+    except Exception:
+        kd = 0.0
+
+    pb = 100.0 / kp if kp > 1e-9 else None
+    ti = kp / ki if ki > 1e-9 else 0.0
+    td = kd / kp if kp > 1e-9 else 0.0
+    pb_text = _format_float(pb, 3) if pb is not None else "-"
+    return f"PB={pb_text}，Ti={_format_float(ti, 3)}s，Td={_format_float(td, 3)}s"
+
+
 def _inject_experience_tool(
     agent_name: str,
     tools: List[Dict[str, Any]],
@@ -338,6 +359,7 @@ def build_agent_response(
                 f"Kp={_format_float(evaluated_pid.get('Kp'), 4)}, "
                 f"Ki={_format_float(evaluated_pid.get('Ki'), 4)}, "
                 f"Kd={_format_float(evaluated_pid.get('Kd'), 4)}\n"
+                f"- PB / Ti / Td: {_format_pid_equivalents(evaluated_pid)}\n"
             )
         return (
             f"**评估智能体报告：整定方案独立验收**\n\n"

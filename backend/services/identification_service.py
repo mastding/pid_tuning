@@ -100,8 +100,7 @@ def extract_candidate_windows(cleaned_df: Any, candidate_windows: List[Dict[str,
 
     if cleaned_df is not None:
         combined_events = list(candidate_windows)
-        has_mv_peak = any(str(evt.get("type", "")).strip().lower() == "mv_peak" for evt in combined_events if isinstance(evt, dict))
-        if not has_mv_peak:
+        if not combined_events:
             combined_events.extend(build_mv_peak_windows(cleaned_df))
         for idx, event in enumerate(combined_events):
             start_idx = int(event.get("window_start_idx", 0))
@@ -111,9 +110,11 @@ def extract_candidate_windows(cleaned_df: Any, candidate_windows: List[Dict[str,
                 base_name = "step_event"
                 if str(event.get("type", "")) == "mv_peak":
                     base_name = "mv_peak"
+                elif str(event.get("type", "")) == "mv_change":
+                    base_name = "mv_change"
                 candidates.append(
                     {
-                        "name": f"{base_name}_{idx + 1}",
+                        "name": str(event.get("window_source") or event.get("source") or f"{base_name}_{idx + 1}"),
                         "df": candidate_df,
                         "event": event,
                     }

@@ -2632,14 +2632,36 @@ createApp({
           const selectedModelParams = result.selected_model_params || {};
           const attempts = Array.isArray(result.attempts) ? result.attempts.slice() : [];
           const candidates = Array.isArray(result.identification_candidates) ? result.identification_candidates.slice() : [];
-          const windowSourcesAll = new Set(attempts.map(item => String(item?.window_source || '')));
+          const candidateWindowSources = new Set(
+            candidates
+              .map(item => String(item?.window_source || ''))
+              .filter(Boolean)
+          );
+          const windowSourcesAll = new Set(
+            (attempts.length
+              ? attempts.map(item => String(item?.window_source || ''))
+              : Array.from(candidateWindowSources)
+            ).filter(Boolean)
+          );
           const filteredWindowSources = new Set(
             attempts
               .filter(item => String(item?.model_type || '').toUpperCase() === 'WINDOW_FILTER')
               .map(item => String(item?.window_source || ''))
+              .filter(Boolean)
           );
           const fittedAttemptsRaw = attempts.filter(item => String(item?.model_type || '').toUpperCase() !== 'WINDOW_FILTER');
-          const fittedWindowSources = new Set(fittedAttemptsRaw.map(item => String(item?.window_source || '')));
+          const fittedWindowSources = new Set(
+            (fittedAttemptsRaw.length
+              ? fittedAttemptsRaw.map(item => String(item?.window_source || ''))
+              : Array.from(candidateWindowSources)
+            ).filter(Boolean)
+          );
+          const fallbackCandidateCount = Number(result.identification_candidate_count || 0) || candidates.length;
+          const fallbackFilteredWindowCount = Number(result.filtered_window_count || 0) || filteredWindowSources.size;
+          const effectiveCandidateCount = fallbackCandidateCount || fittedAttemptsRaw.length;
+          const effectiveWindowCountTotal = windowSourcesAll.size || candidateWindowSources.size;
+          const effectiveWindowCountFitted = fittedWindowSources.size || candidateWindowSources.size;
+          const effectiveAttemptCountFitted = fittedAttemptsRaw.length || candidates.length;
 
           const sortedCandidates = (candidates.length ? candidates : attempts
             .filter(item => item?.success !== false && String(item?.model_type || '').toUpperCase() !== 'WINDOW_FILTER'))
@@ -2677,11 +2699,11 @@ createApp({
             windowSource: result.identification_best_window_source || result.selected_window_source || result.source || '-',
             confidence: this.formatPercent(result.confidence, 1),
             fitScore: this.formatNumber(result.identification_fit_score, 2),
-            candidateCount: candidates.length || fittedAttemptsRaw.length,
-            windowCountTotal: windowSourcesAll.size,
-            windowCountFitted: fittedWindowSources.size,
-            windowCountFiltered: filteredWindowSources.size,
-            attemptCountFitted: fittedAttemptsRaw.length,
+            candidateCount: effectiveCandidateCount,
+            windowCountTotal: effectiveWindowCountTotal,
+            windowCountFitted: effectiveWindowCountFitted,
+            windowCountFiltered: fallbackFilteredWindowCount,
+            attemptCountFitted: effectiveAttemptCountFitted,
             selectionReason: result.model_selection_reason || '系统会在可用于辨识的候选窗口上比较多种模型的拟合效果，并按辨识拟合评分选择当前最优模型。',
             parameterExplanation: this.buildParameterExplanation(modelType, selectedModelParams),
             attempts: sortedCandidates
@@ -2785,6 +2807,19 @@ createApp({
           return String(msg?.agent || '') === '评估智能体' && Boolean(this.latestTuningResultData?.evaluation);
         },
 
+        derivePidEquivalentParams(pid) {
+          if (!pid || typeof pid !== 'object') return null;
+          const kp = Number(pid.Kp);
+          const ki = Number(pid.Ki);
+          const kd = Number(pid.Kd);
+          if (![kp, ki, kd].some(value => Number.isFinite(value))) return null;
+          return {
+            PB: Number.isFinite(kp) && kp > 1e-9 ? 100 / kp : null,
+            Ti: Number.isFinite(kp) && Number.isFinite(ki) && ki > 1e-9 ? kp / ki : 0,
+            Td: Number.isFinite(kp) && kp > 1e-9 && Number.isFinite(kd) ? kd / kp : 0
+          };
+        },
+
         buildEvaluationExplainPayload(msg) {
           const toolResult = this.getToolResult(msg, 'tool_evaluate_pid');
           const latestEvaluation = this.latestTuningResultData?.evaluation || {};
@@ -2797,6 +2832,7 @@ createApp({
           const performanceDetails = payload.performance_details || latestEvaluation.performance_details || {};
           const finalDetails = payload.final_details || latestEvaluation.final_details || {};
           const initialPid = payload.initial_assessment?.evaluated_pid || latestEvaluation.initial_assessment?.evaluated_pid || null;
+          const initialPidDerived = this.derivePidEquivalentParams(initialPid);
           const autoRefineResult = payload.auto_refine_result || latestEvaluation.auto_refine_result || {};
           const modelRetryResult = payload.model_retry_result || latestEvaluation.model_retry_result || {};
           const selectedCandidate = payload.evaluation_selected_candidate || latestEvaluation.evaluation_selected_candidate || {};
@@ -2841,8 +2877,12 @@ createApp({
             confidenceAsScore: Number.isFinite(Number(finalDetails.confidence_as_score)) ? this.formatNumber(Number(finalDetails.confidence_as_score), 2) : '-',
             stabilityText: performanceDetails.is_stable === true ? '稳定' : performanceDetails.is_stable === false ? '不稳定' : '-',
             initialPid,
+            initialPidDerived,
             initialPidText: initialPid
               ? `Kp=${this.formatNumber(Number(initialPid.Kp), 4)} / Ki=${this.formatNumber(Number(initialPid.Ki), 4)} / Kd=${this.formatNumber(Number(initialPid.Kd), 4)}`
+              : '',
+            initialPidPbText: initialPidDerived
+              ? `PB=${this.formatNumber(initialPidDerived.PB, 3)} / Ti=${this.formatNumber(initialPidDerived.Ti, 3)} s / Td=${this.formatNumber(initialPidDerived.Td, 3)} s`
               : '',
             selectedCandidate: {
               modelType: this.modelTypeLabel(selectedCandidate.model_type || payload.model_type || ''),

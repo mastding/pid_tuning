@@ -46,14 +46,14 @@ tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_ti
         system_message=data_analyst_prompt,
         tools=data_analyst_tools,
         model_client_stream=False,
-        max_tool_iterations=2,
+        max_tool_iterations=10,
     )
 
     system_id_expert = AssistantAgent(
         name="system_id_expert",
         model_client=model_client,
         system_message="""你是系统辨识智能体。
-调用 tool_fit_fopdt(dt=1.0) 来辨识最优过程模型。
+调用 tool_fit_fopdt来辨识过程模型。
 重点关注：
 - model_type（模型类型）
 - selected_model_params（选中的模型参数）
@@ -65,6 +65,7 @@ tool_fetch_history_data(loop_uri="{loop_uri}", start_time="{start_time}", end_ti
 用一句简洁的中文回答，区分原始模型参数和当前工作模型参数的差异。""",
         tools=[tool_fit_fopdt],
         model_client_stream=False,
+        max_tool_iterations=10,
     )
 
     knowledge_expert = AssistantAgent(
@@ -104,7 +105,7 @@ tool_tune_pid(loop_type="{loop_type}", model_type="...", selected_model_params={
 工具成功后，用一句简洁的中文总结模型类型、选定策略、PID参数、专家知识指导和经验指导。""",
         tools=[tool_tune_pid],
         model_client_stream=False,
-        max_tool_iterations=2,
+        max_tool_iterations=10,
     )
 
     evaluation_expert = AssistantAgent(

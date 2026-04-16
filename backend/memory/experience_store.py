@@ -11,6 +11,30 @@ EXPERIENCE_FILE = MEMORY_ROOT / "pid_experiences.jsonl"
 INDEX_FILE = MEMORY_ROOT / "pid_experiences.db"
 
 
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, set):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "tolist"):
+        try:
+            return _json_safe(value.tolist())
+        except Exception:
+            pass
+    if hasattr(value, "item"):
+        try:
+            return _json_safe(value.item())
+        except Exception:
+            return str(value)
+    return str(value)
+
+
 def ensure_experience_store() -> Path:
     MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
     if not EXPERIENCE_FILE.exists():
@@ -80,14 +104,15 @@ def _ensure_index_schema() -> None:
 
 def append_experience_record(record: Dict[str, Any]) -> str:
     store_path = ensure_experience_store()
-    experience_id = str(record.get("experience_id") or "")
+    safe_record = _json_safe(record)
+    experience_id = str(safe_record.get("experience_id") or "")
     with store_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        handle.write(json.dumps(safe_record, ensure_ascii=False) + "\n")
 
-    model = record.get("model") or {}
-    strategy = record.get("strategy") or {}
-    evaluation = record.get("evaluation") or {}
-    tags = record.get("tags") or []
+    model = safe_record.get("model") or {}
+    strategy = safe_record.get("strategy") or {}
+    evaluation = safe_record.get("evaluation") or {}
+    tags = safe_record.get("tags") or []
     with _get_connection() as conn:
         conn.execute(
             """
@@ -112,13 +137,13 @@ def append_experience_record(record: Dict[str, Any]) -> str:
                 float(model.get("L", 0.0) or 0.0),
                 float(model.get("normalized_rmse", 0.0) or 0.0),
                 float(model.get("r2_score", 0.0) or 0.0),
-                json.dumps(model.get("selected_model_params") or {}, ensure_ascii=False),
+                json.dumps(_json_safe(model.get("selected_model_params") or {}), ensure_ascii=False),
                 str(strategy.get("final", "")),
                 float(evaluation.get("final_rating", 0.0) or 0.0),
                 float(evaluation.get("performance_score", 0.0) or 0.0),
                 1 if bool(evaluation.get("passed", False)) else 0,
-                json.dumps(tags, ensure_ascii=False),
-                json.dumps(record, ensure_ascii=False),
+                json.dumps(_json_safe(tags), ensure_ascii=False),
+                json.dumps(safe_record, ensure_ascii=False),
             ),
         )
         conn.commit()
@@ -444,7 +469,7 @@ def register_experience_references(
                     int(reuse["hit_count"]),
                     int(reuse["follow_up_success_count"]),
                     str(hit_time),
-                    json.dumps(record, ensure_ascii=False),
+                    json.dumps(_json_safe(record), ensure_ascii=False),
                     experience_id,
                 ),
             )

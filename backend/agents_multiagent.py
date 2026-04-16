@@ -107,15 +107,24 @@ _shared_data_store = SessionStore()
 
 
 def _to_jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
     if isinstance(value, dict):
         return {str(k): _to_jsonable(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_to_jsonable(item) for item in value]
     if isinstance(value, tuple):
         return [_to_jsonable(item) for item in value]
+    if isinstance(value, set):
+        return [_to_jsonable(item) for item in value]
+    if hasattr(value, "tolist"):
+        try:
+            return _to_jsonable(value.tolist())
+        except Exception:
+            pass
     if hasattr(value, "item"):
         try:
-            return value.item()
+            return _to_jsonable(value.item())
         except Exception:
             return str(value)
     return value

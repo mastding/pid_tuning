@@ -752,6 +752,17 @@ def build_candidate_windows(df: pd.DataFrame) -> Tuple[List[Dict], Dict | None]:
                 ),
                 reverse=True,
             )
+            type_counters: Dict[str, int] = {}
+            for idx, item in enumerate(candidate_windows):
+                item["candidate_order"] = int(idx + 1)
+                window_type = str(item.get("type", "") or "").strip().lower()
+                base_name = "step_event"
+                if window_type == "mv_peak":
+                    base_name = "mv_peak"
+                elif window_type == "mv_change":
+                    base_name = "mv_change"
+                type_counters[base_name] = int(type_counters.get(base_name, 0)) + 1
+                item["window_source"] = f"{base_name}_{type_counters[base_name]}"
             best_event = max(candidate_windows, key=lambda item: abs(item["amplitude"]))
             return candidate_windows, best_event
         return [], None
@@ -771,6 +782,7 @@ def build_candidate_windows(df: pd.DataFrame) -> Tuple[List[Dict], Dict | None]:
         "window_end_idx": end_idx,
         "amplitude": float(mv_diff[center]),
         "type": "mv_change",
+        "window_source": "mv_change_1",
     }
     event = {**event, **_score_candidate_window(df, event)}
     return [event], event

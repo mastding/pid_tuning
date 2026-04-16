@@ -360,7 +360,7 @@ def controller_logic_translator(raw_params: Dict, brand: str = "Siemens") -> Dic
 
     if brand_key == "siemens":
         PB = 100 / Kp if Kp > 1e-9 else 100.0
-        Ti = 1 / Ki if Ki > 1e-9 else 0.0
+        Ti = Kp / Ki if Ki > 1e-9 else 0.0
         Td = Kd / Kp if Kp > 1e-9 else 0.0
         return {"PB": PB, "Ti": Ti, "Td": Td, "format": "PB-Ti-Td", "brand": "Siemens"}
 
