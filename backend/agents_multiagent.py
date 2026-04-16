@@ -762,6 +762,7 @@ async def run_multi_agent_collaboration(
             }
             yield {"type": "done", "status": "failed"}
             return
+        print("[调优结果原始数据]", json.dumps(final_result, ensure_ascii=False, indent=2))
         yield {"type": "result", "data": final_result}
         yield {"type": "done", "status": "succeeded"}
 

@@ -746,7 +746,27 @@ def build_candidate_windows(df: pd.DataFrame) -> Tuple[List[Dict], Dict | None]:
                 ),
                 reverse=True,
             )
+            
+            # 添加候选窗口日志
+            print(f"\n[候选窗口生成] 生成了 {len(candidate_windows)} 个候选窗口:")
+            for i, cw in enumerate(candidate_windows):
+                print(f"  候选窗口 #{i+1}:")
+                print(f"    - window_start_idx: {cw.get('window_start_idx')}")
+                print(f"    - window_end_idx: {cw.get('window_end_idx')}")
+                print(f"    - start_idx: {cw.get('start_idx')}")
+                print(f"    - end_idx: {cw.get('end_idx')}")
+                print(f"    - type: {cw.get('type')}")
+                print(f"    - amplitude: {cw.get('amplitude')}")
+                print(f"    - window_usable_for_id: {cw.get('window_usable_for_id')}")
+                print(f"    - window_quality_score: {cw.get('window_quality_score')}")
+            
             best_event = max(candidate_windows, key=lambda item: abs(item["amplitude"]))
+            print(f"\n[候选窗口生成] 最佳候选窗口:")
+            print(f"  - window_start_idx: {best_event.get('window_start_idx')}")
+            print(f"  - window_end_idx: {best_event.get('window_end_idx')}")
+            print(f"  - type: {best_event.get('type')}")
+            print(f"  - amplitude: {best_event.get('amplitude')}")
+            
             return candidate_windows, best_event
         return [], None
 
@@ -776,6 +796,12 @@ def select_identification_window(
 ) -> Tuple[pd.DataFrame, List[Dict], Dict | None, List[Dict]]:
     candidate_windows, selected_event = build_candidate_windows(df)
     step_events = list(df.attrs.get("step_events", [])) if isinstance(getattr(df, "attrs", None), dict) else []
+    
+    # 添加辨识窗口选择日志
+    print(f"\n[辨识窗口选择] 开始选择辨识窗口")
+    print(f"  - 候选窗口数量：{len(candidate_windows) if candidate_windows else 0}")
+    print(f"  - selected_window_index: {selected_window_index}")
+    
     if candidate_windows:
         chosen_event = None
         if selected_window_index is not None:
@@ -785,8 +811,16 @@ def select_identification_window(
                 idx = -1
             if 0 <= idx < len(candidate_windows):
                 chosen_event = candidate_windows[idx]
+                print(f"  - 用户选择的候选窗口索引：{idx}")
 
         selected_event = chosen_event or selected_event or candidate_windows[0]
+        print(f"\n[辨识窗口选择] 最终选择的辨识窗口:")
+        print(f"  - window_start_idx: {selected_event.get('window_start_idx')}")
+        print(f"  - window_end_idx: {selected_event.get('window_end_idx')}")
+        print(f"  - start_idx: {selected_event.get('start_idx')}")
+        print(f"  - end_idx: {selected_event.get('end_idx')}")
+        print(f"  - type: {selected_event.get('type')}")
+        
         start_idx = int(selected_event["window_start_idx"])
         end_idx = int(selected_event["window_end_idx"])
         return df.iloc[start_idx:end_idx].reset_index(drop=True), step_events, selected_event, candidate_windows
@@ -831,6 +865,24 @@ def prepare_pid_dataset(
                 "type": selected_event["type"],
             },
         )
+
+    # 添加 prepare_pid_dataset 返回数据的日志
+    print(f"\n[prepare_pid_dataset] 返回数据:")
+    print(f"  - cleaned_df 行数：{len(denoised_df)}")
+    print(f"  - window_df 行数：{len(window_df)}")
+    if selected_event:
+        print(f"  - selected_event:")
+        print(f"    - window_start_idx: {selected_event.get('window_start_idx')}")
+        print(f"    - window_end_idx: {selected_event.get('window_end_idx')}")
+        print(f"    - start_idx: {selected_event.get('start_idx')}")
+        print(f"    - end_idx: {selected_event.get('end_idx')}")
+        print(f"    - type: {selected_event.get('type')}")
+    if candidate_windows:
+        print(f"  - candidate_windows 数量：{len(candidate_windows)}")
+        print(f"    第一个候选窗口:")
+        first_cw = candidate_windows[0]
+        print(f"      - window_start_idx: {first_cw.get('window_start_idx')}")
+        print(f"      - window_end_idx: {first_cw.get('window_end_idx')}")
 
     return {
         "raw_df": raw_df,

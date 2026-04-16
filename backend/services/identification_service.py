@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List
 
 import numpy as np
+import pandas as pd
 
 from skills.system_id_skills import (
     calculate_model_confidence,
@@ -56,6 +57,16 @@ def sanitize_selected_model_params(model_type: str, model_params: Dict[str, Any]
 def extract_candidate_windows(cleaned_df: Any, candidate_windows: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
     candidate_windows = candidate_windows or []
+    
+    # 添加日志：打印传入的候选窗口信息
+    print(f"\n[extract_candidate_windows] 传入的候选窗口数量：{len(candidate_windows)}")
+    for i, cw in enumerate(candidate_windows[:5]):  # 只打印前 5 个
+        print(f"  候选窗口 #{i+1}:")
+        print(f"    - window_start_idx: {cw.get('window_start_idx')}")
+        print(f"    - window_end_idx: {cw.get('window_end_idx')}")
+        print(f"    - start_idx: {cw.get('start_idx')}")
+        print(f"    - end_idx: {cw.get('end_idx')}")
+        print(f"    - type: {cw.get('type')}")
 
     def build_mv_peak_windows(df: Any) -> List[Dict[str, Any]]:
         if df is None or len(df) < 20 or "MV" not in df.columns:
@@ -132,6 +143,19 @@ def extract_candidate_windows(cleaned_df: Any, candidate_windows: List[Dict[str,
         if key not in seen:
             deduped.append(candidate)
             seen.add(key)
+    
+    # 添加日志：打印提取后的候选窗口信息
+    print(f"\n[extract_candidate_windows] 提取后的候选窗口数量：{len(deduped)}")
+    for i, candidate in enumerate(deduped[:5]):  # 只打印前 5 个
+        event = candidate.get("event") or {}
+        print(f"  候选窗口 #{i+1} ({candidate.get('name')}):")
+        print(f"    - df 行数：{len(candidate.get('df', []))}")
+        print(f"    - window_start_idx: {event.get('window_start_idx')}")
+        print(f"    - window_end_idx: {event.get('window_end_idx')}")
+        print(f"    - start_idx: {event.get('start_idx')}")
+        print(f"    - end_idx: {event.get('end_idx')}")
+        print(f"    - type: {event.get('type')}")
+    
     return deduped
 
 
@@ -543,6 +567,21 @@ def fit_best_fopdt_window(
         return mv_adj, pv_adj, best_lag, best_score
 
     extracted_candidates = extract_candidate_windows(cleaned_df, candidate_windows)
+    
+    # 添加日志：打印提取的候选窗口信息
+    print(f"\n[fit_best_fopdt_window] 提取的候选窗口数量：{len(extracted_candidates)}")
+    for i, candidate in enumerate(extracted_candidates):
+        print(f"  候选窗口 #{i+1}:")
+        print(f"    - name: {candidate.get('name')}")
+        print(f"    - df 行数：{len(candidate.get('df', []))}")
+        if candidate.get("event"):
+            event = candidate["event"]
+            print(f"    - event:")
+            print(f"      - window_start_idx: {event.get('window_start_idx')}")
+            print(f"      - window_end_idx: {event.get('window_end_idx')}")
+            print(f"      - start_idx: {event.get('start_idx')}")
+            print(f"      - end_idx: {event.get('end_idx')}")
+            print(f"      - type: {event.get('type')}")
 
     def _empty_quality() -> Dict[str, Any]:
         return {
@@ -634,10 +673,68 @@ def fit_best_fopdt_window(
                 "window_corr": float(quality.get("corr", 0.0) or 0.0),
                 "window_drift_ratio": float(quality.get("drift_ratio", 0.0) or 0.0),
             }
+            
+            # 添加开始和结束时间字段（无论是否有 event）
+            start_idx = None
+            end_idx = None
+            
+            # 优先从 event 中获取索引
             if candidate.get("event"):
-                attempt_result["window_start_index"] = int(candidate["event"].get("window_start_idx", 0))
-                attempt_result["window_end_index"] = int(candidate["event"].get("window_end_idx", len(candidate_df)))
+                start_idx = int(candidate["event"].get("window_start_idx", 0))
+                end_idx = int(candidate["event"].get("window_end_idx", len(candidate_df)))
+                attempt_result["window_start_index"] = start_idx
+                attempt_result["window_end_index"] = end_idx
                 attempt_result["event_type"] = str(candidate["event"].get("type", ""))
+            else:
+                # 如果没有 event，使用默认值
+                start_idx = 0
+                end_idx = len(candidate_df)
+                attempt_result["window_start_index"] = start_idx
+                attempt_result["window_end_index"] = end_idx
+            
+            # 尝试从 cleaned_df 中提取时间信息
+            if cleaned_df is not None and len(cleaned_df) > 0:
+                # 查找时间列
+                time_column = None
+                for col in cleaned_df.columns:
+                    try:
+                        # 尝试将列解析为 datetime
+                        parsed = pd.to_datetime(cleaned_df[col], errors='coerce')
+                        valid_count = parsed.notna().sum()
+                        if valid_count > len(cleaned_df) * 0.5:  # 至少 50% 的数据是有效时间
+                            time_column = col
+                            break
+                    except Exception as e:
+                        continue
+                
+                # 如果找到时间列，提取对应索引的时间
+                if time_column is not None:
+                    # 确保索引在有效范围内
+                    start_idx_clamped = max(0, min(start_idx, len(cleaned_df) - 1))
+                    end_idx_clamped = max(start_idx_clamped, min(end_idx, len(cleaned_df) - 1))
+                    
+                    try:
+                        start_time = cleaned_df[time_column].iloc[start_idx_clamped]
+                        end_time = cleaned_df[time_column].iloc[end_idx_clamped]
+                        
+                        # 转换为字符串格式
+                        if pd.api.types.is_datetime64_any_dtype(start_time):
+                            attempt_result["window_start_time"] = start_time.strftime("%Y-%m-%d %H:%M:%S")
+                            attempt_result["window_end_time"] = end_time.strftime("%Y-%m-%d %H:%M:%S")
+                        else:
+                            # 尝试直接使用值作为时间
+                            attempt_result["window_start_time"] = str(start_time)
+                            attempt_result["window_end_time"] = str(end_time)
+                    except Exception as e:
+                        # 即使出错也添加空值字段
+                        attempt_result["window_start_time"] = ""
+                        attempt_result["window_end_time"] = ""
+                else:
+                    attempt_result["window_start_time"] = ""
+                    attempt_result["window_end_time"] = ""
+            else:
+                attempt_result["window_start_time"] = ""
+                attempt_result["window_end_time"] = ""
 
             try:
                 fitted_model_base = _fit_model_by_type(model_type, mv_array, pv_array, actual_dt)
@@ -732,6 +829,14 @@ def fit_best_fopdt_window(
                     "tuning_model": tuning_model,
                 }
             )
+            
+            # 添加日志：确认时间字段是否存在
+            print(f"\n[时间提取] 最终 attempt_result 中的时间字段:")
+            print(f"  - window_start_time: {attempt_result.get('window_start_time', 'NOT FOUND')}")
+            print(f"  - window_end_time: {attempt_result.get('window_end_time', 'NOT FOUND')}")
+            print(f"  - window_start_index: {attempt_result.get('window_start_index', 'NOT FOUND')}")
+            print(f"  - window_end_index: {attempt_result.get('window_end_index', 'NOT FOUND')}")
+            
             attempts.append(attempt_result)
 
             packaged = {

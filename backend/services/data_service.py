@@ -304,6 +304,24 @@ def load_pid_dataset(
     selected_event = prepared["selected_event"]
     quality_metrics = prepared["quality_metrics"] or {}
 
+    # 添加 load_pid_dataset 处理候选窗口和辨识窗口的日志
+    print(f"\n[load_pid_dataset] 处理候选窗口和辨识窗口:")
+    if candidate_windows:
+        print(f"  - candidate_windows 数量：{len(candidate_windows)}")
+        for i, cw in enumerate(candidate_windows[:3]):  # 只打印前 3 个
+            print(f"    候选窗口 #{i+1}:")
+            print(f"      - window_start_idx: {cw.get('window_start_idx')}")
+            print(f"      - window_end_idx: {cw.get('window_end_idx')}")
+            print(f"      - start_idx: {cw.get('start_idx')}")
+            print(f"      - end_idx: {cw.get('end_idx')}")
+    if selected_event:
+        print(f"  - selected_event:")
+        print(f"    - window_start_idx: {selected_event.get('window_start_idx')}")
+        print(f"    - window_end_idx: {selected_event.get('window_end_idx')}")
+        print(f"    - start_idx: {selected_event.get('start_idx')}")
+        print(f"    - end_idx: {selected_event.get('end_idx')}")
+        print(f"    - type: {selected_event.get('type')}")
+    
     selected_window = {
         "rows": int(len(window_df)),
         "start_index": int(selected_event.get("window_start_idx", selected_event.get("start_idx", 0))) if selected_event else 0,
@@ -317,6 +335,13 @@ def load_pid_dataset(
         "start_time": window_overview.get("start_time"),
         "end_time": window_overview.get("end_time"),
     }
+    
+    print(f"\n[load_pid_dataset] selected_window:")
+    print(f"  - start_index: {selected_window.get('start_index')}")
+    print(f"  - end_index: {selected_window.get('end_index')}")
+    print(f"  - event_start_index: {selected_window.get('event_start_index')}")
+    print(f"  - event_end_index: {selected_window.get('event_end_index')}")
+    print(f"  - event_type: {selected_window.get('event_type')}")
 
     return {
         "csv_path": csv_path,
