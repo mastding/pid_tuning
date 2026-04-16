@@ -1,4 +1,4 @@
-﻿import { resolveApiBase } from './api/client.js';
+import { resolveApiBase } from './api/client.js';
 import { fetchSystemConfig, saveSystemConfig, testModelConnectivity } from './api/system-config.js';
 import './modules/pid-analysis-chart.js';
 import {
@@ -1916,18 +1916,7 @@ createApp({
           const option = this.fitWindowOptions.find(item => item.source === newSource);
           if (!option) return;
 
-          console.log('[辨识窗口选择] 选中窗口选项:', option);
-          console.log('[辨识窗口选择] windowStartTime:', option.windowStartTime, 'windowEndTime:', option.windowEndTime);
-          console.log('[辨识窗口选择] windowStartIndex:', option.windowStartIndex, 'windowEndIndex:', option.windowEndIndex);
-
           const payload = this.pidFitChartPayload;
-          console.log('[辨识窗口选择] 当前 payload:', payload);
-          console.log('[辨识窗口选择] payload.xAxisType:', payload?.xAxisType);
-          console.log('[辨识窗口选择] payload.points 数量:', payload?.points?.length);
-          if (payload?.points?.length > 0) {
-            console.log('[辨识窗口选择] payload.points 前 5 个点:', payload.points.slice(0, 5).map(p => ({ index: p.index, label: p.label })));
-            console.log('[辨识窗口选择] payload.points 后 5 个点:', payload.points.slice(-5).map(p => ({ index: p.index, label: p.label })));
-          }
 
           // 直接使用选项中的时间范围
           let startTime = option.windowStartTime || '';
@@ -1935,14 +1924,10 @@ createApp({
 
           // 如果时间为空但有索引，尝试从payload中找到对应的时间
           if ((!startTime || !endTime) && option.windowStartIndex !== undefined && option.windowEndIndex !== undefined) {
-            console.log('[辨识窗口选择] 时间为空但有索引，尝试从payload中找到对应时间');
             if (payload?.points?.length > 0) {
               // 找到对应索引的点
               const startPoint = payload.points.find(p => p.index === option.windowStartIndex);
               const endPoint = payload.points.find(p => p.index === option.windowEndIndex);
-              
-              console.log('[辨识窗口选择] 找到的起始点:', startPoint);
-              console.log('[辨识窗口选择] 找到的结束点:', endPoint);
               
               if (startPoint) {
                 startTime = payload?.xAxisType === 'timestamp' ? startPoint.label : startPoint.index;
@@ -1953,18 +1938,12 @@ createApp({
             }
           }
 
-          console.log('[辨识窗口选择] 最终使用的开始时间:', startTime, '结束时间:', endTime);
-
           if (!this.pidChartRanges?.['fit'] || !this.pidChartRangeDrafts?.['fit']) return;
 
           this.pidChartRanges['fit'].start = startTime;
           this.pidChartRanges['fit'].end = endTime;
           this.pidChartRangeDrafts['fit'].start = startTime;
           this.pidChartRangeDrafts['fit'].end = endTime;
-
-          console.log('[辨识窗口选择] 已更新pidChartRanges和pidChartRangeDrafts');
-          console.log('[辨识窗口选择] pidChartRanges[fit]:', this.pidChartRanges['fit']);
-          console.log('[辨识窗口选择] pidChartRangeDrafts[fit]:', this.pidChartRangeDrafts['fit']);
 
           this.schedulePidAnalysisChartRender({ focusChartKey: 'fit' });
         },
@@ -2059,8 +2038,6 @@ createApp({
           }
           
           // 如果没有找到点（可能是采样数据），找到最接近 start 和 end 的点
-          console.log('[slicePidAnalysisPoints] 未找到精确匹配的点，尝试找到最接近的点');
-          console.log('[slicePidAnalysisPoints] 目标范围:', start, '-', end);
           
           // 找到所有点的索引
           const allIndexes = points.map(p => Number(p?.index)).filter(idx => Number.isFinite(idx));
@@ -2075,8 +2052,6 @@ createApp({
           let closestEndIdx = allIndexes.reduce((prev, curr) => {
             return Math.abs(curr - end) < Math.abs(prev - end) ? curr : prev;
           });
-          
-          console.log('[slicePidAnalysisPoints] 最接近的索引范围:', closestStartIdx, '-', closestEndIdx);
           
           // 确保顺序正确
           if (closestStartIdx > closestEndIdx) {
@@ -2169,47 +2144,31 @@ createApp({
         },
 
         buildIdentificationWindowFitPayload(result, basePayload, selectedFitWindow) {
-          console.log('[buildIdentificationWindowFitPayload] 开始构建 payload');
-          console.log('[buildIdentificationWindowFitPayload] selectedFitWindow:', selectedFitWindow);
-          console.log('[buildIdentificationWindowFitPayload] basePayload:', basePayload);
-          console.log('[buildIdentificationWindowFitPayload] basePayload?.points?.length:', basePayload?.points?.length);
-          
           if (!selectedFitWindow) {
-            console.log('[buildIdentificationWindowFitPayload] selectedFitWindow 为空，使用 buildPidFitChartPayload');
             return this.buildPidFitChartPayload(result);
           }
 
           const selectedSource = String(selectedFitWindow.source || '');
           const currentSelectedSource = String(result?.model?.selectedWindowSource || result?.model?.windowSource || '');
-          console.log('[buildIdentificationWindowFitPayload] selectedSource:', selectedSource);
-          console.log('[buildIdentificationWindowFitPayload] currentSelectedSource:', currentSelectedSource);
           
           if (!basePayload?.points?.length && selectedSource === currentSelectedSource) {
-            console.log('[buildIdentificationWindowFitPayload] basePayload 为空但 source 匹配，使用 buildPidFitChartPayload');
             return this.buildPidFitChartPayload(result);
           }
           if (!basePayload?.points?.length) {
-            console.log('[buildIdentificationWindowFitPayload] basePayload 为空，返回 null');
             return null;
           }
 
           const startIndex = Number(selectedFitWindow.windowStartIndex);
           const endIndex = Number(selectedFitWindow.windowEndIndex);
-          console.log('[buildIdentificationWindowFitPayload] startIndex:', startIndex, 'endIndex:', endIndex);
           
           // 检查 basePayload.points 的 index 范围
           if (basePayload?.points?.length > 0) {
             const indexes = basePayload.points.map(p => p.index);
-            console.log('[buildIdentificationWindowFitPayload] basePayload.points 的 index 范围:', 
-              Math.min(...indexes), '-', Math.max(...indexes));
-            console.log('[buildIdentificationWindowFitPayload] basePayload.points 前 3 个点的 index:', indexes.slice(0, 3));
           }
           
           const pointsBase = this.slicePidAnalysisPoints(basePayload.points, startIndex, endIndex, 0);
-          console.log('[buildIdentificationWindowFitPayload] pointsBase 数量:', pointsBase.length);
           
           if (!pointsBase.length) {
-            console.log('[buildIdentificationWindowFitPayload] pointsBase 为空，返回 null');
             return null;
           }
 
@@ -2548,10 +2507,8 @@ createApp({
           }
 
           if (fitElement && this.pidFitChartPayload) {
-            console.log('[图表渲染] 开始渲染fit图表, payload:', this.pidFitChartPayload);
             renderPidAnalysisChart(fitElement, this.pidFitChartPayload);
           } else if (fitElement) {
-            console.log('[图表渲染] 销毁fit图表');
             destroyPidAnalysisChart(fitElement);
           }
         },
@@ -2573,8 +2530,6 @@ createApp({
         async schedulePidAnalysisChartRender(options = {}) {
           const focusChartKey = typeof options === 'string' ? options : (options?.focusChartKey || '');
           const forceRemote = Boolean(options?.forceRemote);
-
-          console.log('[图表渲染调度] 开始执行, focusChartKey:', focusChartKey, 'forceRemote:', forceRemote);
 
           const shouldLoadRemote = this.currentPage === 'tuning'
             && this.shellSection === 'tuning-loop-analysis'
@@ -2624,10 +2579,8 @@ createApp({
             }
 
             if ((refreshAllDependents || focusChartKey === 'fit') && this.hasManualChartRange('fit') && fitFallback) {
-              console.log('[图表渲染调度] 将加载fit图表远程数据');
               remoteJobs.push(this.loadPidAnalysisRemotePayload('fit', fitFallback));
             } else if (!this.hasManualChartRange('fit')) {
-              console.log('[图表渲染调度] 清空fit图表远程数据');
               this.pidAnalysisRemotePayloads.fit = null;
             }
 
@@ -4807,7 +4760,6 @@ window: ${this.historyWindow || 1}
         },
         latestTuningResultData() {
           const result = this.latestTuningResultMessage?.data || this.selectedTaskSession?.latestResult || null;
-          console.log('[调优结果数据] 原始数据:', result);
           if (!result || typeof result !== 'object') return result;
           const pid = result.pidParams || {};
           const assessedPid = result.evaluation?.initial_assessment?.evaluated_pid || {};
